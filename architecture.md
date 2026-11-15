@@ -1,0 +1,287 @@
+# Orbit
+
+Product vision and architecture outline  |  15 November 2026  |  Planning document v4.0
+
+A self-hosted control centre for autonomous, persistent AI representatives. This document consolidates the agreed product direction, operating model, integrations, constraints and implementation priorities. It is intentionally a product and architecture brief, not a prescriptive code-level specification.
+
+## 1. Executive summary
+
+Orbit lets an administrator create and operate multiple independent AI agents. Each agent has an identity, personality, mission, natural-language instructions, model configuration, credentials, tools, schedules, knowledge, memories, conversations, budgets and execution policies. Agents can proactively discover opportunities, respond to incoming events, form relationships and complete tasks over time.
+
+Orbit is not a multi-tenant SaaS in its first incarnation, nor a single-purpose social agent. It is one privately deployed management platform. A sales agent (John), support agent (Sarah) and superconnector are configurations of the same runtime, not separate implementations.
+
+## 2. Product principles
+- Agentic by default: agents choose and chain authorised tools to pursue missions; no visual workflow designer.
+- Configuration through plain text: personality, mission, engagement criteria and tool-use guidance; optional reusable agent templates.
+- PostgreSQL first: external inputs, actions, decisions and task state are persisted durably before processing.
+- Modular channels and tools: X is the social MVP; additional networks, email, MCP and real-world capabilities are adapters.
+- Explicit guardrails: deterministic rules, platform permissions, consent, approvals, budgets and a global pause mechanism override model suggestions.
+- Inspectable behaviour: shadow mode, playground, historical replay, evaluation datasets, Langfuse traces and action audit logs.
+- Small deployment: one repository, Next.js web process, Bun worker, PostgreSQL and a few external APIs.
+
+## 3. Technology and deployment
+| Area | Chosen direction |
+| --- | --- |
+| UI | Next.js App Router, TypeScript, Bun, Tailwind, shadcn/ui |
+| Data | PostgreSQL, pgvector, Drizzle ORM |
+| Agents | Vercel AI SDK with OpenRouter; model and API key per agent |
+| Workers | Separate Bun worker process sharing application modules |
+| Scheduling | Durable PostgreSQL-backed jobs; LISTEN/NOTIFY only as a wake-up signal |
+| Observability | Langfuse via OpenTelemetry; Orbit retains operational truth |
+| Authentication | Auth.js or equivalent OAuth; allowlisted admin emails, no public registration |
+| Hosting | Railway + Docker, single monorepo |
+| Email | Resend for sending and inbound routing; PostgreSQL-backed virtual inboxes |
+| Research | Exa web search; optional Firecrawl extraction and Browserbase later |
+
+Deployment target: one web service, one worker service and PostgreSQL on Railway. No Go, Redis, Kafka, Kubernetes or per-agent containers for the MVP. Separate credentials and data scopes provide logical isolation.
+
+## 4. Core agent model
+| Element | Meaning |
+| --- | --- |
+| Agent | Long-lived identity with name, avatar, role, status and dedicated social/email presence |
+| Template | Reusable starting configuration: sales, support, superconnector or custom |
+| Personality | Natural-language voice, style, manner and interaction preferences |
+| Mission | Outcome sought; goals and optional time-bounded campaigns |
+| Instructions | Engagement preferences, escalation guidance and tool-use guidance |
+| Model settings | OpenRouter key, main model, cheaper evaluator model, parameters and budgets |
+| Tools | Native API capabilities and individually allowlisted MCP operations |
+| Triggers | Scheduled discovery, mentions, incoming email, webhooks and manual invocations |
+| Knowledge | Agent-scoped documents and retrieved source passages |
+| Memory | Structured person/conversation state and searchable facts |
+| Execution mode | Fixture simulation, real-data shadow mode or permitted live mode |
+
+An agent is a durable identity. Changing prompts, models, tools or policies creates a versioned configuration; relationships and conversation history survive revisions. Agents can be paused or archived. No internal agent-to-agent handoff framework is required: agents can introduce one another through ordinary authorised channels.
+
+## 5. End-to-end event and action lifecycle
+| Stage | Behaviour |
+| --- | --- |
+| Ingestion | Poll an approved API or receive a signed webhook; persist provider payload, source IDs and event metadata in PostgreSQL; deduplicate. |
+| Queue | Enqueue durable processing work in the same transaction; notify workers after commit. |
+| Deterministic screening | Blocklists, opt-outs, duplicate engagements, spam tagging, cooldowns, channel status and other code-enforced exclusions. |
+| Cheap evaluation | Per-agent, plain-text relevance criteria evaluated by a small model; return zero or more candidate actions, not a single choice. |
+| Main agent | Load versioned personality, mission, recent context, structured memory and relevant RAG passages; choose and chain tools. |
+| Policy gateway | Check per-agent/tool permissions, provider restrictions, recipient consent, approvals, budgets, current mode and current blocklist state. |
+| Execution | Persist action intent; dispatch allowed external writes; reconcile uncertain outcomes and avoid duplicate retries. |
+| Follow-through | Store results and conversation state, schedule pending commitments and resume on future events. |
+| Observability | Persist execution and action statuses in Orbit; emit diagnostic spans and scores to Langfuse. |
+
+All external inbound content is untrusted data, including posts, webpages, PDFs and MCP responses. It cannot grant permissions, change policy or access credentials.
+
+## 6. Actions and social behaviour
+
+An agent may propose several actions on the same post, such as reply + like + repost + follow, or choose no action. The evaluator suggests candidates; the main agent refines them; the action gateway independently authorises each one.
+- X MVP: targeted discovery, mentions, thread context, replies and other actions only where the account’s access and platform rules permit.
+- Future channels: Reddit (comments/upvotes), Bluesky, Instagram, LinkedIn, Telegram, WhatsApp Business and potentially WeChat, each with a capability-aware adapter.
+- Following: prefer meaningful relationships; store who was followed, when, why and by which agent.
+- Unfollowing: scheduled review of followed accounts using relevance, history, opt-outs, minimum durations and cooldowns; avoid follow/unfollow churn.
+- No assumption that a provider API permits autonomous likes, follows, unsolicited replies or DMs. Platform access and policy compliance are prerequisites to live use.
+
+## 7. Conversations, people and memory
+
+Keep canonical people records, platform-specific identities, conversations, messages, contact preferences, relationship history and opt-out/consent evidence in relational tables. Never merge identities across platforms solely on similar names.
+
+Allow agent-managed JSONB memory objects for flexible facts and notes, but not arbitrary table creation or unrestricted SQL. Store source evidence, timestamps, confidence where justified, visibility scope and expiry or review dates. Explicit consent is authoritative structured data, not agent-editable memory.
+
+Use pgvector for semantic matching of knowledge passages, long-term textual memories, relevant public discussions and potential matchmaking candidates. Use relational queries for exact identities, permissions, statuses and recent threads. Combine vector similarity with PostgreSQL full-text search where useful.
+
+## 8. Native knowledge base and RAG
+
+Each agent has a private document library for PDFs, Markdown, plain text, FAQs, product descriptions, brand materials and documentation. Files are stored in object storage; PostgreSQL stores ownership, versions, extraction state, chunks, metadata and optional embeddings.
+
+Upload flow: authenticate admin → upload original → create durable document record → worker extracts and cleans text → split into source-aware chunks → embed → store chunks in PostgreSQL/pgvector → mark searchable. Retrieval: agent-scoped hybrid search → source-labelled passages → answer grounded in retrieved evidence. Provide a knowledge inspection screen showing retrieved chunks and source documents.
+
+Keep personality and operating rules in instructions, reference knowledge in RAG, and changing operational facts behind authenticated MCP/native tools. Support reprocessing, replacement, deletion and embedding invalidation.
+
+## 9. Tool registry, MCP and real-world actions
+
+Native tools and MCP operations share a typed capability registry. Examples include web.search, web.read, knowledge.search, x.reply, x.follow, email.send, calendar.schedule, people.search, people.introduce, task.schedule, support.createTicket and phone.call. Each agent explicitly enables the individual tools it may use.
+
+Tools may complete synchronously or return a pending external identifier. Long-running work is represented as durable tasks with deadlines, wait conditions, status, retries and cancellation. Inbound webhook results are first persisted to PostgreSQL, then resume the task. The agent can make commitments that survive restarts.
+
+Matchmaking is optional, not a universal agent feature. A superconnector can search profiles and propose mutually useful introductions; John can introduce an interested prospect to a demo host; Sarah can direct a customer to human support. Private introductions require consent appropriate to the information being shared.
+
+Use natural-language guidance to describe when a tool is appropriate, but enforce permissions in deterministic code. Support per-tool automatic execution, approval-required execution or disabled state; record consent scope and evidence. For generic MCP, restrict exposed operations, credentials, timeouts and high-risk effects.
+
+## 10. Communication and research integrations
+| Integration | Initial role / approach |
+| --- | --- |
+| X | First social source and action channel; polling/mentions through approved API access. |
+| Resend | Per-agent address on a dedicated subdomain; inbound webhooks, sending, replies, attachments, delivery outcomes. |
+| Exa | Provider-independent web.search tool for research and discovery. |
+| Firecrawl | Optional webpage extraction/crawling when basic web.read is insufficient. |
+| MCP | Agent-scoped remote authenticated tools; Sentry, product data, CRM or custom systems. |
+| Telegram | Future per-agent bot for external conversation and optional operator control. |
+| Calendar | Availability, booking and invitations; explicit participant agreement. |
+| SMS / voice | Future opt-in messaging and phone-call tools; asynchronous status handling. |
+| Browserbase / Daytona | Optional isolated browser or code execution only when the capability genuinely requires it. |
+
+Credentials are encrypted centrally and assigned per agent: separate OpenRouter, X and Telegram credentials by default. The runtime retrieves secrets for authorised connectors; LLM prompts and tool responses never receive raw keys. Support rotation, revocation and degraded-connection status.
+
+## 11. Scheduling and execution modes
+
+Schedules are configured per agent for discovery frequency, query criteria, fetch limits, relationship reviews, follow-ups, memory maintenance and goal review. Durable jobs, not a perpetual LLM loop, drive work. LISTEN/NOTIFY improves latency but is not the queue; workers also poll for recovery.
+| Mode | Reads | Writes |
+| --- | --- | --- |
+| Simulation | Saved events and mocked tools | Always mocked |
+| Shadow | Real permitted reads and real model calls | All external writes suppressed and logged |
+| Live | Real permitted reads | Only policy-approved actions; some may require human approval |
+
+Pause and kill-switch controls must stop queued and in-flight outbound actions at the gateway where feasible. Use bounded model steps, timeouts, concurrency caps, cost limits, idempotency and reconciliation for ambiguous provider responses.
+
+## 12. Evaluation, tracing and analytics
+
+Use one Langfuse production project (and optionally a separate development project), not a project per agent. Tag traces with agent ID, execution ID, session/conversation ID, model, prompt/config version, tool, trigger and environment. Keep action status, delivery confirmation and approvals in Orbit PostgreSQL.
+- Playground: paste a post or question, choose agent/model/version and inspect relevance, proposed actions, policy outcomes, source retrieval and draft responses.
+- Regression datasets: save good/bad real-world events; compare model and prompt versions; replay events with no external writes.
+- Evaluation types: deterministic assertions, LLM-as-judge for subjective qualities, and human review.
+- Metrics: relevant opportunity rate, meaningful replies, meetings, support resolution, tool success, latency, cost, policy violations and opt-outs.
+- Trace privacy: redact secrets and sensitive personal data; apply retention and access controls.
+
+## 13. Dashboard and administration
+
+Global navigation: Agents, Activity, Conversations, People, Playground/Evaluations, Integrations and Settings. Each agent has Overview, Identity/Personality, Mission/Goals, Models, Tools, Triggers, Channels, Knowledge, Memory, Activity, Conversations, Analytics and Permissions.
+
+Admin access is private and allowlisted by email, ideally using a trusted OAuth provider through Auth.js or equivalent. No open registration. The dashboard provides per-agent pause/resume, shadow/live mode, credential health, approvals, usage and action audit trails.
+
+## 14. Suggested data domains (not a fixed schema)
+
+Agents and versions; templates and campaigns; credentials and integrations; inbound events and evaluations; jobs, tasks and actions; people, identities, follows, conversations and messages; consent and blocklists; knowledge documents, chunks and embeddings; memory objects; execution traces and evaluation cases; approvals, schedules and budgets.
+
+Every agent-owned record needs an explicit agent scope; shared or cross-agent access must be intentional. Add unique provider-event keys and outbound idempotency keys. Store provider payloads alongside normalised fields when allowed by provider retention terms.
+
+## 15. Full product scope and incremental delivery
+
+Orbit's **full platform design is the implementation backbone**. Delivery is incremental, but architecture and data models must accommodate the full system without redesign. The first completed release is Railway-deployable and supports real external actions where provider access and policies permit; unavailable provider capabilities are explicitly disabled rather than faked.
+
+| Phase | Outcome |
+| --- | --- |
+| 1. Foundation | Private OAuth and magic-link login, allowlist, development-only auth bypass, agents/templates, versioned configuration, encrypted per-agent credentials, Drizzle/Postgres, Zod environment validation, Docker/Compose/Railway configuration. |
+| 2. Runtime and safety | Bun worker, durable jobs and recovery, OpenRouter/AI SDK, model configuration, policy gateway, approval queue, hard budgets, consent, agent lifecycle, Langfuse and audit trails. |
+| 3. Evaluation and UI | Full agent workspace, playground for single inputs and multi-step scenarios, simulation and shadow mode, detailed timelines, production-derived regression datasets and side-by-side comparisons. |
+| 4. Channels and research | Approved X discovery, mentions, posting and other permitted actions; Resend virtual inboxes; web search and read; authenticated remote MCP tools. |
+| 5. Intelligence and memory | Cheap multi-action evaluator, adaptive context retrieval, proactive planning, conversations, structured and JSONB memories, reversible identity linking, agent-scoped and shared-library RAG with pgvector. |
+| 6. Durable outcomes | Future tasks, event-driven waits, follow-ups, approvals, evidence-based outcomes, introductions, relationship review and escalation. |
+| 7. Validation and live readiness | Exercise all six templates plus blank agent, with detailed end-to-end tests for John, Sarah and the superconnector. Verify evaluations and safeguards, then require explicit administrator activation for live mode. |
+
+These are implementation milestones, not independent product architectures. Codex may refine sequencing and engineering choices while preserving the behavioural requirements.
+
+### Agent templates
+
+All templates are editable database-backed presets with personality, mission, instructions, suggested tool groups, schedules, policies, engagement criteria and evaluation fixtures. They are **not** separate agent implementations.
+
+| Template | Example mission |
+| --- | --- |
+| Sales and GTM — John | Represent The Timeline, discover potential customers, conduct relevant outreach, build relationships and arrange demos with a human. |
+| Customer support — Sarah | Answer product questions from RAG, investigate with approved MCP tools and escalate to human support when needed. |
+| Superconnector | Learn consenting participants' needs and offers, identify useful matches, seek double opt-in and arrange introductions. |
+| Community manager | Welcome members, participate in authorised communities, answer questions and facilitate discussions. |
+| Recruitment agent | Research suitable candidates, communicate within applicable permissions and coordinate hiring conversations. |
+| Partnerships agent | Discover compatible organisations, assess collaboration opportunities and coordinate partnership discussions. |
+| Blank agent | Start without predefined mission, personality or tools. |
+
+Event coordination and research may be added as further templates without new runtime types.
+
+## 16. Deferred capabilities and non-goals
+- No public SaaS billing, tenant onboarding or marketplace in the first version.
+- No visual workflow designer, complex agent-to-agent handoff framework or bespoke agent implementations.
+- No full-time sandbox/container per agent; add isolated browser/code tools only when needed.
+- No requirement to activate voice, SMS, Instagram, Reddit, Bluesky or WeChat in the initial integration rollout; adapter architecture must support them later.
+- No assumption that automated engagement is permissible merely because an API endpoint exists.
+
+## 17. Implementation defaults and safeguards
+- X integration: use only authorised API capabilities and approved automation. Missing permissions disable affected tools and leave the agent functional in shadow mode; do not implement scraping as a fallback.
+- Jobs: use a PostgreSQL-backed durable queue with transactional enqueue, SKIP LOCKED claims, leases, retries, dead-letter state and periodic recovery polling. LISTEN/NOTIFY is an optional wake-up optimisation, never the sole delivery mechanism. Codex chooses a maintained library or a small implementation that satisfies these recovery semantics.
+- External writes: store an action intent and idempotency key before dispatch. If the provider response is ambiguous, reconcile the provider state before any retry. Preserve the complete audit trail.
+- Tool policies: read-only tools can execute automatically within budgets. Public posting and relationship actions require explicit per-agent enablement and platform permission. Private messages, introductions, personal-data sharing, bookings and other consequential actions require applicable recipient consent; sensitive or irreversible operations additionally require administrator approval. All checks occur in deterministic code.
+- Knowledge files: use Railway-compatible S3 object storage for originals and attachments; PostgreSQL holds metadata, extraction state, text chunks and pgvector embeddings. Initially accept PDF, TXT and Markdown. Expand formats through extractors without changing the core data model.
+- Budgets: every agent has configurable daily and monthly OpenRouter spending caps, provider request quotas, outbound-action caps, concurrency limits, a maximum of 10 tool steps per run and a five-minute run deadline as initial defaults. Reject or defer work when limits are reached; do not treat limits as activity targets.
+- Cross-agent data: default to isolated agent memories, conversations, credentials and knowledge. Administrators may explicitly attach shared knowledge libraries; private relationship memories do not automatically cross agent boundaries. No automatic cross-agent relationship visibility. Identity links within an agent are evidence-backed, autonomous and reversible; shared libraries require explicit grants.
+- Email: use Resend for outbound sending and inbound routing to agent-specific addresses on a dedicated subdomain, with PostgreSQL-backed virtual inboxes. Validate provider account features, domain verification, webhooks and deliverability during integration; use supported APIs only. If an account lacks inbound access, keep email receiving disabled until enabled rather than changing the architecture.
+- Operational security: allowlisted administrator login, encrypted credentials, audit logs, webhook signature verification, prompt-injection boundaries, opt-out enforcement and a global outbound kill switch are required for live mode.
+
+## 18. Detailed behavioural requirements
+
+### 18.1 Discovery and evaluation
+- Each agent can define multiple discovery sources, schedules, administrator-authored keywords/search expressions, account lists, language or topic constraints, fetch limits and natural-language engagement criteria. Agents may generate operational search queries within those constraints but cannot modify saved configuration. These are configuration, not hard-coded agent types.
+- The discovery adapter persists source events and provider identifiers first. A shared fetcher may reuse permitted reads for multiple agents, but evaluations, action proposals and relationship histories remain agent-scoped. Respect provider retention and redistribution rules.
+- Run deterministic exclusions before any model call: blocked people, opt-outs, spam, repeated tags, duplicate posts, already-handled conversations, disabled tools, rate limits and source-specific rules.
+- The inexpensive evaluator returns relevance, priority scores, reasons and **zero, one or many** candidate actions on a single event (reply, like, repost, follow, bookmark, ignore and platform-specific actions). It is not the final authority to execute. A negative or uncertain assessment may result in no main-agent invocation. Use adaptive context retrieval: start with the event, fetch parent/thread context when needed. The main agent selects from ranked opportunities.
+- The main agent can revise or combine suggestions; every actual action is independently checked and recorded. Support audience/post filters such as verified status, follower count, language, original reply-count snapshot and account exclusions. Allow scheduled original posts, with optional media tools. Configure whether and when agents continue replies to their own posts or replies. A failed action does not necessarily cancel other independent actions.
+
+### 18.2 Relationships, following and unfollowing
+- Record the reason, originating interaction, time and status for every follow; maintain relationship notes, prior conversations, contact preferences and opt-outs.
+- A configurable scheduled review examines followed accounts for relevance, relationship history, inactivity, explicit requests and cooldowns. It proposes unfollows rather than relying on opportunistic decisions during unrelated conversations.
+- Never treat lack of engagement alone as a reason for aggressive follow/unfollow cycling. Apply provider restrictions and conservative limits.
+- Agents act independently by default. Prevent the same agent accidentally repeating the same action on the same target; a separate agent may engage independently. Offer a per-agent setting to avoid posts already engaged by other Orbit agents. Conversation continuation is not a duplicate of initial engagement.
+
+### 18.3 Communication, introductions and meetings
+- Resend-backed virtual mailboxes support inbound and outbound mail, drafts, replies, attachments, delivery/bounce status, subject lines, Message-ID, In-Reply-To and References for threading, and search in Orbit's own stored messages.
+- A person may have multiple platform identities; link identities autonomously using evidence and confidence, with verified and inferred states, reversible links and automatic rollback when contradicted. A phone number supplied in conversation is strong evidence but not proof of ownership. Never use an inferred link to bypass sharing permissions. Maintain a coherent relationship history when authorised identity linkage exists.
+- Introductions are an **optional toolset**. A superconnector may search consenting profiles and match needs to offers; a sales agent may offer a demo introduction; a support agent may introduce a human support contact. The agent type does not determine which tools exist.
+- The introduction lifecycle is: identify a useful connection → propose it → collect each required party's consent → share only authorised information → send the introduction → optionally arrange a meeting → record the outcome and follow-up.
+- Support calendars, SMS and voice as future tools. Outbound messages, calls, bookings and personal-data sharing must honour consent and any required administrator approval.
+- Agents may refer to other agents using their public handles or email addresses. No special internal handoff framework is required.
+
+### 18.4 Durable commitments and tool outcomes
+- Agents can create future commitments such as “follow up next Tuesday”, “check whether a support issue is resolved”, “wait for a reply”, or “book a demo after confirmation”. Persist the owner, next run time, status, dependencies, attempts and cancellation state in PostgreSQL.
+- Tool results can be immediate, failed or pending. Pending work resumes only after a persisted provider callback, inbound event or scheduled check. Never rely on an LLM process remaining alive while waiting.
+- A generic tool registry exposes native tools and individually allowlisted remote MCP tools, including their input schemas, authentication requirements, permissions and side effects. Tool availability is agent-specific; adding a new tool does not require a new agent type.
+- MCP tools and retrieved content are untrusted inputs. Use explicit credentials, timeouts, scope restrictions, audit records and stronger isolation for executable/untrusted tools.
+
+### 18.5 Playground, evaluation and trace inspection
+- The dashboard playground supports pasting an X post, selecting a saved event, simulating an inbound email or supplying a custom scenario. Select agent, configuration version, evaluator model and main model.
+- Show deterministic filter decisions, evaluator scores and proposed **multiple actions**, generated drafts, retrieved knowledge passages, tool-call sequence, permission decisions, simulated effects, token/cost estimates and links to Langfuse traces.
+- Simulation never makes external writes. Shadow mode may perform permitted reads and real LLM inference, but writes are suppressed centrally. Live mode permits only explicitly enabled and authorised operations.
+- Turn real successes and failures into replayable evaluation cases. Compare prompt/model versions with fixed inputs and mocked side effects; retain historical results for regression testing.
+- The activity timeline is per agent and includes discovery, evaluation, planning, action intent, execution outcome, follow-ups and errors. Langfuse stores diagnostic traces; PostgreSQL remains authoritative for action and task state.
+
+### 18.6 Knowledge and model configuration
+- Store personality, mission, operating instructions, engagement criteria, tool-use guidance and schedules separately as versioned text/configuration. Templates are editable defaults, not separate implementations.
+- Allow per-agent OpenRouter keys and independently configurable main and evaluator models, with budgets and fallback/error behaviour. Never expose raw provider keys to model prompts.
+- Agent-scoped document uploads include PDF, TXT and Markdown initially; support FAQs, product documentation and brand guidance as content. Originals live in object storage; extracted chunks, metadata and embeddings live in PostgreSQL/pgvector.
+- Retrieve relevant passages rather than placing entire documents in the system prompt. Show citations/sources and retrieved chunks in the dashboard. Use native/MCP tools for live operational facts rather than treating static RAG as authoritative for changing data.
+
+### 18.7 Operations and administration
+- Only allowlisted administrator emails can sign in through OAuth or magic links; there is no public registration. AUTH_DISABLED is allowed only in a strictly local development environment and must fail startup in production; use an explicit local admin identity. Each agent has its own connections, credentials, permissions, execution mode, schedules, memory, knowledge and budgets.
+- Support agent pause/resume, global outbound kill switch, per-tool approval policies, provider health/degraded states, secret rotation and revocation, and comprehensive audit history.
+- Support a dedicated per-agent email address, social identity and (later) Telegram bot. A single codebase and shared Bun worker execute all agents; no per-agent deployment or sandbox is required for trusted API tools.
+- Keep Orbit lightweight: one Next.js app, one Bun worker, PostgreSQL/pgvector, Railway/Docker (Dockerfiles, Docker Compose and per-service railway.json), Zod-validated environments, and hosted providers. Do not add Go, Redis, Kafka, a visual workflow editor or a separate orchestration service for the MVP.
+
+## 19. Decisions from product review (rounds 1–8)
+
+### Identity, autonomy and planning
+- One agent may operate multiple connected identities and channels, sharing its own agent-scoped relationship memory while keeping platform-specific threads intact.
+- Only administrators edit persistent configuration: prompts, personality, mission, saved discovery criteria, tool grants, models, schedules and budgets. Agents may create plans, operational queries, memories and future tasks within that configuration.
+- Proactive planning and autonomous first contact are supported where legally and contractually permitted. Each agent's first-contact policy is `auto`, `approval` or `disabled`, with tool-level overrides. Automatic first contact is the default setting, never a bypass of platform restrictions.
+
+### Discovery and independent engagement
+- Cheap evaluation returns relevance, candidate actions and scores. Retrieve additional context adaptively. The main agent selects from ranked opportunities and may perform multiple independently authorised actions on one post.
+- Agents act independently. Per-agent deduplication prevents repeated initial actions from reprocessed events. Other agents may engage the same post unless an individual agent's cross-agent-engagement exclusion is enabled.
+- Support original publishing, scheduled posts, per-agent audience filters (including verified accounts and initial zero-reply posts), and configurable conversation continuation after inbound replies.
+- Outcomes can be retrieved as memory and influence reasoning, but agents do not silently change saved configuration or permissions.
+
+### Memory, people and knowledge
+- Agent memories are isolated by default; knowledge libraries may be private or explicitly shared. Memories include structured facts and controlled flexible JSONB objects with provenance.
+- Retention is configurable by data class, with deletion and provider requirements taking precedence.
+- Identity linking is autonomous, evidence-based and reversible; confirmed links and inferred links are distinguished. No admin review is required for every match, but identity linkage never implies consent to disclose data.
+- Essential current conversation context is loaded automatically; agents can call deeper memory, history and RAG retrieval tools when needed.
+
+### Tools, consent and durable tasks
+- Tool groups are enabled per agent, with individual overrides. Remote authenticated MCP servers expose discoverable, individually controlled operations.
+- Agent-wide approval defaults combine with per-tool risk tiers. Consent is structured, scoped and supported by conversation evidence; consent and administrator approval are separate checks.
+- Tools can return immediate results or pending states represented by durable tasks. Tasks resume on persisted events or timeout checks.
+- Conversations remain separate per channel/thread with linked person context. Every inbound reply is evaluated; agents may autonomously schedule bounded follow-ups, recover from failures and escalate when necessary. Completion is evidence-based, not an agent assertion.
+
+### Testing, operations and live activation
+- The native playground supports quick inputs and multi-step scenarios using the production runtime with mocked or suppressed writes. Evaluation datasets are manually authored or promoted from production traces.
+- Evaluations combine deterministic assertions, model judges and human feedback. Administrators can rate, correct and save regression cases, and compare model/prompt versions side by side.
+- Orbit shows detailed execution timelines, operational metrics and goal outcomes; Langfuse stores diagnostic traces, not the authoritative job/action ledger.
+- Authentication supports OAuth and magic links with allowlisted emails; local-only `AUTH_DISABLED` bypass is explicitly guarded. Secrets are encrypted in PostgreSQL with an external master key. Zod validates environment configuration.
+- Web + worker + PostgreSQL deploy on Railway with Docker, Compose and per-service Railway config. S3-compatible object storage holds files. Jobs recover with reconciliation, integration failures degrade only affected capabilities, hard per-agent budgets apply, and automated backups are periodically restore-tested.
+- Evaluation and safety checks must pass before live activation, but **only an administrator** can enable live mode, pause, resume or stop an agent. The first complete release must support permitted real external actions, not merely a shadow demo.
+
+## 20. Definition of success
+
+Orbit succeeds when an administrator can create John, Sarah or a superconnector from a template, configure personality and mission in plain language, assign separate models and tools, attach documents, schedule discovery, run a shadow-mode test, inspect evaluations and Langfuse traces, and deliberately activate live operation after checks and evaluations. Admins can pause, resume and stop agents; stop prevents further external writes and cancels pending work where feasible. All live actions remain individually policy-gated. The same runtime must support both proactive outreach and reactive support, with durable follow-through on commitments.
+
+Guiding statement: Agents decide what to do. Tools define what they can do. Policies determine what they may do. Tasks ensure they follow through. PostgreSQL records what actually happened.
