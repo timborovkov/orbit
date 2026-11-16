@@ -1,0 +1,25 @@
+name: Feature or improvement
+description: Suggest a feature or improvement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is public. Remove personal data, credentials, and private links.
+        Before substantial implementation or a pull request, agree scope and
+        contribution terms with a maintainer as described in CONTRIBUTING.md.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Proposed outcome
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Suggested scope

@@ -27,7 +27,7 @@ Orbit is not a multi-tenant SaaS in its first incarnation, nor a single-purpose 
 | Agents | Vercel AI SDK with OpenRouter; model and API key per agent |
 | Workers | Separate Bun worker process sharing application modules |
 | Scheduling | Durable PostgreSQL-backed jobs; LISTEN/NOTIFY only as a wake-up signal |
-| Observability | Langfuse via OpenTelemetry; Orbit retains operational truth |
+| Observability | Langfuse via OpenTelemetry for agent traces and evaluations; Sentry for application errors and performance; Orbit retains operational truth |
 | Authentication | Auth.js or equivalent OAuth; allowlisted admin emails, no public registration |
 | Hosting | Railway + Docker, single monorepo |
 | Email | Resend for sending and inbound routing; PostgreSQL-backed virtual inboxes |
@@ -63,7 +63,7 @@ An agent is a durable identity. Changing prompts, models, tools or policies crea
 | Policy gateway | Check per-agent/tool permissions, provider restrictions, recipient consent, approvals, budgets, current mode and current blocklist state. |
 | Execution | Persist action intent; dispatch allowed external writes; reconcile uncertain outcomes and avoid duplicate retries. |
 | Follow-through | Store results and conversation state, schedule pending commitments and resume on future events. |
-| Observability | Persist execution and action statuses in Orbit; emit diagnostic spans and scores to Langfuse. |
+| Observability | Persist execution and action statuses in Orbit; emit diagnostic spans and scores to Langfuse and application errors to Sentry. |
 
 All external inbound content is untrusted data, including posts, webpages, PDFs and MCP responses. It cannot grant permissions, change policy or access credentials.
 
@@ -130,12 +130,12 @@ Pause and kill-switch controls must stop queued and in-flight outbound actions a
 
 ## 12. Evaluation, tracing and analytics
 
-Use one Langfuse production project (and optionally a separate development project), not a project per agent. Tag traces with agent ID, execution ID, session/conversation ID, model, prompt/config version, tool, trigger and environment. Keep action status, delivery confirmation and approvals in Orbit PostgreSQL.
+Use one Langfuse production project (and optionally a separate development project), not a project per agent. Tag traces with agent ID, execution ID, session/conversation ID, model, prompt/config version, tool, trigger and environment. Use Sentry for web and worker error monitoring and performance diagnostics, with correlation IDs linking failures to Orbit executions and Langfuse traces. Keep action status, delivery confirmation and approvals in Orbit PostgreSQL.
 - Playground: paste a post or question, choose agent/model/version and inspect relevance, proposed actions, policy outcomes, source retrieval and draft responses.
 - Regression datasets: save good/bad real-world events; compare model and prompt versions; replay events with no external writes.
 - Evaluation types: deterministic assertions, LLM-as-judge for subjective qualities, and human review.
 - Metrics: relevant opportunity rate, meaningful replies, meetings, support resolution, tool success, latency, cost, policy violations and opt-outs.
-- Trace privacy: redact secrets and sensitive personal data; apply retention and access controls.
+- Telemetry privacy: redact secrets and sensitive personal data from Langfuse and Sentry; apply retention and access controls.
 
 ## 13. Dashboard and administration
 
@@ -156,7 +156,7 @@ Orbit's **full platform design is the implementation backbone**. Delivery is inc
 | Phase | Outcome |
 | --- | --- |
 | 1. Foundation | Private OAuth and magic-link login, allowlist, development-only auth bypass, agents/templates, versioned configuration, encrypted per-agent credentials, Drizzle/Postgres, Zod environment validation, Docker/Compose/Railway configuration. |
-| 2. Runtime and safety | Bun worker, durable jobs and recovery, OpenRouter/AI SDK, model configuration, policy gateway, approval queue, hard budgets, consent, agent lifecycle, Langfuse and audit trails. |
+| 2. Runtime and safety | Bun worker, durable jobs and recovery, OpenRouter/AI SDK, model configuration, policy gateway, approval queue, hard budgets, consent, agent lifecycle, Langfuse traces, Sentry monitoring and audit trails. |
 | 3. Evaluation and UI | Full agent workspace, playground for single inputs and multi-step scenarios, simulation and shadow mode, detailed timelines, production-derived regression datasets and side-by-side comparisons. |
 | 4. Channels and research | Approved X discovery, mentions, posting and other permitted actions; Resend virtual inboxes; web search and read; authenticated remote MCP tools. |
 | 5. Intelligence and memory | Cheap multi-action evaluator, adaptive context retrieval, proactive planning, conversations, structured and JSONB memories, reversible identity linking, agent-scoped and shared-library RAG with pgvector. |
