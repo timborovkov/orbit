@@ -3,3 +3,5 @@ bun.lock
 node_modules
 
 architecture.md
+
+apps/web/next-env.d.ts
