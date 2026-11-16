@@ -16,7 +16,10 @@
     "lint": "eslint apps/web/src apps/worker/src --max-warnings 0",
     "knip": "knip",
     "doctor": "bun scripts/run-react-doctor.mjs",
-    "validate": "bun run format:check && bun run typecheck && bun run lint && bun run knip && bun run doctor"
+    "validate": "bun run format:check && bun run typecheck && bun run lint && bun run knip && bun run doctor",
+    "db:migrate": "bun scripts/migrate.ts",
+    "test:unit": "bun test tests/auth-env.test.ts",
+    "test:e2e": "playwright test && playwright test --config playwright.local.config.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
@@ -28,6 +31,9 @@
     "prettier": "3.10.1",
     "react-doctor": "0.9.23",
     "typescript": "6.0.2",
-    "typescript-eslint": "8.72.2"
+    "typescript-eslint": "8.72.2",
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.65.1",
+    "postgres": "^4.1.1"
   }
 }

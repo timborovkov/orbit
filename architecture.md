@@ -1,6 +1,6 @@
 # Orbit
 
-Product vision and architecture outline  |  15 November 2026  |  Planning document v4.0
+Product vision and architecture outline  |  15 November 2026  |  Planning document v4.1
 
 A self-hosted control centre for autonomous, persistent AI representatives. This document consolidates the agreed product direction, operating model, integrations, constraints and implementation priorities. It is intentionally a product and architecture brief, not a prescriptive code-level specification.
 
@@ -28,7 +28,7 @@ Orbit is not a multi-tenant SaaS in its first incarnation, nor a single-purpose 
 | Workers | Separate Bun worker process sharing application modules |
 | Scheduling | Durable PostgreSQL-backed jobs; LISTEN/NOTIFY only as a wake-up signal |
 | Observability | Langfuse via OpenTelemetry for agent traces and evaluations; Sentry for application errors and performance; Orbit retains operational truth |
-| Authentication | Auth.js or equivalent OAuth; allowlisted admin emails, no public registration |
+| Authentication | Environment-configured administrator password login; OAuth/magic links planned; no public registration |
 | Hosting | Railway + Docker, single monorepo |
 | Email | Resend for sending and inbound routing; PostgreSQL-backed virtual inboxes |
 | Research | Exa web search; optional Firecrawl extraction and Browserbase later |
@@ -141,7 +141,7 @@ Use one Langfuse production project (and optionally a separate development proje
 
 Global navigation: Agents, Activity, Conversations, People, Playground/Evaluations, Integrations and Settings. Each agent has Overview, Identity/Personality, Mission/Goals, Models, Tools, Triggers, Channels, Knowledge, Memory, Activity, Conversations, Analytics and Permissions.
 
-Admin access is private and allowlisted by email, ideally using a trusted OAuth provider through Auth.js or equivalent. No open registration. The dashboard provides per-agent pause/resume, shadow/live mode, credential health, approvals, usage and action audit trails.
+Admin access initially uses environment-configured email/password credentials; trusted OAuth with allowlisted emails is planned. No open registration. The dashboard provides per-agent pause/resume, shadow/live mode, credential health, approvals, usage and action audit trails.
 
 ## 14. Suggested data domains (not a fixed schema)
 
@@ -155,7 +155,7 @@ Orbit's **full platform design is the implementation backbone**. Delivery is inc
 
 | Phase | Outcome |
 | --- | --- |
-| 1. Foundation | Private OAuth and magic-link login, allowlist, development-only auth bypass, agents/templates, versioned configuration, encrypted per-agent credentials, Drizzle/Postgres, Zod environment validation, Docker/Compose/Railway configuration. |
+| 1. Foundation | Private environment-configured administrator login and guarded local development AUTH_DISABLED bypass; OAuth and magic-link login and allowlist later, agents/templates, versioned configuration, encrypted per-agent credentials, Drizzle/Postgres, Zod environment validation, Docker/Compose/Railway configuration. |
 | 2. Runtime and safety | Bun worker, durable jobs and recovery, OpenRouter/AI SDK, model configuration, policy gateway, approval queue, hard budgets, consent, agent lifecycle, Langfuse traces, Sentry monitoring and audit trails. |
 | 3. Evaluation and UI | Full agent workspace, playground for single inputs and multi-step scenarios, simulation and shadow mode, detailed timelines, production-derived regression datasets and side-by-side comparisons. |
 | 4. Channels and research | Approved X discovery, mentions, posting and other permitted actions; Resend virtual inboxes; web search and read; authenticated remote MCP tools. |
@@ -242,7 +242,7 @@ Event coordination and research may be added as further templates without new ru
 - Retrieve relevant passages rather than placing entire documents in the system prompt. Show citations/sources and retrieved chunks in the dashboard. Use native/MCP tools for live operational facts rather than treating static RAG as authoritative for changing data.
 
 ### 18.7 Operations and administration
-- Only allowlisted administrator emails can sign in through OAuth or magic links; there is no public registration. AUTH_DISABLED is allowed only in a strictly local development environment and must fail startup in production; use an explicit local admin identity. Each agent has its own connections, credentials, permissions, execution mode, schedules, memory, knowledge and budgets.
+- An environment-configured administrator can sign in with email and password; future OAuth or magic links require allowlisted administrator emails; there is no public registration. AUTH_DISABLED is allowed only in a strictly local development environment and must fail startup in production; use an explicit local admin identity. Each agent has its own connections, credentials, permissions, execution mode, schedules, memory, knowledge and budgets.
 - Support agent pause/resume, global outbound kill switch, per-tool approval policies, provider health/degraded states, secret rotation and revocation, and comprehensive audit history.
 - Support a dedicated per-agent email address, social identity and (later) Telegram bot. A single codebase and shared Bun worker execute all agents; no per-agent deployment or sandbox is required for trusted API tools.
 - Keep Orbit lightweight: one Next.js app, one Bun worker, PostgreSQL/pgvector, Railway/Docker (Dockerfiles, Docker Compose and per-service railway.json), Zod-validated environments, and hosted providers. Do not add Go, Redis, Kafka, a visual workflow editor or a separate orchestration service for the MVP.
@@ -276,7 +276,7 @@ Event coordination and research may be added as further templates without new ru
 - The native playground supports quick inputs and multi-step scenarios using the production runtime with mocked or suppressed writes. Evaluation datasets are manually authored or promoted from production traces.
 - Evaluations combine deterministic assertions, model judges and human feedback. Administrators can rate, correct and save regression cases, and compare model/prompt versions side by side.
 - Orbit shows detailed execution timelines, operational metrics and goal outcomes; Langfuse stores diagnostic traces, not the authoritative job/action ledger.
-- Authentication supports OAuth and magic links with allowlisted emails; local-only `AUTH_DISABLED` bypass is explicitly guarded. Secrets are encrypted in PostgreSQL with an external master key. Zod validates environment configuration.
+- Authentication initially supports environment-configured administrator credentials, with OAuth and magic links with allowlisted emails planned; local-only `AUTH_DISABLED` bypass is explicitly guarded. Secrets are encrypted in PostgreSQL with an external master key. Zod validates environment configuration.
 - Web + worker + PostgreSQL deploy on Railway with Docker, Compose and per-service Railway config. S3-compatible object storage holds files. Jobs recover with reconciliation, integration failures degrade only affected capabilities, hard per-agent budgets apply, and automated backups are periodically restore-tested.
 - Evaluation and safety checks must pass before live activation, but **only an administrator** can enable live mode, pause, resume or stop an agent. The first complete release must support permitted real external actions, not merely a shadow demo.
 
@@ -285,3 +285,14 @@ Event coordination and research may be added as further templates without new ru
 Orbit succeeds when an administrator can create John, Sarah or a superconnector from a template, configure personality and mission in plain language, assign separate models and tools, attach documents, schedule discovery, run a shadow-mode test, inspect evaluations and Langfuse traces, and deliberately activate live operation after checks and evaluations. Admins can pause, resume and stop agents; stop prevents further external writes and cancels pending work where feasible. All live actions remain individually policy-gated. The same runtime must support both proactive outreach and reactive support, with durable follow-through on commitments.
 
 Guiding statement: Agents decide what to do. Tools define what they can do. Policies determine what they may do. Tasks ensure they follow through. PostgreSQL records what actually happened.
+
+### Initial administrator password authentication
+
+MinIO-style bootstrap credentials are supplied through `ORBIT_ADMIN_EMAIL` and `ORBIT_ADMIN_PASSWORD` (minimum 16 characters), never committed or exposed to clients. `APP_URL` defines the trusted origin; production deployments require HTTPS. No public registration or password-reset flow is exposed. Rotate the password in the deployment environment; rotation invalidates existing sessions. OAuth and magic links remain planned additions, not prerequisites for the foundation.
+
+Use cryptographically random, eight-hour, database-backed opaque sessions; PostgreSQL stores only token hashes and credential fingerprints. Cookies are HttpOnly, SameSite=Strict and Secure on HTTPS. Server mutations verify the origin and administrator session. Login attempts are limited durably in PostgreSQL (ten attempts per fifteen minutes for the bootstrap account); account-wide throttling deliberately trades availability for brute-force resistance without trusting proxy headers. Password comparison uses constant-time digests. The initial console persists agents paused in shadow mode and a global outbound pause (enabled initially). Runtime activation, provider integrations and OAuth are explicitly unavailable until their implementation milestones. The future policy gateway must enforce the persisted global pause; the foundation alone does not execute agents.
+
+
+### Guarded local development authentication
+
+`AUTH_DISABLED=true` is implemented for local development only. Require `NODE_ENV=development`, loopback app and PostgreSQL URLs, and an explicit `AUTH_LOCAL_ADMIN_EMAIL`. The supported `bun run dev` launcher binds the web process to 127.0.0.1 and supplies an internal runtime marker; direct Next invocations do not enable bypass. Reject invalid flags and unsafe bypass configuration at startup, including in production. Also check the request Host against APP_URL and retain origin validation on mutations. Do not expose this server through a proxy or tunnel. This mode creates no sessions, uses the explicit local identity for all audit records, redirects /login to the dashboard and displays a persistent bypass notice. Authentication remains enabled by default; disabling the flag restores the administrator password requirements. OAuth/magic-link login remains deferred.
