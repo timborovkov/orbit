@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible, non-sensitive problem
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is public. Use synthetic examples and remove personal data,
+        credentials, tokens, and private links. Report vulnerabilities privately
+        through GitHub's security advisory form.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the commit, browser, and operating system when relevant.

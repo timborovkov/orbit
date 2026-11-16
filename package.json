@@ -1,0 +1,17 @@
+{
+  "name": "orbit",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Elastic-2.0",
+  "packageManager": "bun@1.4.4",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "bun run --parallel --filter '*' dev",
+    "build": "bun run --filter @orbit/web build",
+    "check": "bun run --filter @orbit/web typecheck && bun run --filter @orbit/worker typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/bun": "1.4.4"
+  }
+}

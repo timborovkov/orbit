@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, production]
+  pull_request:
+    branches: [main, production]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Cache Bun downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', '.bun-version') }}
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck web and worker
+        run: bun run check
+      - name: Build web
+        run: bun run build
+
+  full-validation:
+    name: Full validation
+    if: github.base_ref == 'production' || github.ref == 'refs/heads/production' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build web image
+        run: docker build -f docker/web.Dockerfile -t orbit-web:ci .
+      - name: Build worker image
+        run: docker build -f docker/worker.Dockerfile -t orbit-worker:ci .
+      - name: Check Compose configuration
+        run: docker compose config --quiet
+      - name: Smoke test web container
+        run: |
+          docker run -d --rm --name orbit-web-ci -p 127.0.0.1:3000:3000 orbit-web:ci
+          trap 'docker stop orbit-web-ci' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3000/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs orbit-web-ci
+          exit 1

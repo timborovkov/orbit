@@ -1,0 +1,33 @@
+name: orbit
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: orbit
+      POSTGRES_PASSWORD: orbit_dev
+      POSTGRES_DB: orbit
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U orbit -d orbit']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  web:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    ports:
+      - '3000:3000'
+  worker:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+
+volumes:
+  postgres_data:
