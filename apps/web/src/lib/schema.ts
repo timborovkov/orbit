@@ -1,4 +1,5 @@
-import { pgTable, text, timestamp, boolean, uuid, integer } from 'drizzle-orm/pg-core';
+import { boolean, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+
 export const sessions = pgTable('sessions', {
   tokenHash: text('token_hash').primaryKey(),
   email: text('email').notNull(),

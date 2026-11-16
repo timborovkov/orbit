@@ -1,17 +1,18 @@
-import { desc } from 'drizzle-orm';
-import { ArrowDownLeft, CirclePause, LockKeyhole, ShieldCheck, Users } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { desc } from 'drizzle-orm';
+import { ArrowDownLeft, CirclePause, LockKeyhole, ShieldCheck, Users } from 'lucide-react';
 
-import { SubmitButton } from '../components/ui/submit-button';
-import { requireAdmin } from '../lib/auth';
-import { db } from '../lib/db';
-import { env } from '../lib/env';
-import { agents, audit, controls } from '../lib/schema';
+import { logout } from '@/actions/auth';
+import { setGlobalPause } from '@/actions/controls';
+import { CreateAgent } from '@/app/create-agent';
+import { ThemeSwitch } from '@/app/theme';
+import { SubmitButton } from '@/components/ui/submit-button';
+import { requireAdmin } from '@/lib/auth';
+import { db } from '@/lib/db';
+import { env } from '@/lib/env';
+import { agents, audit, controls } from '@/lib/schema';
 
-import { logout, setGlobalPause } from './actions';
-import { CreateAgent } from './create-agent';
-import { ThemeSwitch } from './theme';
 export const dynamic = 'force-dynamic';
 export default async function Home() {
   const { email, team, events, state } = await requireAdmin().then(async (email) => {

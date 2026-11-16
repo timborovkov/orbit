@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 const outputDir = mkdtempSync(join(tmpdir(), 'react-doctor-'));
 

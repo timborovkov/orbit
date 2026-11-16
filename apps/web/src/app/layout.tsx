@@ -1,8 +1,10 @@
-import { GeistSans } from 'geist/font/sans';
-import Script from 'next/script';
+import '@fontsource-variable/ibm-plex-sans/wght.css';
+import '@fontsource/ibm-plex-mono/latin-400.css';
 
 import type { Viewport } from 'next';
-import './globals.css';
+import Script from 'next/script';
+
+import '@/app/globals.css';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -24,7 +26,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <meta name="theme-color" content="#fff" />
         <Script src="/theme.js" strategy="beforeInteractive" />
       </head>
-      <body className={GeistSans.variable}>{children}</body>
+      <body>{children}</body>
     </html>
   );
 }

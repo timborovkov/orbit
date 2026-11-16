@@ -1,10 +1,10 @@
 'use client';
-import { Plus, X } from 'lucide-react';
+
 import { useRef, useState, useTransition } from 'react';
+import { Plus, X } from 'lucide-react';
 
-import { Button } from '../components/ui/button';
-
-import { createAgent } from './actions';
+import { createAgent } from '@/actions/agents';
+import { Button } from '@/components/ui/button';
 
 const empty = {
   name: '',

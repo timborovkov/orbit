@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { parseEnv } from '../apps/web/src/lib/env';
+import { parseEnv } from '@/lib/env';
 
 const local = {
   NODE_ENV: 'development',
@@ -86,3 +86,24 @@ test('production server rejects bypass at startup before serving health', async 
     child.kill();
   }
 }, 20000);
+
+describe('password authentication configuration', () => {
+  const production = {
+    NODE_ENV: 'production',
+    DATABASE_URL: 'postgres://user:password@database.example.com/orbit',
+    APP_URL: 'https://orbit.example.com',
+    ORBIT_ADMIN_EMAIL: 'admin@example.com',
+    ORBIT_ADMIN_PASSWORD: 'test-only-password-123456',
+  };
+  test('requires credentials and HTTPS for public production origins', () => {
+    expect(parseEnv(production).AUTH_DISABLED).toBe(false);
+    expect(() => parseEnv({ ...production, ORBIT_ADMIN_PASSWORD: 'short' })).toThrow();
+    expect(() => parseEnv({ ...production, ORBIT_ADMIN_EMAIL: undefined })).toThrow();
+    expect(() => parseEnv({ ...production, APP_URL: 'http://orbit.example.com' })).toThrow('HTTPS');
+    expect(parseEnv({ ...production, APP_URL: 'http://127.0.0.1:3000' }).AUTH_DISABLED).toBe(false);
+  });
+  test('rejects malformed URLs in both modes', () => {
+    expect(() => parseEnv({ ...production, APP_URL: 'invalid' })).toThrow();
+    expect(() => parseEnv({ ...local, DATABASE_URL: 'invalid' })).toThrow();
+  });
+});

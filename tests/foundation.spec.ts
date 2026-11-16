@@ -1,7 +1,6 @@
-import AxeBuilder from '@axe-core/playwright';
-import { test, expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
+import AxeBuilder from '@axe-core/playwright';
+import { expect, test, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
 const sql = postgres('postgres://orbit:orbit_dev@localhost:5432/orbit_test');
@@ -48,6 +47,11 @@ test('private login, persisted workspace, keyboard dialog, themes and screenshot
   test.setTimeout(120000);
   await page.goto('/');
   await expect(page).toHaveURL(/login/);
+  await page.evaluate(() => document.fonts.ready);
+  await expect(page.locator('body')).toHaveCSS('font-family', /IBM Plex Sans Variable/);
+  expect(await page.evaluate(() => document.fonts.check('400 14px "IBM Plex Sans Variable"'))).toBe(
+    true,
+  );
   for (const mode of ['dark', 'light']) {
     await page
       .getByRole('radio', { name: mode.charAt(0).toUpperCase() + mode.slice(1), exact: true })

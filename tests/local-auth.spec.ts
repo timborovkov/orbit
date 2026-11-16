@@ -1,5 +1,6 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import postgres from 'postgres';
+
 const sql = postgres('postgres://orbit:orbit_dev@127.0.0.1:5432/orbit_test');
 test.beforeAll(async () => {
   await sql`TRUNCATE sessions, agents, audit, login_attempts`;

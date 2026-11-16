@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 
-import { parseEnv } from '../src/lib/env';
+import { parseEnv } from '@/lib/env';
 
 if (process.argv.length > 2)
   throw new Error('Set PORT to choose a local port; dev server flags are not accepted');

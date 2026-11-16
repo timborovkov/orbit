@@ -1,14 +1,14 @@
-import { LockKeyhole } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { LockKeyhole } from 'lucide-react';
 
-import { SubmitButton } from '../../components/ui/submit-button';
-import { env } from '../../lib/env';
-import { login } from '../actions';
-import { ThemeSwitch } from '../theme';
+import { login } from '@/actions/auth';
+import { PasswordField } from '@/app/login/password-field';
+import { ThemeSwitch } from '@/app/theme';
+import { SubmitButton } from '@/components/ui/submit-button';
+import { env } from '@/lib/env';
 
-import { PasswordField } from './password-field';
 export const dynamic = 'force-dynamic';
 export default async function Login({
   searchParams,

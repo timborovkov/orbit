@@ -4,7 +4,7 @@ export async function register() {
     process.env.AUTH_DISABLED !== undefined &&
     process.env.AUTH_DISABLED !== 'false'
   ) {
-    const { env } = await import('./lib/env');
+    const { env } = await import('@/lib/env');
     // Validate bypass configuration before serving even the public health route.
     try {
       env();

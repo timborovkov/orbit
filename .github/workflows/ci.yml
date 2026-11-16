@@ -39,7 +39,6 @@ jobs:
 
   full-validation:
     name: Full validation
-    if: github.base_ref == 'production' || github.ref == 'refs/heads/production' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -48,6 +47,14 @@ jobs:
         run: docker build -f docker/web.Dockerfile -t orbit-web:ci .
       - name: Build worker image
         run: docker build -f docker/worker.Dockerfile -t orbit-worker:ci .
+      - name: Smoke test worker container
+        run: |
+          docker run -d --name orbit-worker-ci orbit-worker:ci
+          trap 'docker rm -f orbit-worker-ci' EXIT
+          sleep 2
+          docker stop --time 5 orbit-worker-ci
+          docker logs orbit-worker-ci
+          test "$(docker inspect --format '{{.State.ExitCode}}' orbit-worker-ci)" = 0
       - name: Check Compose configuration
         run: docker compose config --quiet
       - name: Smoke test web container
@@ -56,6 +63,8 @@ jobs:
           trap 'docker stop orbit-web-ci' EXIT
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:3000/health; then
+              curl --fail --silent http://127.0.0.1:3000/icon.svg > /dev/null
+              curl --fail --silent http://127.0.0.1:3000/theme.js > /dev/null
               exit 0
             fi
             sleep 1

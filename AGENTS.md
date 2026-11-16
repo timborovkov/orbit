@@ -12,6 +12,7 @@ Before building or changing UI, read [design.md](design.md). Follow its current 
 
 ## Repository work
 
+- Use `@/*` for application imports. Prettier owns import ordering; run it after adding imports. Keep server actions grouped by feature and reusable authentication behaviour in `lib/auth.ts`.
 - Use Bun 1.4.4 for installation and scripts. The repository is a Bun workspace with a Next.js web app and a separate Bun worker.
 - Keep services aligned with the single web service, single worker service, and PostgreSQL deployment in the architecture. Do not add infrastructure for deferred capabilities prematurely.
 - Add environment variables, validation, schemas, and migrations when the feature that uses them is implemented. Do not create speculative examples or placeholders.

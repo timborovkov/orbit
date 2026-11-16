@@ -1,5 +1,7 @@
 'use client';
-import { Button } from '../components/ui/button';
+
+import { Button } from '@/components/ui/button';
+
 export default function WorkspaceError({ reset }: { error: Error; reset: () => void }) {
   return (
     <main className="route-state">
