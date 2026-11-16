@@ -6,7 +6,7 @@ updates:
       interval: weekly
     groups:
       minor-and-patch:
-        patterns: ['*']
+        patterns: ["*"]
         update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
@@ -14,7 +14,7 @@ updates:
       interval: weekly
     groups:
       minor-and-patch:
-        patterns: ['*']
+        patterns: ["*"]
         update-types: [minor, patch]
   - package-ecosystem: docker
     directory: /docker
@@ -22,7 +22,7 @@ updates:
       interval: weekly
     groups:
       minor-and-patch:
-        patterns: ['*']
+        patterns: ["*"]
         update-types: [minor, patch]
   - package-ecosystem: docker-compose
     directory: /
@@ -30,5 +30,5 @@ updates:
       interval: weekly
     groups:
       minor-and-patch:
-        patterns: ['*']
+        patterns: ["*"]
         update-types: [minor, patch]

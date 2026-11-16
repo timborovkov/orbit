@@ -1,0 +1,5 @@
+bun.lock
+.next
+node_modules
+
+architecture.md
