@@ -23,6 +23,14 @@ services:
       dockerfile: docker/web.Dockerfile
     ports:
       - '3000:3000'
+    environment:
+      DATABASE_URL: postgres://orbit:orbit_dev@postgres:5432/orbit
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      ORBIT_ADMIN_EMAIL: ${ORBIT_ADMIN_EMAIL:-}
+      ORBIT_ADMIN_PASSWORD: ${ORBIT_ADMIN_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
   worker:
     profiles: ['app']
     build:

@@ -2,10 +2,23 @@
 
 # Orbit
 
-Orbit is a privately deployed control centre for persistent AI representatives. An administrator can configure agents with their own missions, tools, knowledge, credentials, schedules, budgets, and permissions, then inspect and control their activity.
+A privately deployed control centre for persistent AI representatives, built with Next.js, Bun and PostgreSQL.
 
-Orbit runs a Next.js dashboard, a separate Bun worker, and PostgreSQL with pgvector. Docker and Railway provide deployment. See [architecture.md](architecture.md) for the product and architecture brief.
+The initial console supports administrator password login, paused agent creation, global outbound pause and audit history. Agent execution and provider connections are still upcoming.
 
-## Local start
+## Start locally
 
-Install [Bun](https://bun.sh/) 1.4.4 and Docker. Run `bun install` and `docker compose up -d postgres`, then `bun run dev` for the web app and worker. The dashboard is at `http://localhost:3000`.
+Install Bun 1.4.4 and Docker. Copy `.env.example` to `.env` and replace the administrator email and password (at least 16 characters).
+
+```sh
+bun install --frozen-lockfile
+docker compose up -d postgres
+bun run db:migrate
+bun run dev
+```
+
+Open http://localhost:3000.
+
+- [Development and testing](docs/development.md), including local development without login.
+- [Deployment and environment variables](docs/deployment.md).
+- [Architecture](architecture.md), [design](design.md) and [contributing](CONTRIBUTING.md).

@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="226 18 640 640" fill="none" role="img" aria-labelledby="orbit-title orbit-description">
+  <title id="orbit-title">Orbit — luminous orbital logo</title>
+  <desc id="orbit-description">A dimensional indigo planet wrapped in a luminous violet-to-cyan orbital ribbon, with a white satellite. All artwork uses editable SVG paths, gradients and filters.</desc>
+
+  <defs>
+    <!-- Background atmosphere. All lighting is constructed from SVG gradients. -->
+    <radialGradient id="background-base" cx="36%" cy="48%" r="80%">
+      <stop stop-color="#06051e"/><stop offset=".57" stop-color="#030313"/>
+      <stop offset="1" stop-color="#02020d"/>
+    </radialGradient>
+    <radialGradient id="ambient-left" gradientUnits="userSpaceOnUse" cx="-55" cy="724" r="690" gradientTransform="translate(-55 724) rotate(-26) scale(1 .7) translate(55 -724)">
+      <stop stop-color="#7542ff" stop-opacity=".88"/>
+      <stop offset=".25" stop-color="#5022d6" stop-opacity=".58"/>
+      <stop offset=".58" stop-color="#2a0d77" stop-opacity=".25"/>
+      <stop offset="1" stop-color="#200950" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ambient-right" gradientUnits="userSpaceOnUse" cx="2030" cy="-65" r="635" gradientTransform="translate(2030 -65) rotate(-18) scale(1 .6) translate(-2030 65)">
+      <stop stop-color="#6c24cc" stop-opacity=".65"/>
+      <stop offset=".4" stop-color="#351479" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#1c103d" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ambient-planet">
+      <stop offset=".35" stop-color="#371ce2" stop-opacity=".21"/>
+      <stop offset=".62" stop-color="#3517bd" stop-opacity=".13"/>
+      <stop offset="1" stop-color="#241072" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Planet: a nearly black core, softly lit limb, and fine atmospheric highlights. -->
+    <radialGradient id="planet-body" gradientUnits="userSpaceOnUse" cx="528" cy="303" r="253">
+      <stop stop-color="#030418"/><stop offset=".52" stop-color="#040720"/>
+      <stop offset=".75" stop-color="#080e33"/><stop offset=".9" stop-color="#11244f"/>
+      <stop offset="1" stop-color="#244b98"/>
+    </radialGradient>
+    <linearGradient id="planet-limb" gradientUnits="userSpaceOnUse" x1="415" y1="181" x2="694" y2="509">
+      <stop stop-color="#fcf1ff"/><stop offset=".16" stop-color="#a7a3ff"/>
+      <stop offset=".35" stop-color="#586fff"/><stop offset=".58" stop-color="#0b1c52"/>
+      <stop offset=".82" stop-color="#1e4dc8"/><stop offset="1" stop-color="#5b98ff"/>
+    </linearGradient>
+    <radialGradient id="limb-alpha">
+      <stop offset=".57" stop-color="white" stop-opacity="0"/>
+      <stop offset=".74" stop-color="white" stop-opacity=".035"/>
+      <stop offset=".86" stop-color="white" stop-opacity=".12"/>
+      <stop offset=".93" stop-color="white" stop-opacity=".38"/>
+      <stop offset=".978" stop-color="white" stop-opacity=".79"/>
+      <stop offset="1" stop-color="white"/>
+    </radialGradient>
+    <mask id="limb-mask" maskUnits="userSpaceOnUse" x="370" y="148" width="380" height="380">
+      <circle cx="560" cy="338" r="188" fill="url(#limb-alpha)"/>
+    </mask>
+    <clipPath id="planet-clip"><circle cx="560" cy="338" r="188"/></clipPath>
+    <!-- Reveal the whole ring outside the sphere, and only its front half inside it. -->
+    <mask id="orbit-depth" maskUnits="userSpaceOnUse" x="150" y="80" width="800" height="570">
+      <path d="M150 80H950V650H150Z" fill="white"/>
+      <circle cx="560" cy="338" r="188" fill="black"/>
+      <path d="M-1000 0H1000V1000H-1000Z" transform="translate(546 356) rotate(-22)" fill="white"/>
+    </mask>
+    <linearGradient id="upper-limb" gradientUnits="userSpaceOnUse" x1="378" y1="296" x2="732" y2="233">
+      <stop stop-color="#c480ff" stop-opacity="0"/><stop offset=".08" stop-color="#cf9cff" stop-opacity=".65"/><stop offset=".2" stop-color="#eee0ff"/>
+      <stop offset=".46" stop-color="#f1f9ff"/><stop offset=".68" stop-color="#91bdff"/>
+      <stop offset="1" stop-color="#517cfa" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="left-limb" gradientUnits="userSpaceOnUse" x1="378" y1="270" x2="470" y2="484">
+      <stop stop-color="#c180ff"/><stop offset=".4" stop-color="#a048ff"/>
+      <stop offset=".8" stop-color="#793cfc" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#3754fa" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="bottom-limb" gradientUnits="userSpaceOnUse" x1="434" y1="485" x2="727" y2="400">
+      <stop stop-color="#6557fb"/><stop offset=".47" stop-color="#6090ff"/>
+      <stop offset="1" stop-color="#1750d2" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="reflected-orbit" gradientUnits="userSpaceOnUse" x1="504" y1="291" x2="735" y2="228">
+      <stop stop-color="#1b2672" stop-opacity="0"/><stop offset=".5" stop-color="#3047b2" stop-opacity=".4"/>
+      <stop offset="1" stop-color="#74b8ff" stop-opacity=".88"/>
+    </linearGradient>
+
+    <!-- The orbit has a broad glass-like face, a soft bloom, and a fine luminous edge. -->
+    <linearGradient id="ring-back" gradientUnits="userSpaceOnUse" x1="-280" y1="0" x2="280" y2="0">
+      <stop stop-color="#a24bfa"/><stop offset=".13" stop-color="#b678ff"/>
+      <stop offset=".29" stop-color="#4021a0"/><stop offset=".46" stop-color="#283977"/>
+      <stop offset=".61" stop-color="#263da6"/><stop offset=".77" stop-color="#588ef9"/>
+      <stop offset=".91" stop-color="#9d8bff"/><stop offset="1" stop-color="#d5b9ff"/>
+    </linearGradient>
+    <linearGradient id="ring-front" gradientUnits="userSpaceOnUse" x1="-280" y1="0" x2="280" y2="0">
+      <stop stop-color="#a24bfa"/><stop offset=".13" stop-color="#b678ff"/>
+      <stop offset=".29" stop-color="#bcb4ff"/><stop offset=".46" stop-color="#86dfff"/>
+      <stop offset=".61" stop-color="#62edff"/><stop offset=".77" stop-color="#588ef9"/>
+      <stop offset=".91" stop-color="#9d8bff"/><stop offset="1" stop-color="#d5b9ff"/>
+    </linearGradient>
+    <radialGradient id="ring-sheen" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="scale(280 87)">
+      <stop offset=".65" stop-color="#132cbd" stop-opacity=".5"/>
+      <stop offset=".78" stop-color="#1922a4" stop-opacity=".3"/>
+      <stop offset=".88" stop-color="#e9faff" stop-opacity=".03"/>
+      <stop offset=".955" stop-color="#ebfcff" stop-opacity=".52"/>
+      <stop offset="1" stop-color="#fffaff" stop-opacity=".98"/>
+    </radialGradient>
+    <linearGradient id="ring-edge" gradientUnits="userSpaceOnUse" x1="-280" y1="0" x2="280" y2="0">
+      <stop stop-color="#edd1ff" stop-opacity=".5"/><stop offset=".22" stop-color="#fff6ff"/>
+      <stop offset=".48" stop-color="#e0ffff"/><stop offset=".68" stop-color="#b2faff"/>
+      <stop offset="1" stop-color="#faeaff" stop-opacity=".85"/>
+    </linearGradient>
+    <radialGradient id="satellite" cx="35%" cy="24%" r="84%">
+      <stop stop-color="#ffffff"/><stop offset=".48" stop-color="#f6f7ff"/>
+      <stop offset=".85" stop-color="#d8f1ff"/><stop offset="1" stop-color="#9ecfff"/>
+    </radialGradient>
+    <radialGradient id="satellite-aura">
+      <stop stop-color="#d1e8ff" stop-opacity=".7"/><stop offset=".23" stop-color="#8d8eff" stop-opacity=".55"/>
+      <stop offset=".5" stop-color="#6252ff" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#5144ec" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wordmark" gradientUnits="userSpaceOnUse" x1="1270" y1="218" x2="1310" y2="452">
+      <stop stop-color="#fffaff"/><stop offset=".43" stop-color="#f4f3ff"/>
+      <stop offset=".72" stop-color="#fcfcff"/><stop offset="1" stop-color="#e9e8ff"/>
+    </linearGradient>
+
+    <!-- Generous filter bounds prevent glow clipping at any display size. -->
+    <filter id="glow-wide" x="-60%" y="-130%" width="220%" height="360%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="23"/>
+    </filter>
+    <filter id="glow-soft" x="-35%" y="-100%" width="170%" height="300%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <filter id="glow-fine" x="-25%" y="-70%" width="150%" height="240%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+    <filter id="limb-soft" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+  </defs>
+
+  <g id="orbit-symbol">
+    <!-- A restrained halo preserves depth without washing out the silhouette. -->
+    <ellipse cx="551" cy="348" rx="355" ry="304" fill="url(#ambient-planet)"/>
+
+    <!-- Rear orbital ribbon is occluded by the opaque planet. -->
+    <g transform="translate(546 356) rotate(-22)">
+      <path d="M280 0 A280 87 0 1 1 -280 0 A280 87 0 1 1 280 0 Z M244 -6 A244 61 0 1 0 -244 -6 A244 61 0 1 0 244 -6 Z" fill="url(#ring-back)" fill-rule="evenodd" opacity=".35" filter="url(#glow-wide)"/>
+      <path d="M280 0 A280 87 0 1 1 -280 0 A280 87 0 1 1 280 0 Z M244 -6 A244 61 0 1 0 -244 -6 A244 61 0 1 0 244 -6 Z" fill="url(#ring-back)" fill-rule="evenodd" opacity=".4" filter="url(#glow-soft)"/>
+      <path d="M280 0 A280 87 0 1 1 -280 0 A280 87 0 1 1 280 0 Z M244 -6 A244 61 0 1 0 -244 -6 A244 61 0 1 0 244 -6 Z" fill="url(#ring-back)" fill-rule="evenodd"/>
+      <path d="M280 0 A280 87 0 1 1 -280 0 A280 87 0 1 1 280 0 Z M244 -6 A244 61 0 1 0 -244 -6 A244 61 0 1 0 244 -6 Z" fill="url(#ring-sheen)" fill-rule="evenodd"/>
+    </g>
+
+    <!-- Solid body and coloured atmospheric limb. -->
+    <circle cx="560" cy="338" r="188" fill="url(#planet-body)"/>
+    <circle cx="560" cy="338" r="188" fill="url(#planet-limb)" mask="url(#limb-mask)"/>
+    <g clip-path="url(#planet-clip)" fill="none">
+      <path d="M417.516 457.558 A186 186 0 0 1 475.558 172.273" stroke="url(#left-limb)" stroke-width="22" filter="url(#limb-soft)" opacity=".9"/>
+      <path d="M372.258 328.161 A188 188 0 0 1 727.509 252.650" stroke="url(#upper-limb)" stroke-width="18" filter="url(#glow-soft)" opacity=".7"/>
+      <path d="M734.580 405.015 A187 187 0 0 1 410.655 450.539" stroke="url(#bottom-limb)" stroke-width="13" filter="url(#glow-soft)" opacity=".58"/>
+    </g>
+    <path d="M372.557 328.177 A187.7 187.7 0 0 1 727.242 252.786" fill="none" stroke="url(#upper-limb)" stroke-width="1.7"/>
+    <path d="M731.198 414.222 A187.4 187.4 0 0 1 412.327 453.375" fill="none" stroke="url(#bottom-limb)" stroke-width="1.1" opacity=".4"/>
+
+    <!-- Soft reflected arc, rather than an intrusive full line over the sphere. -->
+    <path d="M500 294 C577 253 667 229 735 229" fill="none" stroke="url(#reflected-orbit)" stroke-width="5.6" stroke-linecap="round" clip-path="url(#planet-clip)"/>
+
+    <!-- A continuous ribbon with depth masking avoids seams at the orbital ends. -->
+    <g mask="url(#orbit-depth)">
+      <g transform="translate(546 356) rotate(-22)">
+        <path d="M280 0 A280 87 0 1 1 -280 0 A280 87 0 1 1 280 0 Z M244 -6 A244 61 0 1 0 -244 -6 A244 61 0 1 0 244 -6 Z" fill-rule="evenodd" fill="url(#ring-front)" opacity=".22" filter="url(#glow-wide)"/>
+        <path d="M280 0 A280 87 0 1 1 -280 0 A280 87 0 1 1 280 0 Z M244 -6 A244 61 0 1 0 -244 -6 A244 61 0 1 0 244 -6 Z" fill-rule="evenodd" fill="url(#ring-front)" opacity=".25" filter="url(#glow-soft)"/>
+        <path d="M280 0 A280 87 0 1 1 -280 0 A280 87 0 1 1 280 0 Z M244 -6 A244 61 0 1 0 -244 -6 A244 61 0 1 0 244 -6 Z" fill-rule="evenodd" fill="url(#ring-front)"/>
+        <path d="M280 0 A280 87 0 1 1 -280 0 A280 87 0 1 1 280 0 Z M244 -6 A244 61 0 1 0 -244 -6 A244 61 0 1 0 244 -6 Z" fill-rule="evenodd" fill="url(#ring-sheen)"/>
+        <ellipse rx="280" ry="87" fill="none" stroke="url(#ring-edge)" stroke-width="3" filter="url(#glow-fine)" opacity=".6"/>
+        <ellipse rx="280" ry="87" fill="none" stroke="url(#ring-edge)" stroke-width="1.6" opacity=".85"/>
+      </g>
+    </g>
+
+    <!-- Satellite node: vector sphere plus a separate optical bloom. -->
+    <circle cx="735" cy="228" r="78" fill="url(#satellite-aura)"/>
+    <circle cx="735" cy="228" r="27" fill="#a5bdff" opacity=".67" filter="url(#glow-soft)"/>
+    <circle cx="735" cy="228" r="24.6" fill="url(#satellite)" stroke="#fbfaff" stroke-width="1.2"/>
+  </g>
+</svg>

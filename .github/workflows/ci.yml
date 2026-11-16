@@ -39,7 +39,6 @@ jobs:
 
   full-validation:
     name: Full validation
-    if: github.base_ref == 'production' || github.ref == 'refs/heads/production' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -48,6 +47,14 @@ jobs:
         run: docker build -f docker/web.Dockerfile -t orbit-web:ci .
       - name: Build worker image
         run: docker build -f docker/worker.Dockerfile -t orbit-worker:ci .
+      - name: Smoke test worker container
+        run: |
+          docker run -d --name orbit-worker-ci orbit-worker:ci
+          trap 'docker rm -f orbit-worker-ci' EXIT
+          sleep 2
+          docker stop --time 5 orbit-worker-ci
+          docker logs orbit-worker-ci
+          test "$(docker inspect --format '{{.State.ExitCode}}' orbit-worker-ci)" = 0
       - name: Check Compose configuration
         run: docker compose config --quiet
       - name: Smoke test web container
@@ -56,9 +63,56 @@ jobs:
           trap 'docker stop orbit-web-ci' EXIT
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:3000/health; then
+              curl --fail --silent http://127.0.0.1:3000/icon.svg > /dev/null
+              curl --fail --silent http://127.0.0.1:3000/theme.js > /dev/null
               exit 0
             fi
             sleep 1
           done
           docker logs orbit-web-ci
           exit 1
+
+  integration:
+    name: PostgreSQL and browser integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: orbit
+          POSTGRES_PASSWORD: orbit_dev
+          POSTGRES_DB: orbit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orbit -d orbit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Apply test database migrations
+        run: bun run db:migrate
+        env:
+          DATABASE_URL: postgres://orbit:orbit_dev@localhost:5432/orbit_test
+      - name: Build web
+        run: bun run build
+      - name: Test auth configuration and production startup guards
+        run: bun run test:unit
+      - name: Install browser
+        run: bunx playwright install --with-deps chromium
+      - name: Test persistence, accessibility and interface states
+        run: bun run test:e2e
+      - name: Upload browser screenshots and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: browser-results
+          path: test-results/

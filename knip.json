@@ -1,0 +1,7 @@
+{
+  "workspaces": {
+    "apps/web": {
+      "entry": ["public/theme.js"]
+    }
+  }
+}

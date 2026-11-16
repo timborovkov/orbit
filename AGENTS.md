@@ -6,8 +6,13 @@ Explicit user instructions take precedence over this file.
 
 Read [architecture.md](architecture.md) before making product or infrastructure changes. Never directly change `architecture.md` without the user's explicit permission. If implementation reveals a proposed architectural change, describe it to the user and wait for permission before editing the brief. Implementation choices within the architecture can be made normally.
 
+## Interface work
+
+Before building or changing UI, read [design.md](design.md). Follow its current design direction and task-appropriate design skills. After implementing UI changes, capture established decisions, style guidance and verification in `design.md`, as requested by the user. Keep this as the single design reference rather than creating a duplicate uppercase file.
+
 ## Repository work
 
+- Use `@/*` for application imports. Prettier owns import ordering; run it after adding imports. Keep server actions grouped by feature and reusable authentication behaviour in `lib/auth.ts`.
 - Use Bun 1.4.4 for installation and scripts. The repository is a Bun workspace with a Next.js web app and a separate Bun worker.
 - Keep services aligned with the single web service, single worker service, and PostgreSQL deployment in the architecture. Do not add infrastructure for deferred capabilities prematurely.
 - Add environment variables, validation, schemas, and migrations when the feature that uses them is implemented. Do not create speculative examples or placeholders.
