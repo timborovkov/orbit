@@ -988,8 +988,7 @@ html {
 }
 button,
 a,
-select,
-summary {
+select {
   touch-action: manipulation;
 }
 fieldset {
@@ -1040,21 +1039,10 @@ textarea[aria-invalid='true'] {
 .agent-identity h3 {
   overflow-wrap: anywhere;
 }
-.mission-details {
-  margin-block-start: 4px;
+.agent-mission {
+  margin-block: 4px 0;
   color: var(--muted);
   font-size: 0.8125rem;
-}
-.mission-details summary {
-  cursor: pointer;
-  width: fit-content;
-  min-height: 28px;
-  padding-block: 4px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.mission-details p {
-  margin-block: 8px 0;
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1105,9 +1093,6 @@ textarea[aria-invalid='true'] {
   }
   .button-icon {
     min-width: 44px;
-  }
-  .mission-details summary {
-    min-height: 44px;
   }
 }
 @media (max-width: 540px) {
@@ -1222,9 +1207,6 @@ textarea[aria-invalid='true'] {
   }
   .agent-identity .avatar {
     display: none;
-  }
-  .mission-details summary {
-    min-height: 32px;
   }
   .button {
     white-space: normal;

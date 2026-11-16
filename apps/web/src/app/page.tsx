@@ -135,12 +135,7 @@ export default async function Home() {
                                 <h3>
                                   <bdi>{a.name}</bdi>
                                 </h3>
-                                <details className="mission-details">
-                                  <summary aria-label={`View mission for ${a.name}`}>
-                                    View mission
-                                  </summary>
-                                  <p>{a.mission}</p>
-                                </details>
+                                <p className="agent-mission">{a.mission}</p>
                               </div>
                             </div>
                           </td>

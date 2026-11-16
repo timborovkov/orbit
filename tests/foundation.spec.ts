@@ -212,8 +212,8 @@ test('worst-case content, full missions, text zoom, RTL and touch controls', asy
   await create(page, name.slice(0, 80), mission);
   await page.setViewportSize({ width: 320, height: 844 });
   await noOverflow(page);
-  await page.getByText('View mission', { exact: true }).click();
-  await expect(page.locator('.mission-details p')).toHaveText(mission.trim());
+  await expect(page.locator('.agent-mission')).toBeVisible();
+  await expect(page.locator('.agent-mission')).toHaveText(mission.trim());
   await noOverflow(page);
   await accessible(page);
   await page.screenshot({ path: 'test-results/stress-mobile.png', fullPage: true });
