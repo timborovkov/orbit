@@ -11,7 +11,7 @@
     "check": "bun run --filter @orbit/web typecheck && bun run --filter @orbit/worker typecheck"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "@types/bun": "1.4.4"
   }
 }
