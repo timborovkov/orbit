@@ -32,8 +32,8 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', '.bun-version') }}
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Typecheck web and worker
-        run: bun run check
+      - name: Validate code and require React Doctor 100
+        run: bun run validate
       - name: Build web
         run: bun run build
 
