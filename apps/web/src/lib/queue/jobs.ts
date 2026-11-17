@@ -316,12 +316,13 @@ export async function recoverExpiredLeases(store: Store = db()): Promise<JobReco
 /**
  * Cancel queued jobs for an agent. Pause cancels pending only so in-flight claims can finish;
  * stop also cancels claimed jobs so workers abort via heartbeat lease loss.
+ * Returns cancelled job ids so callers can interrupt linked retry-waiting runs.
  */
 export async function cancelPendingJobsForAgent(
   agentId: string,
   store: Store = db(),
   options: { includeClaimed?: boolean } = {},
-): Promise<number> {
+): Promise<string[]> {
   const now = new Date().toISOString();
   const statusFilter = options.includeClaimed
     ? sql`status IN ('pending', 'claimed')`
@@ -338,5 +339,6 @@ export async function cancelPendingJobsForAgent(
       AND payload->>'agentId' = ${agentId}
     RETURNING id
   `);
-  return Array.isArray(result) ? result.length : 0;
+  if (!Array.isArray(result)) return [];
+  return result.map((row) => asText(row.id));
 }

@@ -164,7 +164,9 @@ test('failJob does not overwrite a cancelled or reclaimed claim', async () => {
     types: [`${prefix}.stale-fail`],
   });
   expect(claimed.id).toBe(job.id);
-  expect(await cancelPendingJobsForAgent(agentId, db(), { includeClaimed: true })).toBe(1);
+  expect(await cancelPendingJobsForAgent(agentId, db(), { includeClaimed: true })).toEqual([
+    job.id,
+  ]);
   const failed = await failJob(claimed.id, `${prefix}-stale`, 'worker still failing');
   expect(failed).toBeNull();
   const [row] = await sqlClient()`SELECT status FROM jobs WHERE id = ${job.id}`;
@@ -189,7 +191,7 @@ test('pause cancels pending jobs only; stop also cancels claimed jobs', async ()
   });
   expect(claimed.id).toBe(claimedJob.id);
 
-  expect(await cancelPendingJobsForAgent(agentId, db())).toBe(1);
+  expect(await cancelPendingJobsForAgent(agentId, db())).toEqual([pending.id]);
   const [pendingRow] = await sqlClient()`SELECT status FROM jobs WHERE id = ${pending.id}`;
   const [claimedRow] =
     await sqlClient()`SELECT status, claimed_by FROM jobs WHERE id = ${claimedJob.id}`;
@@ -197,7 +199,9 @@ test('pause cancels pending jobs only; stop also cancels claimed jobs', async ()
   expect(claimedRow.status).toBe('claimed');
   expect(claimedRow.claimed_by).toBe(`${prefix}-pause`);
 
-  expect(await cancelPendingJobsForAgent(agentId, db(), { includeClaimed: true })).toBe(1);
+  expect(await cancelPendingJobsForAgent(agentId, db(), { includeClaimed: true })).toEqual([
+    claimedJob.id,
+  ]);
   const [stoppedRow] = await sqlClient()`SELECT status FROM jobs WHERE id = ${claimedJob.id}`;
   expect(stoppedRow.status).toBe('cancelled');
 });

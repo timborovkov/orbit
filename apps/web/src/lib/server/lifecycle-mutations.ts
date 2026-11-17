@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 import { budgetDefaults, budgetsSchema, type AgentBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
@@ -10,8 +10,8 @@ import {
   shouldCancelPendingJobs,
   type LifecycleState,
 } from '@/lib/lifecycle';
-import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
-import { agents, audit, runs } from '@/lib/schema';
+import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
+import { agents, audit } from '@/lib/schema';
 
 export async function persistLifecycle(actor: string, agentId: string, next: LifecycleState) {
   const parsed = lifecycleSchema.safeParse(next);
@@ -33,32 +33,17 @@ export async function persistLifecycle(actor: string, agentId: string, next: Lif
     });
 
     if (shouldCancelPendingJobs(parsed.data)) {
-      const includeClaimed = parsed.data === 'stopped';
-      const cancelled = await cancelPendingJobsForAgent(agentId, tx, { includeClaimed });
-      if (parsed.data === 'stopped') {
-        await tx
-          .update(runs)
-          .set({
-            status: 'interrupted',
-            finishedAt: new Date(),
-            deferReason: 'Agent stopped; pending work cancelled.',
-          })
-          .where(and(eq(runs.agentId, agentId), inArray(runs.status, ['queued', 'running'])));
-      } else if (parsed.data === 'paused') {
-        await tx
-          .update(runs)
-          .set({
-            status: 'interrupted',
-            finishedAt: new Date(),
-            deferReason: 'Agent paused; queued work cancelled.',
-          })
-          .where(and(eq(runs.agentId, agentId), eq(runs.status, 'queued')));
-      }
+      const cancelledIds = await cancelWorkForLifecycle(
+        agentId,
+        parsed.data === 'stopped' ? 'stopped' : 'paused',
+        tx,
+      );
       await tx.insert(audit).values({
         actor,
-        action: includeClaimed
-          ? `Cancelled ${cancelled} pending/claimed job(s) for agent ${agentId} on stopped`
-          : `Cancelled ${cancelled} pending job(s) for agent ${agentId} on paused`,
+        action:
+          parsed.data === 'stopped'
+            ? `Cancelled ${cancelledIds.length} pending/claimed job(s) for agent ${agentId} on stopped`
+            : `Cancelled ${cancelledIds.length} pending job(s) for agent ${agentId} on paused`,
       });
     }
 

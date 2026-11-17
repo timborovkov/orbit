@@ -3,6 +3,7 @@ import { afterAll, expect, test } from 'bun:test';
 import postgres from 'postgres';
 
 import { budgetDefaults, BudgetError, budgetViolationMessage } from '@/lib/budgets';
+import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import {
   enqueueSimulation,
@@ -237,6 +238,94 @@ test('finalizeExhaustedSimulationJob clears running runs after dead-letter', asy
   expect(done.status).toBe('failed');
   expect(done.defer_reason).toContain('retries exhausted');
   expect(done.result.error).toContain('retries exhausted');
+});
+
+test('pause interrupts retry-waiting runs linked to cancelled pending jobs', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const config = { ...preset.config, name: 'PauseRetry' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'PauseRetry',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
+  const [job] = await sql`
+    INSERT INTO jobs(type,payload,status,attempts,max_attempts,available_at)
+    VALUES (
+      ${SIMULATION_JOB_TYPE},
+      ${sql.json({ runId: 'pending', agentId: id })},
+      'pending',
+      1,
+      3,
+      now()
+    )
+    RETURNING id
+  `;
+  const [run] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token,job_id)
+    VALUES (
+      ${id},
+      ${version.id},
+      'retry-waiting',
+      'running',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      'test',
+      now() + interval '1 hour',
+      ${randomUUID()},
+      ${job.id}
+    )
+    RETURNING id
+  `;
+  await sql`UPDATE jobs SET payload = ${sql.json({ runId: run.id, agentId: id })} WHERE id = ${job.id}`;
+
+  // Claimed in-flight run should survive pause.
+  const [claimedJob] = await sql`
+    INSERT INTO jobs(type,payload,status,attempts,max_attempts,available_at,claimed_by,claimed_at,claim_expires_at)
+    VALUES (
+      ${SIMULATION_JOB_TYPE},
+      ${sql.json({ runId: 'claimed', agentId: id })},
+      'claimed',
+      1,
+      3,
+      now(),
+      'worker-active',
+      now(),
+      now() + interval '1 hour'
+    )
+    RETURNING id
+  `;
+  const [activeRun] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token,job_id)
+    VALUES (
+      ${id},
+      ${version.id},
+      'active-claim',
+      'running',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      'test',
+      now() + interval '1 hour',
+      ${randomUUID()},
+      ${claimedJob.id}
+    )
+    RETURNING id
+  `;
+
+  await sql`UPDATE agents SET lifecycle='paused' WHERE id=${id}`;
+  const cancelled = await cancelWorkForLifecycle(id, 'paused');
+  expect(cancelled).toEqual([job.id]);
+
+  const [retryWaiting] =
+    await sql`SELECT status, defer_reason FROM simulation_runs WHERE id=${run.id}`;
+  const [stillActive] = await sql`SELECT status FROM simulation_runs WHERE id=${activeRun.id}`;
+  const [cancelledJob] = await sql`SELECT status FROM jobs WHERE id=${job.id}`;
+  const [keptClaim] = await sql`SELECT status FROM jobs WHERE id=${claimedJob.id}`;
+  expect(retryWaiting.status).toBe('interrupted');
+  expect(retryWaiting.defer_reason).toContain('paused');
+  expect(stillActive.status).toBe('running');
+  expect(cancelledJob.status).toBe('cancelled');
+  expect(keptClaim.status).toBe('claimed');
 });
 
 test('finalizeOrphanedDeadSimulationRuns clears runs linked to dead jobs', async () => {

@@ -387,12 +387,14 @@ async function processSimulationRun(
     );
 
     const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
-    await updateIfOwned(run.id, executionToken, {
-      status: terminalStatus,
-      finishedAt: new Date(),
-      result,
-      deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
-    });
+    await retryableStore(() =>
+      updateIfOwned(run.id, executionToken, {
+        status: terminalStatus,
+        finishedAt: new Date(),
+        result,
+        deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
+      }),
+    );
   } catch (error) {
     // Leave the run non-terminal so a reclaimed job can resume after failJob retries.
     if (isRetryableInfrastructureError(error)) throw error;
