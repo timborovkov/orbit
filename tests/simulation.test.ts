@@ -169,6 +169,28 @@ describe('bounded manual simulation', () => {
       ),
     ).rejects.toBeInstanceOf(RetryableInfrastructureError);
   });
+  test('retryableStore wraps unexpected failures for policy persistence', async () => {
+    const { retryableStore, RetryableInfrastructureError, isRetryableInfrastructureError } =
+      await import('@/lib/runtime/errors');
+    const { BudgetError } = await import('@/lib/budgets');
+    await expect(
+      retryableStore(async () => {
+        throw new Error('connection reset');
+      }),
+    ).rejects.toBeInstanceOf(RetryableInfrastructureError);
+    await expect(
+      retryableStore(async () => {
+        throw new BudgetError('daily-requests');
+      }),
+    ).rejects.toBeInstanceOf(BudgetError);
+    try {
+      await retryableStore(async () => {
+        throw new Error('connection reset');
+      });
+    } catch (error) {
+      expect(isRetryableInfrastructureError(error)).toBe(true);
+    }
+  });
 });
 
 test('OpenRouter adapter sends credentials only as authorization and parses structured usage', async () => {

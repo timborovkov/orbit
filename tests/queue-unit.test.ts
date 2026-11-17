@@ -287,3 +287,42 @@ test('transient heartbeat errors do not abort; confirmed lease loss does', async
   await lostWorker.stop();
   expect(lostAbort).toBe(true);
 });
+
+test('dead-lettered jobs invoke onDeadLetter for domain finalization', async () => {
+  const { startJobWorker } = await import('@/lib/queue/worker');
+  const store = new FakeJobStore();
+  store.enqueue({
+    type: 'once',
+    payload: { runId: 'run-1' },
+    idempotencyKey: 'dl-1',
+    maxAttempts: 1,
+  });
+  const deadLetters: { id: string; error: string }[] = [];
+
+  const worker = startJobWorker({
+    workerId: 'w-dl',
+    pollMs: 15,
+    recoveryMs: 60_000,
+    leaseMs: 3_000,
+    claimJobs: async () => store.claim('w-dl', 'once', 3_000),
+    completeJob: async () => {
+      throw new Error('should not complete');
+    },
+    failJob: async (id, workerId, error) => store.fail(id, workerId, error),
+    recoverExpiredLeases: async () => 0,
+    heartbeat: async () => true,
+    onDeadLetter: async (job, error) => {
+      deadLetters.push({ id: job.id, error });
+    },
+    handlers: {
+      once: async () => {
+        throw new Error('quota reservation db blip');
+      },
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  await worker.stop();
+  expect(store.get('fake-1')?.status).toBe('dead');
+  expect(deadLetters).toEqual([{ id: 'fake-1', error: 'quota reservation db blip' }]);
+});

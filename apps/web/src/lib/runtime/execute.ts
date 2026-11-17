@@ -16,7 +16,7 @@ import { db } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { enqueueJob } from '@/lib/queue/jobs';
-import { isRetryableInfrastructureError } from '@/lib/runtime/errors';
+import { isRetryableInfrastructureError, retryableStore } from '@/lib/runtime/errors';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { simulate, type ModelCall, type SimulationResult } from '@/lib/runtime/simulation';
@@ -311,7 +311,7 @@ async function processSimulationRun(
         return response;
       },
       async (partial) => {
-        await updateIfOwned(run.id, executionToken, { result: partial });
+        await retryableStore(() => updateIfOwned(run.id, executionToken, { result: partial }));
       },
       {
         maxSteps: budgets.maxToolStepsPerRun,
@@ -325,7 +325,7 @@ async function processSimulationRun(
               effect: budgetViolationMessage(stepLimit),
             }));
           }
-          const ctx = await loadPolicyContext(run.agentId, run.actor, run.id);
+          const ctx = await retryableStore(() => loadPolicyContext(run.agentId, run.actor, run.id));
           if (!ctx) {
             return actions.map((action) => ({
               ...action,
@@ -335,17 +335,19 @@ async function processSimulationRun(
           }
           return await Promise.all(
             actions.map(async (action, index) => {
-              const decision = await authorizeAction(ctx, {
-                type: action.type,
-                payload: { draft: action.draft, reason: action.reason },
-                idempotencyKey: idempotencyKey([
-                  run.id,
-                  stage,
-                  action.type,
-                  String(index),
-                  action.reason,
-                ]),
-              });
+              const decision = await retryableStore(() =>
+                authorizeAction(ctx, {
+                  type: action.type,
+                  payload: { draft: action.draft, reason: action.reason },
+                  idempotencyKey: idempotencyKey([
+                    run.id,
+                    stage,
+                    action.type,
+                    String(index),
+                    action.reason,
+                  ]),
+                }),
+              );
               return {
                 ...action,
                 policy: decision.decision,
@@ -404,4 +406,29 @@ export async function processSimulationJob(
   const runId = typeof payload.runId === 'string' ? payload.runId : null;
   if (!runId) throw new Error('simulation.run payload missing runId');
   await processSimulationRun(runId, inference, signal);
+}
+
+/**
+ * When the queue dead-letters a simulation job, clear any non-terminal run so it no
+ * longer consumes concurrency and surfaces an inspectable failure.
+ */
+export async function finalizeExhaustedSimulationJob(
+  payload: Record<string, unknown>,
+  reason: string,
+) {
+  const runId = typeof payload.runId === 'string' ? payload.runId : null;
+  if (!runId) return;
+  const detail = reason.trim().slice(0, 200);
+  const inspectable = detail
+    ? `Job retries exhausted after repeated infrastructure failures (${detail}). Check database health and start a new run.`
+    : 'Job retries exhausted after repeated infrastructure failures. Check database health and start a new run.';
+  await db()
+    .update(runs)
+    .set({
+      status: 'failed',
+      finishedAt: new Date(),
+      deferReason: inspectable,
+      result: sql`jsonb_set(coalesce(${runs.result}, '{"steps":[],"actions":[],"error":null}'::jsonb), '{error}', to_jsonb(${inspectable}::text))`,
+    })
+    .where(and(eq(runs.id, runId), inArray(runs.status, ['queued', 'running'])));
 }

@@ -2,7 +2,11 @@ import { hostname } from 'node:os';
 
 import { closeDb } from '@/lib/db';
 import { startJobWorker } from '@/lib/queue/worker';
-import { processSimulationJob, SIMULATION_JOB_TYPE } from '@/lib/runtime/execute';
+import {
+  finalizeExhaustedSimulationJob,
+  processSimulationJob,
+  SIMULATION_JOB_TYPE,
+} from '@/lib/runtime/execute';
 import { workerEnvConfig } from '@/lib/worker-env';
 
 const config = workerEnvConfig();
@@ -26,6 +30,10 @@ const worker = startJobWorker({
     [SIMULATION_JOB_TYPE]: async (job, signal) => {
       await processSimulationJob(job.payload, undefined, signal);
     },
+  },
+  onDeadLetter: async (job, error) => {
+    if (job.type !== SIMULATION_JOB_TYPE) return;
+    await finalizeExhaustedSimulationJob(job.payload, error);
   },
   onError: (error) => {
     console.error('Worker job error', error instanceof Error ? error.message : error);

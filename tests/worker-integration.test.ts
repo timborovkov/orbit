@@ -4,7 +4,11 @@ import postgres from 'postgres';
 
 import { budgetDefaults, BudgetError, budgetViolationMessage } from '@/lib/budgets';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
-import { enqueueSimulation, processSimulationJob } from '@/lib/runtime/execute';
+import {
+  enqueueSimulation,
+  finalizeExhaustedSimulationJob,
+  processSimulationJob,
+} from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
 
 const databaseUrl = 'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
@@ -197,4 +201,37 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
   const [final] = await sql`SELECT status, result FROM simulation_runs WHERE id=${runId}`;
   expect(final.status).toBe('completed');
   expect(final.result.actions[0].draft).toBe('replacement draft');
+});
+
+test('finalizeExhaustedSimulationJob clears running runs after dead-letter', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const config = { ...preset.config, name: 'DeadLetter' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'DeadLetter',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
+  const [run] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token)
+    VALUES (
+      ${id},
+      ${version.id},
+      'stuck',
+      'running',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      'test',
+      now() + interval '1 hour',
+      ${randomUUID()}
+    )
+    RETURNING id
+  `;
+  await finalizeExhaustedSimulationJob({ runId: run.id }, 'quota reservation db blip');
+  const [done] =
+    await sql`SELECT status, defer_reason, result FROM simulation_runs WHERE id=${run.id}`;
+  expect(done.status).toBe('failed');
+  expect(done.defer_reason).toContain('retries exhausted');
+  expect(done.result.error).toContain('retries exhausted');
 });

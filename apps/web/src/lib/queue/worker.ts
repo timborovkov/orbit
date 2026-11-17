@@ -22,6 +22,8 @@ export interface WorkerOptions {
   leaseMs?: number;
   concurrency?: number;
   onError?: (error: unknown) => void;
+  /** Called when failJob dead-letters a job so callers can finalize linked domain state. */
+  onDeadLetter?: (job: JobRecord, error: string) => Promise<void>;
   /** Optional test seams; production uses the Postgres-backed helpers. */
   claimJobs?: typeof claimJobs;
   completeJob?: typeof completeJob;
@@ -127,25 +129,28 @@ export function startJobWorker(options: WorkerOptions) {
       },
       options.heartbeatIntervalMs ?? Math.max(1_000, Math.floor(leaseMs / 3)),
     );
+    const deadLetter = async (errorMessage: string) => {
+      try {
+        const failed = await fail(job.id, options.workerId, errorMessage);
+        if (failed?.status === 'dead' && options.onDeadLetter) {
+          await options.onDeadLetter(job, errorMessage);
+        }
+      } catch (failError: unknown) {
+        options.onError?.(failError);
+      }
+    };
+
     try {
       await handler(job, jobCancel.signal);
       try {
         await complete(job.id, options.workerId);
       } catch (error: unknown) {
         options.onError?.(error);
-        try {
-          await fail(job.id, options.workerId, 'Failed to mark job completed');
-        } catch (failError: unknown) {
-          options.onError?.(failError);
-        }
+        await deadLetter('Failed to mark job completed');
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Job failed';
-      try {
-        await fail(job.id, options.workerId, message);
-      } catch (failError: unknown) {
-        options.onError?.(failError);
-      }
+      await deadLetter(message);
       options.onError?.(error);
     } finally {
       clearInterval(heartbeat);
