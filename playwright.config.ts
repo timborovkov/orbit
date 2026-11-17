@@ -16,7 +16,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'bun run --filter @orbit/web start',
+    command: 'bun scripts/playwright-stack.ts',
     url: 'http://localhost:3000/login',
     reuseExistingServer: false,
     env: {
@@ -33,6 +33,7 @@ export default defineConfig({
       OPENROUTER_API_KEY: '',
       ORBIT_ADMIN_EMAIL: 'admin@example.com',
       ORBIT_ADMIN_PASSWORD: 'test-only-password-123456',
+      ORBIT_WORKER_ID: 'playwright-worker',
     },
   },
 });

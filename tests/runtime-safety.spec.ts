@@ -44,12 +44,15 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
     page.getByText('no external action adapters exist yet', { exact: false }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Set Paused', exact: true }).click();
-  await expect(page.getByText('Lifecycle set to paused.', { exact: false })).toBeVisible();
+  // Lifecycle form unmounts on success (Current replaces the button), so assert durable UI.
   await expect(page.locator('.agent-name-line .state-label')).toContainText('Paused');
+  await expect(page.locator('#lifecycle .lifecycle-option.selected h3')).toHaveText('Paused');
 
   await page.getByRole('button', { name: 'Set Live', exact: true }).click();
+  await expect(page.locator('.agent-name-line .state-label')).toContainText('Live');
+  await expect(page.locator('#lifecycle .lifecycle-option.selected h3')).toHaveText('Live');
   await expect(
-    page.getByText('No external action adapters exist yet', { exact: false }),
+    page.getByText('no external action adapters exist yet', { exact: false }),
   ).toBeVisible();
 
   await expect(page.getByRole('heading', { name: 'Budgets', exact: true })).toBeVisible();

@@ -72,11 +72,13 @@ interrupted. The most recent 50 runs are displayed with job status. Shared queue
 policy, budgets and runtime modules live under `apps/web/src/lib` and are imported by
 `apps/worker`.
 
-Validation: `bun run test:unit`, `bun run test:queue`, `bun run test:simulation`,
-`bun run test:integration` (migrated `orbit_test` PostgreSQL) and `bun run test:e2e`
-after a production build. Runtime tests inject deterministic inference and do not
-spend API credit. Browser tests exercise admin actions, lifecycle/budget controls,
-Access key-source states and persisted failure details.
+Validation: `bun run test:unit` for the light main-CI suite (including in-memory queue
+logic). Against a migrated `orbit_test` database run `bun run test:queue`,
+`bun run test:simulation` and `bun run test:integration`. After a production build,
+`bun run test:e2e` covers browser flows with the worker stack. Runtime tests inject
+deterministic inference and do not spend API credit. Browser tests exercise admin
+actions, lifecycle/budget controls, Access key-source states and persisted failure
+details.
 
 ### Agent profile pictures
 
