@@ -125,6 +125,17 @@ export async function simulate(
         'Inference failed or timed out. Check the OpenRouter key, model availability and provider balance, then start a new run.';
     }
   }
-  await checkpoint(result);
+  try {
+    await checkpoint(result);
+  } catch (error) {
+    // Ownership loss after an earlier cancel should not fail the caller; the token fence already
+    // prevents durable writes. Retryable store faults still propagate for queue retry.
+    if (isRetryableInfrastructureError(error)) throw error;
+    if (isBudgetError(error) && error.kind === 'cancelled') {
+      result.error ??= error.message;
+      return result;
+    }
+    throw error;
+  }
   return result;
 }

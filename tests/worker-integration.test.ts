@@ -153,11 +153,11 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
   const firstHold = new Promise<void>((resolve) => {
     firstGate = { continue: resolve };
   });
-  let firstFinished = false;
+  let firstCalls = 0;
 
   const first = processSimulationJob({ runId, agentId: id }, () => async () => {
-    await firstHold;
-    firstFinished = true;
+    firstCalls += 1;
+    if (firstCalls === 1) await firstHold;
     return {
       decision: {
         relevant: true,
@@ -199,7 +199,8 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
 
   firstGate.continue();
   await first;
-  expect(firstFinished).toBe(true);
+  // Lost ownership must cancel before a second paid model stage or policy writes.
+  expect(firstCalls).toBe(1);
   const [final] = await sql`SELECT status, result FROM simulation_runs WHERE id=${runId}`;
   expect(final.status).toBe('completed');
   expect(final.result.actions[0].draft).toBe('replacement draft');

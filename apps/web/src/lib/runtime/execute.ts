@@ -46,6 +46,26 @@ async function updateIfOwned(
     .returning({ id: runs.id });
 }
 
+/** Abort this claim when another worker has rotated the execution token. */
+async function assertOwned(runId: string, executionToken: string) {
+  const row = await retryableStore(async () =>
+    (
+      await db()
+        .select({ id: runs.id })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.id, runId),
+            eq(runs.status, 'running'),
+            eq(runs.executionToken, executionToken),
+          ),
+        )
+        .limit(1)
+    ).at(0),
+  );
+  if (!row) throw new BudgetError('cancelled');
+}
+
 async function expireStaleRuns(
   tx: Parameters<Parameters<ReturnType<typeof db>['transaction']>[0]>[0],
   agentId: string,
@@ -297,6 +317,8 @@ async function processSimulationRun(
         } catch {
           throw new BudgetError('cancelled');
         }
+        // Stop before paid inference / quota when another worker reclaimed this run.
+        await assertOwned(run.id, executionToken);
         // Check + reserve under an agent row lock so concurrent workers cannot both pass.
         await reserveRequestQuota(run.agentId);
         const response = await call(request);
@@ -308,15 +330,20 @@ async function processSimulationRun(
         } catch {
           throw new BudgetError('cancelled');
         }
+        await assertOwned(run.id, executionToken);
         return response;
       },
       async (partial) => {
-        await retryableStore(() => updateIfOwned(run.id, executionToken, { result: partial }));
+        const updated = await retryableStore(() =>
+          updateIfOwned(run.id, executionToken, { result: partial }),
+        );
+        if (!updated.length) throw new BudgetError('cancelled');
       },
       {
         maxSteps: budgets.maxToolStepsPerRun,
         signal,
         onActions: async (actions, partial, stage) => {
+          await assertOwned(run.id, executionToken);
           const stepLimit = checkToolStepLimit(partial.steps.length, budgets);
           if (stepLimit) {
             return actions.map((action) => ({

@@ -156,6 +156,23 @@ describe('bounded manual simulation', () => {
     expect(result.error).not.toBeNull();
     expect(result.actions).toEqual([]);
   });
+  test('ownership loss at checkpoint stops before the next model stage', async () => {
+    const { BudgetError } = await import('@/lib/budgets');
+    let calls = 0;
+    const result = await simulate(
+      config,
+      'question',
+      async () => {
+        calls += 1;
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async () => {
+        throw new BudgetError('cancelled');
+      },
+    );
+    expect(calls).toBe(1);
+    expect(result.error).toBe(new BudgetError('cancelled').message);
+  });
   test('retryable infrastructure errors propagate for queue retry', async () => {
     const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
     await expect(
