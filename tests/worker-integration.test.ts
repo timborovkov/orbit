@@ -4,7 +4,13 @@ import postgres from 'postgres';
 
 import { budgetDefaults, BudgetError, budgetViolationMessage } from '@/lib/budgets';
 import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
-import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
+import { recordConsent } from '@/lib/policy/consent';
+import {
+  authorizeAction,
+  loadPolicyContext,
+  reserveRequestQuota,
+  reviewProposedAction,
+} from '@/lib/policy/gateway';
 import {
   enqueueSimulation,
   finalizeExhaustedSimulationJob,
@@ -24,6 +30,7 @@ process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
 
 const sql = postgres(databaseUrl);
 const ids: string[] = [];
+const uncapped = { ...budgetDefaults, dailySpendCents: null, monthlySpendCents: null };
 
 afterAll(async () => {
   for (const id of ids) {
@@ -46,7 +53,7 @@ test('web enqueue and worker process complete a simulation end to end', async ()
   const config = { ...preset.config, name: 'Integration' };
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
-    VALUES (${id},'Integration',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+    VALUES (${id},'Integration',${config.mission},'shadow',${sql.json(uncapped)},${sql.json([])})
   `;
   const [version] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
@@ -91,7 +98,7 @@ test('policy gateway persists deny for global pause', async () => {
   ids.push(id);
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
-    VALUES (${id},'PausedGate','Mission','shadow',${sql.json(budgetDefaults)},${sql.json([])})
+    VALUES (${id},'PausedGate','Mission','shadow',${sql.json(uncapped)},${sql.json([])})
   `;
   await sql`UPDATE controls SET paused=true`;
   const ctx = await loadPolicyContext(id, 'admin@example.com');
@@ -108,7 +115,7 @@ test('policy gateway persists deny for global pause', async () => {
 test('reserveRequestQuota serializes concurrent reservations under the hard cap', async () => {
   const id = randomUUID();
   ids.push(id);
-  const budgets = { ...budgetDefaults, dailyRequests: 1, monthlyRequests: 1 };
+  const budgets = { ...uncapped, dailyRequests: 1, monthlyRequests: 1 };
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
     VALUES (${id},'QuotaRace','Mission','shadow',${sql.json(budgets)},${sql.json([])})
@@ -134,7 +141,7 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
   const config = { ...preset.config, name: 'TokenFence' };
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
-    VALUES (${id},'TokenFence',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+    VALUES (${id},'TokenFence',${config.mission},'shadow',${sql.json(uncapped)},${sql.json([])})
   `;
   const [version] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
@@ -211,7 +218,7 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
   const id = randomUUID();
   ids.push(id);
   const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
-  const budgets = { ...budgetDefaults, maxToolStepsPerRun: 2, runDeadlineSeconds: 120 };
+  const budgets = { ...uncapped, maxToolStepsPerRun: 2, runDeadlineSeconds: 120 };
   const config = { ...preset.config, name: 'StepResume' };
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
@@ -285,7 +292,7 @@ test('retries preserve the original run deadline', async () => {
   const id = randomUUID();
   ids.push(id);
   const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
-  const budgets = { ...budgetDefaults, runDeadlineSeconds: 30 };
+  const budgets = { ...uncapped, runDeadlineSeconds: 30 };
   const config = { ...preset.config, name: 'DeadlineRetry' };
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
@@ -339,7 +346,7 @@ test('finalizeExhaustedSimulationJob clears running runs after dead-letter', asy
   const config = { ...preset.config, name: 'DeadLetter' };
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
-    VALUES (${id},'DeadLetter',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+    VALUES (${id},'DeadLetter',${config.mission},'shadow',${sql.json(uncapped)},${sql.json([])})
   `;
   const [version] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
@@ -372,7 +379,7 @@ test('pause interrupts retry-waiting runs linked to cancelled pending jobs', asy
   const config = { ...preset.config, name: 'PauseRetry' };
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
-    VALUES (${id},'PauseRetry',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+    VALUES (${id},'PauseRetry',${config.mission},'shadow',${sql.json(uncapped)},${sql.json([])})
   `;
   const [version] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
@@ -460,7 +467,7 @@ test('finalizeOrphanedDeadSimulationRuns clears runs linked to dead jobs', async
   const config = { ...preset.config, name: 'OrphanDead' };
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
-    VALUES (${id},'OrphanDead',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+    VALUES (${id},'OrphanDead',${config.mission},'shadow',${sql.json(uncapped)},${sql.json([])})
   `;
   const [version] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
@@ -500,4 +507,185 @@ test('finalizeOrphanedDeadSimulationRuns clears runs linked to dead jobs', async
   expect(done.status).toBe('failed');
   expect(done.defer_reason).toContain('retries exhausted');
   expect(done.result.error).toContain('reconciled');
+});
+
+test('OpenRouter spend reservations serialize and missing prices require both caps off', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const capped = { ...budgetDefaults, dailySpendCents: 1, monthlySpendCents: null };
+  await sql`INSERT INTO agents(id,name,mission,budgets) VALUES (${id}, 'Spend', 'Fixture', ${sql.json(capped)})`;
+  await expect(reserveRequestQuota(id)).rejects.toThrow(budgetViolationMessage('unknown-price'));
+  const concurrent = await Promise.allSettled([
+    reserveRequestQuota(id, 8000),
+    reserveRequestQuota(id, 8000),
+  ]);
+  const admitted = concurrent.find((result) => result.status === 'fulfilled');
+  const denied = concurrent.find((result) => result.status === 'rejected');
+  expect(admitted?.status).toBe('fulfilled');
+  expect(denied?.reason).toBeInstanceOf(BudgetError);
+  expect(denied?.reason.message).toBe(budgetViolationMessage('daily-spend'));
+
+  await admitted?.value(1000);
+  const settle = await reserveRequestQuota(id, 9000);
+  await settle(2000);
+  expect([
+    ...(await sql`SELECT requests, spend_micros::int FROM usage_counters WHERE agent_id=${id}`),
+  ]).toEqual([
+    { requests: 2, spend_micros: 3000 },
+    { requests: 2, spend_micros: 3000 },
+  ]);
+
+  await sql`UPDATE agents SET budgets=${sql.json({ ...uncapped, dailyRequests: 3 })} WHERE id=${id}`;
+  await reserveRequestQuota(id);
+  await expect(reserveRequestQuota(id, 0)).rejects.toThrow(
+    budgetViolationMessage('daily-requests'),
+  );
+});
+
+test('Stop wins against a model request waiting to reserve quota', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  await sql`INSERT INTO agents(id,name,mission,budgets) VALUES (${id},'Stop while reserving','Fixture',${sql.json(budgetDefaults)})`;
+  const [version] = await sql`
+    INSERT INTO agent_configurations(agent_id,version,config,actor)
+    SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id
+  `;
+  const queued = await enqueueSimulation({
+    actor: 'test',
+    agentId: id,
+    configurationId: version.id,
+    input: 'Fixture',
+  });
+  const runId = queued.runId!;
+  const canReserve = Promise.withResolvers<void>();
+  const reachedQuote = Promise.withResolvers<void>();
+  let providerCalls = 0;
+  const [ready] = await sql`SELECT id FROM jobs WHERE id=${queued.jobId!}`;
+  expect(ready.id).toBe(queued.jobId);
+  await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'stop-fixture')})`;
+  const execute = processSimulationJob({ runId }, () =>
+    Object.assign(
+      async () => {
+        providerCalls++;
+        throw new Error('Unexpected inference');
+      },
+      {
+        quote: async () => {
+          reachedQuote.resolve();
+          await canReserve.promise;
+          return undefined;
+        },
+      },
+    ),
+  );
+  await reachedQuote.promise;
+  try {
+    await sql.begin(async (tx) => {
+      await tx`SELECT id FROM agents WHERE id=${id} FOR UPDATE`;
+      canReserve.resolve();
+      let waiting = false;
+      for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+        const [state] = await sql`SELECT EXISTS (
+          SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+            AND wait_event_type='Lock' AND query ILIKE '%from "agents"%for update'
+        ) AS waiting`;
+        waiting = state.waiting;
+        if (!waiting) await Bun.sleep(10);
+      }
+      expect(waiting).toBe(true);
+      await tx`UPDATE agents SET lifecycle='stopped' WHERE id=${id}`;
+      await tx`UPDATE simulation_runs SET status='interrupted' WHERE id=${runId}`;
+    });
+  } finally {
+    canReserve.resolve();
+    await execute;
+  }
+  expect(providerCalls).toBe(0);
+  expect(await sql`SELECT requests FROM usage_counters WHERE agent_id=${id}`).toHaveLength(0);
+  const [run] = await sql`SELECT status FROM simulation_runs WHERE id=${runId}`;
+  expect(run.status).toBe('interrupted');
+});
+
+test('simulated introductions enforce scoped consent before and after human review', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  await sql`UPDATE controls SET paused=false`;
+  await sql`INSERT INTO agents(id,name,mission,budgets) VALUES (${id}, 'Consent', 'Fixture', ${sql.json(uncapped)})`;
+  const [version] = await sql`
+    INSERT INTO agent_configurations(agent_id,version,config,actor)
+    SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id
+  `;
+  await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'consent-fixture')})`;
+  const actor = 'test@example.com';
+  const run = async () => {
+    const queued = await enqueueSimulation({
+      actor,
+      agentId: id,
+      configurationId: version.id,
+      input: 'Synthetic introduction',
+      recipients: ['fixture-a', 'fixture-b'],
+    });
+    await processSimulationJob({ runId: queued.runId! }, () => async () => ({
+      decision: {
+        relevant: true,
+        priority: 0.5,
+        reason: 'Fixture',
+        actions: [{ type: 'introduce', reason: 'Fixture', draft: null }],
+      },
+      inputTokens: 4,
+      outputTokens: 5,
+    }));
+    const [stored] = await sql`SELECT result FROM simulation_runs WHERE id=${queued.runId!}`;
+    return { runId: queued.runId!, proposal: stored.result.actions[0] };
+  };
+  const consent = (
+    recipient: string,
+    granted: boolean,
+    scope: 'introduce' | 'escalate' = 'introduce',
+  ) =>
+    recordConsent({
+      actor,
+      agentId: id,
+      recipient,
+      granted,
+      scope,
+      evidence: 'Synthetic evidence reference',
+    });
+
+  await consent('fixture-a', true);
+  await consent('fixture-b', true, 'escalate');
+  expect((await run()).proposal.policy).toBe('deny');
+  await consent('fixture-b', true);
+  const proposed = await run();
+  expect(proposed.proposal.policy).toBe('needs-approval');
+  await consent('fixture-b', false);
+  expect(
+    await reviewProposedAction(actor, id, proposed.proposal.intentId, 'approved'),
+  ).toMatchObject({ error: expect.stringContaining('consent') });
+  await consent('fixture-b', true);
+  expect(
+    await reviewProposedAction(actor, id, proposed.proposal.intentId, 'approved'),
+  ).toMatchObject({ message: expect.stringContaining('approved') });
+
+  const [intent] = await sql`SELECT * FROM action_intents WHERE id=${proposed.proposal.intentId}`;
+  expect(intent.review_status).toBe('approved');
+  expect(intent.decision).toBe('suppressed');
+  await consent('fixture-b', false);
+  const ctx = (await loadPolicyContext(id, actor, proposed.runId))!;
+  expect(
+    await authorizeAction(ctx, {
+      type: 'introduce',
+      idempotencyKey: intent.idempotency_key,
+      recipients: intent.recipients,
+    }),
+  ).toMatchObject({ decision: 'deny' });
+  const policyLog =
+    await sql`SELECT decision, actor FROM policy_decisions WHERE intent_id=${intent.id} ORDER BY created_at`;
+  expect(policyLog.map((row) => row.decision)).toEqual([
+    'needs-approval',
+    'deny',
+    'suppressed',
+    'deny',
+  ]);
+  expect(policyLog.every((row) => row.actor === actor)).toBe(true);
 });

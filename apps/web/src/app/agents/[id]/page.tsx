@@ -9,6 +9,7 @@ import { BudgetSettings } from '@/app/budget-settings';
 import { ConfigFields } from '@/app/config-fields';
 import { LifecycleControls } from '@/app/lifecycle-controls';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
+import { ConsentSettings, ProposalReview, ReviewSettings } from '@/app/policy-settings';
 import { ProfilePictureEditor } from '@/app/profile-picture-editor';
 import { RunContent } from '@/app/run-content';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
@@ -29,7 +30,8 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   if (!z.uuid().safeParse(id).success) notFound();
   const workspace = await getAgentWorkspace(id);
   if (!workspace) notFound();
-  const { agent, versions, hasAgentCredential, keySource, history, current } = workspace;
+  const { agent, versions, hasAgentCredential, keySource, history, current, reviews, consents } =
+    workspace;
   const lifecycle = agent.lifecycle;
   const viewedHistory = history;
   const latest = history.at(0);
@@ -67,6 +69,8 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     <div className="access-stack">
       <LifecycleControls agentId={id} lifecycle={lifecycle} />
       <BudgetSettings agentId={id} budgets={agent.budgets} />
+      <ReviewSettings agentId={id} approvalTools={agent.approvalTools} />
+      <ConsentSettings agentId={id} consents={consents} />
       <AccessPanel
         agentId={id}
         agentName={agent.name}
@@ -75,6 +79,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       />
     </div>
   );
+  const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;
   const playground = (
     <div className="playground-grid">
       <section id="simulation" className="simulation-composer">
@@ -104,6 +109,22 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
             maxLength={16000}
             rows={9}
           />
+          <details className="policy-recipients">
+            <summary>Recipients for consent checks</summary>
+            <WorkspaceField
+              id="run-recipient"
+              name="recipient"
+              label="Recipient ID"
+              maxLength={120}
+            />
+            <WorkspaceField
+              id="run-other-recipient"
+              name="otherRecipient"
+              label="Second recipient ID (introductions)"
+              maxLength={120}
+            />
+            <p className="field-hint">Use the same IDs as the consent records in Access.</p>
+          </details>
         </WorkspaceForm>
         <p className="simulation-note">
           <ShieldCheck size={15} aria-hidden="true" />
@@ -234,6 +255,12 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
             { id: 'configure', label: 'Configuration', content: configuration },
             { id: 'playground', label: 'Playground', content: playground },
             { id: 'history', label: 'History', count: history.length, content: historyPanel },
+            {
+              id: 'approvals',
+              label: 'Approvals',
+              count: reviews.filter((review) => review.status === 'pending').length,
+              content: approvalQueue,
+            },
             { id: 'access', label: 'Access', content: access },
           ]}
         />

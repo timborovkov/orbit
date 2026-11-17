@@ -339,7 +339,7 @@ test('dead-lettered jobs invoke onDeadLetter for domain finalization', async () 
   await new Promise((resolve) => setTimeout(resolve, 80));
   await worker.stop();
   expect(store.get('fake-1')?.status).toBe('dead');
-  expect(deadLetters).toEqual([{ id: 'fake-1', error: 'quota reservation db blip' }]);
+  expect(deadLetters).toEqual([{ id: 'fake-1', error: 'Worker could not process the job' }]);
 });
 
 test('lease recovery dead-letters invoke onDeadLetter', async () => {

@@ -43,23 +43,49 @@ jobs:
     name: Full validation
     if: github.base_ref == 'production' || github.ref == 'refs/heads/production' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: orbit
+          POSTGRES_PASSWORD: orbit_dev
+          POSTGRES_DB: orbit_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orbit -d orbit_smoke"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Install smoke test dependencies
+        run: bun install --frozen-lockfile
+      - name: Migrate worker smoke database
+        run: bun run db:migrate
+        env:
+          DATABASE_URL: postgres://orbit:orbit_dev@localhost:5432/orbit_smoke
       - name: Build web image
         run: docker build -f docker/web.Dockerfile -t orbit-web:ci .
       - name: Build worker image
         run: docker build -f docker/worker.Dockerfile -t orbit-worker:ci .
-      - name: Smoke test worker container
+      - name: Process a fixture with the worker image
+        env:
+          DATABASE_URL: postgres://orbit:orbit_dev@127.0.0.1:5432/orbit_smoke
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: |
+          trap 'docker logs orbit-worker-ci; docker rm -f orbit-worker-ci' EXIT
           docker run -d --name orbit-worker-ci \
-            -e DATABASE_URL=postgres://orbit:orbit@127.0.0.1:5432/orbit \
-            -e ORBIT_WORKER_ID=ci-smoke \
+            --network "container:$POSTGRES_CONTAINER" \
+            -e DATABASE_URL -e ORBIT_WORKER_ID=ci-smoke \
             orbit-worker:ci
-          trap 'docker rm -f orbit-worker-ci' EXIT
-          sleep 2
-          docker stop --time 5 orbit-worker-ci
-          docker logs orbit-worker-ci
+          bun scripts/worker-smoke.ts
+          docker stop --timeout 10 orbit-worker-ci
           test "$(docker inspect --format '{{.State.ExitCode}}' orbit-worker-ci)" = 0
       - name: Check Compose configuration
         run: docker compose config --quiet

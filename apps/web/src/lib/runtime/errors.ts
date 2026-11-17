@@ -23,8 +23,6 @@ export async function retryableStore<T>(op: () => Promise<T>): Promise<T> {
     return await op();
   } catch (error) {
     if (isBudgetError(error) || isRetryableInfrastructureError(error)) throw error;
-    throw new RetryableInfrastructureError(
-      error instanceof Error ? error.message : 'Transient infrastructure failure',
-    );
+    throw new RetryableInfrastructureError();
   }
 }

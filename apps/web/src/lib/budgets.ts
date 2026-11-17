@@ -14,8 +14,8 @@ export const budgetDefaults = {
 } as const;
 
 export const budgetsSchema = z.object({
-  dailySpendCents: z.number().int().min(0).max(1_000_000),
-  monthlySpendCents: z.number().int().min(0).max(10_000_000),
+  dailySpendCents: z.number().int().min(0).max(1_000_000).nullable(),
+  monthlySpendCents: z.number().int().min(0).max(10_000_000).nullable(),
   dailyRequests: z.number().int().min(0).max(1_000_000),
   monthlyRequests: z.number().int().min(0).max(10_000_000),
   dailyOutboundActions: z.number().int().min(0).max(1_000_000),
@@ -31,12 +31,12 @@ export const budgetFields = [
   {
     key: 'dailySpendCents',
     label: 'Daily OpenRouter spend cap (USD cents)',
-    hint: 'Reject new model calls once estimated spend reaches this cap.',
+    hint: 'Combine actual costs and reserved calls per UTC day.',
   },
   {
     key: 'monthlySpendCents',
     label: 'Monthly OpenRouter spend cap (USD cents)',
-    hint: 'Reject new model calls once estimated monthly spend reaches this cap.',
+    hint: 'Combine actual costs and reserved calls per UTC month.',
   },
   {
     key: 'dailyRequests',
@@ -83,14 +83,8 @@ export function parseBudgets(value: unknown): AgentBudgets {
   return budgetsSchema.parse({ ...budgetDefaults, ...(value as object) });
 }
 
-/**
- * OpenRouter does not always return monetary cost. When pricing is unavailable we
- * record token counts only and treat spend as 0 for budget enforcement, while still
- * applying request, concurrency, step and deadline caps. Documented in architecture.md.
- */
-export function estimateSpendMicros(inputTokens: number, outputTokens: number, microsPerToken = 0) {
-  if (microsPerToken <= 0) return BigInt(0);
-  return BigInt(Math.max(0, inputTokens) + Math.max(0, outputTokens)) * BigInt(microsPerToken);
+export function hasSpendCap(budgets: AgentBudgets) {
+  return budgets.dailySpendCents !== null || budgets.monthlySpendCents !== null;
 }
 
 export interface BudgetSnapshot {
@@ -101,6 +95,7 @@ export interface BudgetSnapshot {
 }
 
 export type BudgetViolation =
+  | 'unknown-price'
   | 'daily-spend'
   | 'monthly-spend'
   | 'daily-requests'
@@ -111,14 +106,22 @@ export type BudgetViolation =
   | 'tool-steps'
   | 'run-deadline';
 
-export function checkRequestBudgets(snapshot: BudgetSnapshot): BudgetViolation | null {
+export function checkRequestBudgets(
+  snapshot: BudgetSnapshot,
+  reserveMicros = BigInt(0),
+): BudgetViolation | null {
   const { budgets, day, month, activeRuns } = snapshot;
   if (activeRuns >= budgets.maxConcurrentRuns) return 'concurrency';
   if (day.requests >= budgets.dailyRequests) return 'daily-requests';
   if (month.requests >= budgets.monthlyRequests) return 'monthly-requests';
-  if (day.spendMicros >= BigInt(budgets.dailySpendCents) * BigInt(10_000)) return 'daily-spend';
-  if (month.spendMicros >= BigInt(budgets.monthlySpendCents) * BigInt(10_000))
-    return 'monthly-spend';
+  for (const [period, used, cap] of [
+    ['daily-spend', day.spendMicros, budgets.dailySpendCents],
+    ['monthly-spend', month.spendMicros, budgets.monthlySpendCents],
+  ] as const) {
+    if (cap === null) continue;
+    const limit = BigInt(cap) * BigInt(10_000);
+    if (used >= limit || used + reserveMicros > limit) return period;
+  }
   return null;
 }
 
@@ -145,6 +148,8 @@ export function checkRunDeadline(
 
 export function budgetViolationMessage(violation: BudgetViolation): string {
   switch (violation) {
+    case 'unknown-price':
+      return 'OpenRouter pricing could not be verified for this model. Choose a priced model or turn off both spend caps.';
     case 'daily-spend':
       return 'Daily OpenRouter spend cap reached. Work was deferred.';
     case 'monthly-spend':
@@ -188,6 +193,7 @@ export function isBudgetError(error: unknown): error is BudgetError {
 const trustedBudgetMessages = new Set<string>([
   ...(
     [
+      'unknown-price',
       'daily-spend',
       'monthly-spend',
       'daily-requests',

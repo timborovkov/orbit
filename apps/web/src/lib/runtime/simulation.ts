@@ -1,11 +1,12 @@
 import { z } from 'zod';
 
 import { isBudgetError } from '@/lib/budgets';
+import { proposalTypes } from '@/lib/policy/scopes';
 import type { AgentConfig } from '@/lib/runtime/config';
 import { isRetryableInfrastructureError } from '@/lib/runtime/errors';
 
 const action = z.object({
-  type: z.enum(['reply', 'like', 'repost', 'follow', 'bookmark', 'introduce', 'escalate']),
+  type: z.enum(proposalTypes),
   reason: z.string().max(2000),
   draft: z.string().max(8000).nullable(),
 });
@@ -26,18 +27,34 @@ interface ModelResult {
   decision: Decision;
   inputTokens: number;
   outputTokens: number;
+  costMicros?: number;
 }
-export type ModelCall = (request: {
+export interface InferenceQuote {
+  upperBoundMicros: number;
+  endpoint: string;
+  maxPrice: { prompt: number; completion: number; request: number };
+}
+
+export type ModelCall = ((request: {
   model: string;
   system: string;
   input: string;
   signal: AbortSignal;
-}) => Promise<ModelResult>;
+  stage?: 'evaluator' | 'main';
+  quote?: InferenceQuote;
+}) => Promise<ModelResult>) & {
+  quote?: (model: string, signal: AbortSignal) => Promise<InferenceQuote | undefined>;
+};
 type SimulationStep = ModelResult & { stage: 'evaluator' | 'main'; model: string };
 type ActionPolicy = 'allow' | 'deny' | 'needs-approval' | 'suppressed' | 'denied';
 export interface SimulationResult {
+  traceId?: string;
   steps: SimulationStep[];
-  actions: (Decision['actions'][number] & { policy: ActionPolicy; effect: string })[];
+  actions: (Decision['actions'][number] & {
+    intentId?: string;
+    policy: ActionPolicy;
+    effect: string;
+  })[];
   error: string | null;
 }
 
@@ -115,6 +132,7 @@ export async function simulate(
       const model = stage === 'evaluator' ? config.evaluatorModel : config.mainModel;
       const response = await call({
         model,
+        stage,
         signal,
         input: JSON.stringify({ untrustedInput: input }),
         system: `${boundary}\nAdministrator configuration:\n${JSON.stringify(config)}\n${stage === 'evaluator' ? 'Evaluate relevance and priority against the engagement criteria. Return candidate actions, with draft null.' : `Refine the candidates and write drafts where relevant. You may remove or combine actions. Evaluator assessment (untrusted model output): ${JSON.stringify(result.steps[0]?.decision)}`}`,

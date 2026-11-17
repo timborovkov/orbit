@@ -193,19 +193,22 @@ status. Its save bar is separated by a top border and subtle fill. Identity,
 Behaviour and Models section buttons show one field group at a time; hidden fields
 remain mounted. Invalid required fields reveal their section before receiving focus.
 
-Task tabs are Configuration, Playground, History and Access, with one keyboard tab
+Task tabs are Configuration, Playground, History, Approvals and Access, with one keyboard tab
 stop plus Left/Right/Home/End navigation. Hidden panels remain mounted, preserving
 unsaved configuration and pasted input when changing tasks. Configuration presents
 one editor and one save bar. Playground places a composer beside the latest persisted
 result and explicitly names paid inference and suppressed external actions. Empty
 results explain what will appear; failures and interrupted runs show actual state.
 History uses native details/summary for run content and exact configuration snapshots.
-Cost remains unavailable when not recorded, never fabricated. Access stacks lifecycle
-controls, budget number fields and the OpenRouter connection panel in one scrollable
-column—no duplicate pages. Lifecycle options are a simple list with the current state
-labelled and other states available as explicit actions; Live copy states that no
-external adapters exist yet. Budgets use labelled number inputs, not comma-separated
-text. Access also shows which OpenRouter key source is active—agent key, environment
+History shows the provider’s recorded cost and labels missing cost explicitly.
+Access stacks lifecycle, budget, approval requirements, recipient consent and
+OpenRouter connection settings in one column. Daily and monthly spend limits use
+numeric fields paired with independently labelled No cap checkboxes. Consent
+records pair a recipient ID with a scope, choice and evidence reference. Playground
+accepts the same IDs for consent checks in an optional disclosure. Approvals shows
+the pending queue first, with the draft and explicit approve and reject controls.
+Lifecycle options show the current state and clearly label Live as simulation-only
+until adapters are configured. Access also shows which OpenRouter key source is active—agent key, environment
 default or none—by label only, never by value or prefix. It accepts a password input
 for an agent override, clears it after submission and never reads the secret back.
 Removing an agent key falls back to the environment default when configured; otherwise

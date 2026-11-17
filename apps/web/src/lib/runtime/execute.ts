@@ -7,6 +7,7 @@ import {
   checkRequestBudgets,
   checkRunDeadline,
   checkToolStepLimit,
+  hasSpendCap,
   isBudgetError,
   isTrustedBudgetMessage,
   parseBudgets,
@@ -20,6 +21,7 @@ import { isRetryableInfrastructureError, retryableStore } from '@/lib/runtime/er
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { simulate, type ModelCall, type SimulationResult } from '@/lib/runtime/simulation';
+import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
 import { agents, configurations, credentials, jobs, runs, usageCounters } from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
@@ -105,11 +107,13 @@ export async function enqueueSimulation({
   agentId,
   configurationId,
   input,
+  recipients = [],
 }: {
   actor: string;
   agentId: string;
   configurationId: string;
   input: string;
+  recipients?: string[];
 }) {
   const result = await db().transaction(async (tx) => {
     const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
@@ -184,6 +188,7 @@ export async function enqueueSimulation({
           agentId,
           configurationId,
           input,
+          recipients,
           actor,
           status: 'queued',
           result: { steps: [], actions: [], error: null },
@@ -321,6 +326,13 @@ async function processSimulationRun(
     ? AbortSignal.any([deadlineSignal, externalSignal])
     : deadlineSignal;
 
+  const telemetry = createRunTelemetry({
+    runId: run.id,
+    agentId: run.agentId,
+    configurationId: config.id,
+    version: config.version,
+  });
+  let didComplete = false;
   try {
     const credential = (
       await db().select().from(credentials).where(eq(credentials.agentId, run.agentId))
@@ -342,11 +354,28 @@ async function processSimulationRun(
         } catch {
           throw new BudgetError('cancelled');
         }
-        // Stop before paid inference / quota when another worker reclaimed this run.
+        const quote = hasSpendCap(budgets)
+          ? await call.quote?.(request.model, request.signal)
+          : undefined;
+        const settle = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
+          runId: run.id,
+          token: executionToken,
+          signal: request.signal,
+        });
         await assertOwned(run.id, executionToken);
-        // Check + reserve under an agent row lock so concurrent workers cannot both pass.
-        await reserveRequestQuota(run.agentId);
-        const response = await call(request);
+        if (request.signal.aborted) throw new BudgetError('cancelled');
+
+        const response = await telemetry.callModel(call, { ...request, quote });
+        if (response.costMicros !== undefined) {
+          // Failure leaves the conservative reservation in place. Never repeat a paid call
+          // solely because the adjustment could not be recorded.
+          try {
+            await settle(response.costMicros);
+          } catch {
+            void reportFailure('worker.settlement', { runId: run.id, traceId: telemetry.traceId });
+            console.warn('OpenRouter cost settlement failed', { runId: run.id });
+          }
+        }
         if (checkRunDeadline(startedAt, new Date(), budgets)) {
           throw new BudgetError('run-deadline');
         }
@@ -391,6 +420,9 @@ async function processSimulationRun(
               const decision = await retryableStore(() =>
                 authorizeAction(ctx, {
                   type: action.type,
+                  recipients: run.recipients,
+                  preliminary: stage === 'evaluator',
+                  executionToken,
                   payload: { draft: action.draft, reason: action.reason },
                   idempotencyKey: idempotencyKey([
                     run.id,
@@ -403,6 +435,7 @@ async function processSimulationRun(
               );
               return {
                 ...action,
+                intentId: decision.intentId,
                 policy: decision.decision,
                 effect: decision.reasons.join(' '),
               };
@@ -417,10 +450,11 @@ async function processSimulationRun(
       updateIfOwned(run.id, executionToken, {
         status: terminalStatus,
         finishedAt: new Date(),
-        result,
+        result: { ...result, traceId: telemetry.traceId },
         deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
       }),
     );
+    didComplete = !result.error;
   } catch (error) {
     // Leave the run non-terminal so a reclaimed job can resume after failJob retries.
     if (isRetryableInfrastructureError(error)) throw error;
@@ -450,6 +484,8 @@ async function processSimulationRun(
           eq(runs.executionToken, executionToken),
         ),
       );
+  } finally {
+    telemetry.finish(!didComplete);
   }
 }
 

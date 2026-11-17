@@ -76,3 +76,22 @@ export async function persistBudgets(actor: string, agentId: string, budgets: Ag
   if (!updated) return { error: 'Agent not found.' as const };
   return { message: 'Budgets saved.' };
 }
+
+export async function persistApprovalTools(
+  actor: string,
+  agentId: string,
+  approvalTools: string[],
+) {
+  return db().transaction(async (tx) => {
+    const rows = await tx
+      .update(agents)
+      .set({ approvalTools })
+      .where(eq(agents.id, agentId))
+      .returning({ id: agents.id });
+    if (!rows.length) return false;
+    await tx
+      .insert(audit)
+      .values({ actor, action: `Changed approval requirements for agent ${agentId}` });
+    return true;
+  });
+}

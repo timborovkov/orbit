@@ -4,7 +4,7 @@
 
 A privately deployed control centre for persistent AI representatives, built with Next.js, Bun and PostgreSQL.
 
-The console supports administrator login, template-based agents, versioned configurations, private profile pictures, durable worker-backed simulations through OpenRouter, agent lifecycle controls, hard budgets and a policy gateway. Schedules, channel integrations and live external actions are deferred.
+The console supports administrator login, template-based agents, versioned configurations, private profile pictures, durable worker-backed simulations through OpenRouter, agent lifecycle controls, hard budgets, proposal approvals, scoped consent and a policy gateway. Schedules, channel integrations and live external actions are deferred.
 
 ## Start locally
 
@@ -62,8 +62,17 @@ action adapters yet; every candidate action passes the policy gateway, which rec
 an intent and allow/deny/needs-approval/suppressed decision. Global pause, lifecycle,
 tool enablement and budgets are enforced there. Missing credentials fall back to
 optional `OPENROUTER_API_KEY` (web and worker), then produce an inspectable failure.
-Provider error bodies are deliberately discarded. Token usage is shown when returned;
-monetary cost is treated as zero for spend caps when pricing is unavailable.
+Provider error bodies are discarded. Run history shows token usage and reported
+cost. Access supports independent daily and monthly spend caps, including **No cap**.
+Before a capped call the worker reserves an upper bound using a priced endpoint
+and its routing limits. Missing pricing blocks the capped call. An uncertain
+provider outcome retains the reservation until the period ends. Request quotas
+remain active with or without spend caps.
+
+Access records recipient consent and configures which actions require review.
+Approvals lists simulated proposals and records the administrator’s decision.
+Introductions require both recipients’ consent. Escalations require consent from
+their recipient. See the deployment guide for optional Langfuse and Sentry setup.
 
 Agent lifecycle is `shadow` (default), `paused`, `live` or `stopped` — administrator
 only, audited. Live exists but stays gated until write adapters ship. Stop cancels

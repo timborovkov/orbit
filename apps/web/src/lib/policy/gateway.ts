@@ -1,11 +1,11 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import {
   BudgetError,
   budgetViolationMessage,
   checkOutboundBudgets,
   checkRequestBudgets,
-  isBudgetError,
+  hasSpendCap,
   parseBudgets,
   type BudgetSnapshot,
   type BudgetViolation,
@@ -16,8 +16,17 @@ import {
   externalWritesPermitted,
   type LifecycleState,
 } from '@/lib/lifecycle';
-import { RetryableInfrastructureError } from '@/lib/runtime/errors';
-import { actionIntents, agents, controls, policyDecisions, usageCounters } from '@/lib/schema';
+import { missingRecipientConsent } from '@/lib/policy/consent';
+import { consentScope } from '@/lib/policy/scopes';
+import { retryableStore } from '@/lib/runtime/errors';
+import {
+  actionIntents,
+  agents,
+  controls,
+  policyDecisions,
+  runs,
+  usageCounters,
+} from '@/lib/schema';
 
 export type PolicyDecision = 'allow' | 'deny' | 'needs-approval' | 'suppressed';
 
@@ -27,6 +36,9 @@ export interface CandidateAction {
   idempotencyKey: string;
   /** When true, this is a read-only tool invocation rather than an external write. */
   readOnly?: boolean;
+  recipients?: string[];
+  preliminary?: boolean;
+  executionToken?: string;
 }
 
 export interface PolicyContext {
@@ -35,6 +47,7 @@ export interface PolicyContext {
   runId?: string | null;
   lifecycle: LifecycleState;
   enabledTools: string[];
+  approvalTools?: string[];
   budgets: ReturnType<typeof parseBudgets>;
   globalPaused: boolean;
   usage: BudgetSnapshot['day'] & { month: BudgetSnapshot['month']; activeRuns: number };
@@ -88,6 +101,7 @@ export async function loadPolicyContext(
     runId: runId ?? null,
     lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
+    approvalTools: agent.approvalTools,
     budgets: parseBudgets(agent.budgets),
     globalPaused: global?.paused ?? true,
     usage: {
@@ -113,6 +127,7 @@ export async function loadPolicyContext(
 function evaluateCandidate(
   ctx: PolicyContext,
   action: CandidateAction,
+  consentFailure: string | null = null,
 ): {
   decision: PolicyDecision;
   reasons: string[];
@@ -163,6 +178,17 @@ function evaluateCandidate(
       return { decision: 'deny', reasons, violation: outbound };
     }
 
+    if (consentFailure) return { decision: 'deny', reasons: [consentFailure] };
+    if (
+      !action.preliminary &&
+      (consentScope.safeParse(action.type).success || ctx.approvalTools?.includes(action.type))
+    ) {
+      return {
+        decision: 'needs-approval',
+        reasons: ['An administrator must review this proposal.'],
+      };
+    }
+
     // No external write adapters exist yet. Persist the intent and suppress dispatch.
     // Live remains a first-class state so activation can unlock adapters later.
     if (!externalWritesPermitted(ctx.lifecycle)) {
@@ -194,18 +220,65 @@ export async function authorizeAction(
   ctx: PolicyContext,
   action: CandidateAction,
 ): Promise<PolicyResult> {
-  const evaluated = evaluateCandidate(ctx, action);
-
   return await db().transaction(async (tx) => {
+    // Serialize against lifecycle changes, consent changes, and competing reviews.
+    const agent = (
+      await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .where(eq(agents.id, ctx.agentId))
+        .for('update')
+    ).at(0);
+    const current = agent && (await loadPolicyContext(ctx.agentId, ctx.actor, ctx.runId, tx));
+    if (!current) throw new BudgetError('cancelled');
+    if (action.executionToken && ctx.runId) {
+      const owned = (
+        await tx
+          .select({ id: runs.id })
+          .from(runs)
+          .where(
+            and(
+              eq(runs.id, ctx.runId),
+              eq(runs.agentId, ctx.agentId),
+              eq(runs.executionToken, action.executionToken),
+              eq(runs.status, 'running'),
+            ),
+          )
+      ).at(0);
+      if (!owned) throw new BudgetError('cancelled');
+    }
+    const recipients = action.recipients ?? [];
+    const consentFailure = action.readOnly
+      ? null
+      : await missingRecipientConsent(tx, ctx.agentId, action.type, recipients);
+    const evaluated = evaluateCandidate(current, action, consentFailure);
     const existing = (
       await tx
         .select()
         .from(actionIntents)
-        .where(eq(actionIntents.idempotencyKey, action.idempotencyKey))
+        .where(
+          and(
+            eq(actionIntents.agentId, ctx.agentId),
+            eq(actionIntents.idempotencyKey, action.idempotencyKey),
+          ),
+        )
         .limit(1)
         .for('update')
     ).at(0);
     if (existing) {
+      if (evaluated.decision === 'deny' && existing.decision !== 'deny') {
+        // Record the fresh policy outcome without rewriting the original human decision.
+        await tx.insert(policyDecisions).values({
+          agentId: current.agentId,
+          runId: current.runId,
+          actionType: action.type,
+          decision: evaluated.decision,
+          reasons: evaluated.reasons,
+          intentId: existing.id,
+          actor: current.actor,
+        });
+        return { ...evaluated, intentId: existing.id };
+      }
       const audit = (
         await tx
           .select({ id: policyDecisions.id })
@@ -239,6 +312,8 @@ export async function authorizeAction(
           runId: ctx.runId ?? null,
           actionType: action.type,
           payload: action.payload ?? {},
+          recipients,
+          reviewStatus: evaluated.decision === 'needs-approval' ? 'pending' : null,
           idempotencyKey: action.idempotencyKey,
           decision: evaluated.decision,
           reasons: evaluated.reasons,
@@ -266,53 +341,139 @@ export async function authorizeAction(
   });
 }
 
-async function recordUsage(
+/** A review records the human decision. Authorizing a real dispatch is outside simulation. */
+export async function reviewProposedAction(
+  actor: string,
   agentId: string,
-  delta: { spendMicros?: bigint; requests?: number; outboundActions?: number },
-  store: Store = db(),
+  intentId: string,
+  reviewStatus: 'approved' | 'rejected',
 ) {
-  const today = new Date().toISOString().slice(0, 10);
-  const monthStart = `${today.slice(0, 7)}-01`;
-  await Promise.all(
-    (
-      [
-        ['day', today],
-        ['month', monthStart],
-      ] as const
-    ).map(async ([period, start]) => {
-      await store
-        .insert(usageCounters)
-        .values({
-          agentId,
-          period,
-          periodStart: start,
-          spendMicros: delta.spendMicros ?? BigInt(0),
-          requests: delta.requests ?? 0,
-          outboundActions: delta.outboundActions ?? 0,
-        })
-        .onConflictDoUpdate({
-          target: [usageCounters.agentId, usageCounters.period, usageCounters.periodStart],
-          set: {
-            spendMicros: sql`${usageCounters.spendMicros} + ${delta.spendMicros ?? BigInt(0)}`,
-            requests: sql`${usageCounters.requests} + ${delta.requests ?? 0}`,
-            outboundActions: sql`${usageCounters.outboundActions} + ${delta.outboundActions ?? 0}`,
-          },
-        });
-    }),
-  );
+  return db().transaction(async (tx) => {
+    const agent = (
+      await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update')
+    ).at(0);
+    if (!agent) return { error: 'Agent not found.' };
+    const intent = (
+      await tx
+        .select()
+        .from(actionIntents)
+        .where(and(eq(actionIntents.id, intentId), eq(actionIntents.agentId, agentId)))
+        .for('update')
+    ).at(0);
+    if (intent?.reviewStatus !== 'pending')
+      return { error: 'This proposal is no longer awaiting review.' };
+
+    const ctx = await loadPolicyContext(agentId, actor, intent.runId, tx);
+    if (!ctx) return { error: 'Agent not found.' };
+    const consentFailure = await missingRecipientConsent(
+      tx,
+      agentId,
+      intent.actionType,
+      intent.recipients,
+    );
+    const policy = evaluateCandidate(
+      ctx,
+      { type: intent.actionType, idempotencyKey: intent.idempotencyKey },
+      consentFailure,
+    );
+    const run = intent.runId
+      ? (await tx.select({ status: runs.status }).from(runs).where(eq(runs.id, intent.runId))).at(0)
+      : undefined;
+    const approvalBlock =
+      (run && run.status !== 'completed'
+        ? 'The simulation must complete before approval.'
+        : null) ?? (policy.decision === 'deny' ? policy.reasons.join(' ') : null);
+
+    const reviewBlocked = reviewStatus === 'approved' && approvalBlock !== null;
+    const decision = reviewStatus === 'approved' && !reviewBlocked ? 'suppressed' : 'deny';
+    const reason = reviewBlocked
+      ? approvalBlock
+      : reviewStatus === 'approved'
+        ? 'Administrator approved this proposal for simulation.'
+        : 'Administrator rejected this proposal.';
+    await tx.insert(policyDecisions).values({
+      agentId,
+      runId: intent.runId,
+      actionType: intent.actionType,
+      decision,
+      reasons: [reason],
+      intentId,
+      actor,
+    });
+    if (reviewBlocked) return { error: approvalBlock };
+    await tx
+      .update(actionIntents)
+      .set({
+        decision,
+        reasons: [reason],
+        reviewStatus,
+        reviewedBy: actor,
+        reviewedAt: new Date(),
+      })
+      .where(eq(actionIntents.id, intentId));
+    return {
+      message:
+        reviewStatus === 'approved' ? 'Proposal approved for simulation.' : 'Proposal rejected.',
+    };
+  });
 }
 
-/**
- * Atomically check request quotas and reserve one request under an agent row lock.
- * Prevents two overlapping workers from both passing a stale remaining-allowance check.
- */
-export async function reserveRequestQuota(agentId: string): Promise<void> {
-  try {
-    await db().transaction(async (tx) => {
+async function recordRequestUsage(
+  store: Tx,
+  agentId: string,
+  today: string,
+  spendMicros: bigint,
+  requests: number,
+) {
+  for (const [period, periodStart] of [
+    ['day', today],
+    ['month', `${today.slice(0, 7)}-01`],
+  ]) {
+    await store
+      .insert(usageCounters)
+      .values({ agentId, period, periodStart, spendMicros, requests })
+      .onConflictDoUpdate({
+        target: [usageCounters.agentId, usageCounters.period, usageCounters.periodStart],
+        set: {
+          spendMicros: sql`${usageCounters.spendMicros} + ${spendMicros}`,
+          requests: sql`${usageCounters.requests} + ${requests}`,
+        },
+      });
+  }
+}
+
+/** Check the current budgets and reserve before dispatch, under the same agent lock as Stop. */
+export async function reserveRequestQuota(
+  agentId: string,
+  upperBoundMicros?: number,
+  execution?: { runId: string; token: string; signal: AbortSignal },
+) {
+  const reservedMicros = BigInt(upperBoundMicros ?? 0);
+  const today = await retryableStore(() =>
+    db().transaction(async (tx) => {
       const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
         0,
       );
-      if (!agent) throw new Error('Agent unavailable');
+      if (!agent || agent.lifecycle === 'stopped' || execution?.signal.aborted) {
+        throw new BudgetError('cancelled');
+      }
+      if (execution) {
+        const owned = (
+          await tx
+            .select({ id: runs.id })
+            .from(runs)
+            .where(
+              and(
+                eq(runs.id, execution.runId),
+                eq(runs.agentId, agentId),
+                eq(runs.status, 'running'),
+                eq(runs.executionToken, execution.token),
+                sql`${runs.expiresAt} > now()`,
+              ),
+            )
+        ).at(0);
+        if (!owned) throw new BudgetError('cancelled');
+      }
       const budgets = parseBudgets(agent.budgets);
       const today = new Date().toISOString().slice(0, 10);
       const monthStart = `${today.slice(0, 7)}-01`;
@@ -320,43 +481,35 @@ export async function reserveRequestQuota(agentId: string): Promise<void> {
         .select()
         .from(usageCounters)
         .where(eq(usageCounters.agentId, agentId));
-      const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
-      const month = counters.find(
-        (row) => row.period === 'month' && row.periodStart === monthStart,
-      );
-      const snapshot: BudgetSnapshot = {
-        budgets,
-        day: {
-          spendMicros: day?.spendMicros ?? BigInt(0),
-          requests: day?.requests ?? 0,
-          outboundActions: day?.outboundActions ?? 0,
-        },
-        month: {
-          spendMicros: month?.spendMicros ?? BigInt(0),
-          requests: month?.requests ?? 0,
-          outboundActions: month?.outboundActions ?? 0,
-        },
-        activeRuns: 0,
-      };
-      const violation = checkRequestBudgets(snapshot);
-      if (violation) throw new BudgetError(violation);
-      await recordUsage(
-        agentId,
+      const violation = checkRequestBudgets(
         {
-          requests: 1,
-          spendMicros: BigInt(0),
+          budgets,
+          day:
+            counters.find((row) => row.period === 'day' && row.periodStart === today) ??
+            emptyUsage(),
+          month:
+            counters.find((row) => row.period === 'month' && row.periodStart === monthStart) ??
+            emptyUsage(),
+          activeRuns: 0,
         },
-        tx,
+        reservedMicros,
       );
-    });
-  } catch (error) {
-    // Budget exhaustion and missing agents are terminal; store/network blips must retry.
-    if (isBudgetError(error)) throw error;
-    if (error instanceof Error && error.message === 'Agent unavailable') throw error;
-    throw new RetryableInfrastructureError(
-      error instanceof Error ? error.message : 'Quota reservation failed',
-    );
-  }
+      if (violation) throw new BudgetError(violation);
+      if (upperBoundMicros === undefined && hasSpendCap(budgets))
+        throw new BudgetError('unknown-price');
+      await recordRequestUsage(tx, agentId, today, reservedMicros, 1);
+      return today;
+    }),
+  );
+
+  // Keep the full reservation after ambiguous failures or missing costs. Settlement is attempted
+  // once per dispatch, so a connection loss during commit cannot double-apply the adjustment.
+  return async (billedMicros: number) => {
+    const adjustment = BigInt(billedMicros) - reservedMicros;
+    if (adjustment !== BigInt(0)) {
+      await db().transaction((tx) => recordRequestUsage(tx, agentId, today, adjustment, 0));
+    }
+  };
 }
 
 /** Pure evaluation helper for unit tests without persistence. */

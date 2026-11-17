@@ -8,6 +8,7 @@ import {
   processSimulationJob,
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
+import { flushTelemetry, reportFailure } from '@/lib/runtime/telemetry';
 import { workerEnvConfig } from '@/lib/worker-env';
 
 const config = workerEnvConfig();
@@ -29,7 +30,13 @@ const worker = startJobWorker({
   workerId,
   handlers: {
     [SIMULATION_JOB_TYPE]: async (job, signal) => {
-      await processSimulationJob(job.payload, undefined, signal);
+      try {
+        await processSimulationJob(job.payload, undefined, signal);
+      } catch (error) {
+        const runId = typeof job.payload.runId === 'string' ? job.payload.runId : undefined;
+        void reportFailure('worker.queue', { runId });
+        throw error;
+      }
     },
   },
   onDeadLetter: async (job, error) => {
@@ -39,8 +46,9 @@ const worker = startJobWorker({
   reconcileDeadLetters: async () => {
     await finalizeOrphanedDeadSimulationRuns();
   },
-  onError: (error) => {
-    console.error('Worker job error', error instanceof Error ? error.message : error);
+  onError: () => {
+    console.error('Worker queue operation failed.');
+    void reportFailure('worker.queue');
   },
 });
 
@@ -48,6 +56,7 @@ const shutdown = async (signal: string) => {
   console.info(`Orbit worker received ${signal}; draining in-flight jobs`);
   await worker.stop();
   await closeDb();
+  await flushTelemetry();
   console.info('Orbit worker stopped');
 };
 

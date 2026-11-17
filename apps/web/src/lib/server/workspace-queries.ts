@@ -1,18 +1,20 @@
 import 'server-only';
 
-import { asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { parseBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import { openRouterKeySource } from '@/lib/runtime/openrouter-key';
 import {
+  actionIntents,
   agents,
   audit,
   configurations,
   controls,
   credentials,
   jobs,
+  recipientConsents,
   runs,
   templates,
 } from '@/lib/schema';
@@ -43,7 +45,7 @@ export async function getAgentWorkspace(id: string) {
   await requireAdmin();
   const agent = (await db().select().from(agents).where(eq(agents.id, id))).at(0);
   if (!agent) return null;
-  const [versions, keys, history] = await Promise.all([
+  const [versions, keys, history, reviews, consents] = await Promise.all([
     db()
       .select()
       .from(configurations)
@@ -54,6 +56,32 @@ export async function getAgentWorkspace(id: string) {
       .from(credentials)
       .where(eq(credentials.agentId, id)),
     db().select().from(runs).where(eq(runs.agentId, id)).orderBy(desc(runs.createdAt)).limit(50),
+    db()
+      .select({
+        id: actionIntents.id,
+        actionType: actionIntents.actionType,
+        draft: sql<string | null>`${actionIntents.payload}->>'draft'`,
+        reason: sql<string | null>`${actionIntents.payload}->>'reason'`,
+        recipients: actionIntents.recipients,
+        status: actionIntents.reviewStatus,
+        createdAt: actionIntents.createdAt,
+        reviewedBy: actionIntents.reviewedBy,
+      })
+      .from(actionIntents)
+      .where(and(eq(actionIntents.agentId, id), isNotNull(actionIntents.reviewStatus)))
+      .orderBy(sql`(${actionIntents.reviewStatus} = 'pending') DESC`, desc(actionIntents.createdAt))
+      .limit(50),
+    db()
+      .select({
+        recipient: recipientConsents.recipient,
+        scope: recipientConsents.scope,
+        evidence: recipientConsents.evidence,
+        granted: recipientConsents.granted,
+      })
+      .from(recipientConsents)
+      .where(eq(recipientConsents.agentId, id))
+      .orderBy(desc(recipientConsents.updatedAt))
+      .limit(50),
   ]);
   const current = versions.at(0);
   if (!current) return null;
@@ -79,6 +107,8 @@ export async function getAgentWorkspace(id: string) {
     hasAgentCredential,
     keySource: openRouterKeySource(hasAgentCredential),
     history: viewedHistory,
+    reviews,
+    consents,
     current,
   };
 }

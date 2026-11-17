@@ -26,18 +26,15 @@ export async function saveAgentBudgets(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
   const agentId = uuid.parse(form.get('agentId'));
-  const raw = Object.fromEntries(Object.keys(budgetDefaults).map((key) => [key, form.get(key)]));
-  const parsed = budgetsSchema.safeParse({
-    dailySpendCents: Number(raw.dailySpendCents),
-    monthlySpendCents: Number(raw.monthlySpendCents),
-    dailyRequests: Number(raw.dailyRequests),
-    monthlyRequests: Number(raw.monthlyRequests),
-    dailyOutboundActions: Number(raw.dailyOutboundActions),
-    monthlyOutboundActions: Number(raw.monthlyOutboundActions),
-    maxConcurrentRuns: Number(raw.maxConcurrentRuns),
-    maxToolStepsPerRun: Number(raw.maxToolStepsPerRun),
-    runDeadlineSeconds: Number(raw.runDeadlineSeconds),
-  });
+  const raw = Object.fromEntries(
+    Object.keys(budgetDefaults).map((key) => {
+      const value = form.get(key);
+      const spendCap = key === 'dailySpendCents' || key === 'monthlySpendCents';
+      if (spendCap && form.get(`${key}Unlimited`) === 'on') return [key, null];
+      return [key, typeof value === 'string' && value.trim() !== '' ? Number(value) : undefined];
+    }),
+  );
+  const parsed = budgetsSchema.safeParse(raw);
   if (!parsed.success) return { error: 'Check budget values stay within allowed ranges.' };
   const result = await persistBudgets(actor, agentId, parsed.data);
   revalidatePath(`/agents/${agentId}`);

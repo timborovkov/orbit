@@ -49,8 +49,10 @@ export function RunContent({
             ))}
           </ul>
           <p className="run-usage">
-            {step.model} · {step.inputTokens} input / {step.outputTokens} output tokens · Cost not
-            reported
+            {step.model} · {step.inputTokens} input / {step.outputTokens} output tokens ·{' '}
+            {step.costMicros === undefined
+              ? 'Cost not reported'
+              : `$${(step.costMicros / 1_000_000).toFixed(6)} USD`}
           </p>
         </details>
       ))}

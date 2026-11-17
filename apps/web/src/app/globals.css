@@ -2268,3 +2268,56 @@ details[open] > summary > .disclosure-chevron {
     flex-basis: 48px;
   }
 }
+
+.budget-unlimited {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 8px;
+}
+
+.budget-list .budget-unlimited input {
+  inline-size: 16px;
+  block-size: 16px;
+  accent-color: var(--ink);
+}
+
+.policy-options,
+.policy-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.policy-options label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.policy-recipients > div {
+  margin-top: 10px;
+}
+
+.policy-records {
+  display: grid;
+  gap: 0;
+  margin-block: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.policy-records li {
+  border-top: 1px solid var(--border);
+  padding-block: 12px;
+  overflow-wrap: anywhere;
+}
+
+.policy-records blockquote {
+  margin-inline: 0;
+  white-space: pre-wrap;
+}
+
+.policy-records p {
+  margin-block: 6px 0;
+}

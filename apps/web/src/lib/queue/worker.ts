@@ -166,7 +166,7 @@ export function startJobWorker(options: WorkerOptions) {
         await deadLetter('Failed to mark job completed');
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Job failed';
+      const message = 'Worker could not process the job';
       await deadLetter(message);
       options.onError?.(error);
     } finally {

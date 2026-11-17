@@ -288,7 +288,7 @@ test('OpenRouter adapter sends credentials only as authorization and parses stru
                 finish_reason: 'stop',
               },
             ],
-            usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 },
+            usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30, cost: 0.1001 },
           }),
           { headers: { 'content-type': 'application/json' } },
         );
@@ -302,14 +302,73 @@ test('OpenRouter adapter sends credentials only as authorization and parses stru
       system: 'Instructions',
       input: 'Quoted input',
       signal: AbortSignal.timeout(1000),
+      quote: {
+        endpoint: 'test/variant',
+        upperBoundMicros: 200_000,
+        maxPrice: { prompt: 1, completion: 2, request: 0 },
+      },
     });
+    const routed = JSON.parse(body);
+    expect(routed.provider).toMatchObject({
+      only: ['test/variant'],
+      allow_fallbacks: false,
+      max_price: { prompt: 1, completion: 2, request: 0 },
+    });
+    expect(routed.usage).toEqual({ include: true });
     expect(authorization).toBe('Bearer test-secret-key');
     expect(body).not.toContain('test-secret-key');
     expect(result.inputTokens).toBe(20);
     expect(result.outputTokens).toBe(10);
+    expect(result.costMicros).toBe(100100);
     expect(result.decision.actions).toHaveLength(2);
     expect(transport).toHaveBeenCalledTimes(1);
   } finally {
     transport.mockRestore();
+  }
+});
+
+test('OpenRouter pricing needs an exact model and a compatible priced endpoint', async () => {
+  const { spyOn } = await import('bun:test');
+  const { openRouterInference } = await import('@/lib/runtime/openrouter');
+  const fetchMock = spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(
+      Response.json({
+        data: {
+          endpoints: [
+            {
+              tag: 'unsupported',
+              context_length: 1000,
+              pricing: { prompt: '0', completion: '0' },
+              supported_parameters: ['max_tokens'],
+            },
+            {
+              tag: 'missing-rate',
+              context_length: 1000,
+              pricing: { prompt: '0' },
+              supported_parameters: ['max_tokens', 'structured_outputs'],
+            },
+            {
+              tag: 'known/fp8',
+              context_length: 10_000,
+              pricing: { prompt: '0.000001', completion: '0.000002', request: '0.004' },
+              supported_parameters: ['max_tokens', 'structured_outputs'],
+            },
+          ],
+        },
+      }),
+    )
+    .mockResolvedValueOnce(Response.json({ data: { endpoints: [] } }));
+  try {
+    const call = openRouterInference('test-secret');
+    const signal = AbortSignal.timeout(1000);
+    expect(await call.quote?.('openrouter/auto:free', signal)).toBeUndefined();
+    expect(await call.quote?.('test/main', signal)).toMatchObject({
+      endpoint: 'known/fp8',
+      upperBoundMicros: 20_000,
+    });
+    expect(await call.quote?.('test/no-price', signal)).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    fetchMock.mockRestore();
   }
 });

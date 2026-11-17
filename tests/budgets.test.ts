@@ -8,7 +8,6 @@ import {
   checkRequestBudgets,
   checkRunDeadline,
   checkToolStepLimit,
-  estimateSpendMicros,
   isBudgetError,
   isTrustedBudgetMessage,
   parseBudgets,
@@ -66,9 +65,16 @@ test('tool step and deadline limits', () => {
   expect(checkRunDeadline(started, new Date('2026-01-01T00:04:59Z'), budgetDefaults)).toBeNull();
 });
 
-test('spend estimation documents zero when pricing unavailable', () => {
-  expect(estimateSpendMicros(100, 50)).toBe(BigInt(0));
-  expect(estimateSpendMicros(100, 50, 12)).toBe(BigInt(1800));
+test('spend caps are independent and accept an explicit no-cap setting', () => {
+  const day = { spendMicros: 80_000n, requests: 0, outboundActions: 0 };
+  const month = { ...day, spendMicros: 8_000n };
+  const budgets = parseBudgets({ dailySpendCents: null, monthlySpendCents: 1 });
+  const snapshot = { budgets, day, month, activeRuns: 0 };
+  expect(checkRequestBudgets(snapshot, 2_000n)).toBeNull();
+  expect(checkRequestBudgets(snapshot, 2_001n)).toBe('monthly-spend');
+  expect(checkRequestBudgets({ ...snapshot, budgets: { ...budgets, dailySpendCents: 0 } })).toBe(
+    'daily-spend',
+  );
 });
 
 test('BudgetError messages are exact trusted allowlist entries', () => {

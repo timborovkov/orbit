@@ -5,6 +5,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -13,6 +14,7 @@ import {
 
 import type { AgentBudgets } from '@/lib/budgets';
 import type { LifecycleState } from '@/lib/lifecycle';
+import type { ConsentScope } from '@/lib/policy/scopes';
 import type { AgentConfig } from '@/lib/runtime/config';
 import type { SimulationResult } from '@/lib/runtime/simulation';
 
@@ -30,6 +32,7 @@ export const agents = pgTable('agents', {
   pictureKey: text('picture_key'),
   lifecycle: text('lifecycle').$type<LifecycleState>().notNull().default('shadow'),
   budgets: jsonb('budgets').$type<AgentBudgets>().notNull(),
+  approvalTools: jsonb('approval_tools').$type<string[]>().notNull().default([]),
   enabledTools: jsonb('enabled_tools').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -104,6 +107,7 @@ export const runs = pgTable('simulation_runs', {
     .notNull()
     .references(() => configurations.id),
   input: text('input').notNull(),
+  recipients: jsonb('recipients').$type<string[]>().notNull().default([]),
   status: text('status').$type<RunStatus>().notNull().default('queued'),
   result: jsonb('result').$type<SimulationResult>().notNull(),
   actor: text('actor').notNull(),
@@ -123,6 +127,10 @@ export const actionIntents = pgTable('action_intents', {
     .references(() => agents.id),
   runId: uuid('run_id').references(() => runs.id),
   actionType: text('action_type').notNull(),
+  recipients: jsonb('recipients').$type<string[]>().notNull().default([]),
+  reviewStatus: text('review_status').$type<'pending' | 'approved' | 'rejected'>(),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
   payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
   idempotencyKey: text('idempotency_key').notNull().unique(),
   decision: text('decision').notNull(),
@@ -157,4 +165,20 @@ export const usageCounters = pgTable(
     outboundActions: integer('outbound_actions').notNull().default(0),
   },
   (table) => [unique().on(table.agentId, table.period, table.periodStart)],
+);
+
+export const recipientConsents = pgTable(
+  'recipient_consents',
+  {
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    recipient: text('recipient').notNull(),
+    scope: text('scope').$type<ConsentScope>().notNull(),
+    evidence: text('evidence').notNull(),
+    granted: boolean('granted').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    actor: text('actor').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.recipient, table.scope] })],
 );

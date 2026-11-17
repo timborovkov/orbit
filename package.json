@@ -18,7 +18,7 @@
     "doctor": "bun scripts/run-react-doctor.mjs",
     "validate": "bun run format:check && bun run typecheck && bun run lint && bun run knip && bun run doctor",
     "db:migrate": "bun scripts/migrate.ts",
-    "test:unit": "bun test tests/auth-env.test.ts tests/simulation.test.ts tests/pictures.test.ts tests/budgets.test.ts tests/lifecycle.test.ts tests/policy.test.ts tests/queue-unit.test.ts",
+    "test:unit": "bun test tests/auth-env.test.ts tests/simulation.test.ts tests/pictures.test.ts tests/budgets.test.ts tests/lifecycle.test.ts tests/policy.test.ts tests/queue-unit.test.ts tests/telemetry.test.ts",
     "test:e2e": "playwright test && playwright test --config playwright.openrouter-env.config.ts && playwright test --config playwright.local.config.ts",
     "test:simulation": "bun test tests/simulation-persistence.test.ts",
     "test:queue": "bun test tests/queue.test.ts",
