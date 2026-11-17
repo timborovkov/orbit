@@ -4,6 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # typescript is aliased to @typescript/typescript6 for ESLint; a Dependabot
+    # major bump would replace that with plain typescript@7+ and break lint.
+    # TypeScript 7 for tsc lives under @typescript/native (npm:typescript@7.x).
+    ignore:
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
     groups:
       minor-and-patch:
         patterns: ['*']
