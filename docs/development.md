@@ -21,8 +21,10 @@ No password or session is used in this mode. The dashboard displays the local id
 
 ## Checks
 
-Which suites run on `main` versus `production`, and how to trigger the heavy path
-manually, is owned by [testing policy](testing/README.md).
+`main` is development (Railway deploys from it for now); `production` is the
+protected release branch via a PR from `main`, where heavy CI runs. Which suites
+run where, and how to trigger the heavy path manually, is owned by
+[testing policy](testing/README.md).
 
 Fast path (every `main` PR — `Static checks`):
 

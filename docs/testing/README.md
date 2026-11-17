@@ -48,16 +48,19 @@ workflow_dispatch E2E: Playwright E2E (any branch)
 - `main` is the development branch. PRs require only `Static checks`: validation,
   React Doctor, web build, and fast unit tests (no database, browsers, Docker image
   builds, or RustFS).
-- `production` is the release branch. PRs require `Static checks`,
+- `production` is the protected release branch. Release through a PR from `main` to
+  `production`, where the heavy CI runs. Those PRs require `Static checks`,
   `Full validation` (Docker image builds and container smoke tests),
   `PostgreSQL integration` (migrated `orbit_test` and simulation persistence), and
-  `Playwright E2E`, with an up-to-date branch and resolved review threads. Release
-  through a PR from `main` to `production`.
+  `Playwright E2E`, with an up-to-date branch and resolved review threads.
 - Heavy CI jobs also run on production pushes and on manual `CI` workflow
   dispatch. Superseded PR runs are cancelled.
 - Browser E2E runs on production PRs/pushes and on manual `E2E` workflow dispatch.
   Unlike The Timeline (manual-only E2E), Orbit keeps Playwright in the production
   release path. It never runs on `main` PRs.
+- Railway deploys from `main` for now (Orbit is not live yet; same pattern as The
+  Timeline until an operator switches the source branch). Changing repository
+  branch policy does not change Railway configuration.
 - A job skipped by an `if:` still satisfies a required check of that name (GitHub
   treats skipped as passing). Do not rename required check names without updating
   branch protection.

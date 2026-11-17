@@ -24,7 +24,7 @@ Before building or changing UI, read [design.md](design.md). Follow its current 
 
 - Scope local checks to changed behavior. Prose-only work needs changed-file formatting, links and diff review, not application suites. Follow [testing policy](docs/testing/README.md) for which suites run on `main` versus `production`.
 - GitHub owns broad validation. Required checks gate merging, not commits, pushes or PR creation. Never bypass or weaken checks; report pending and unrelated failures accurately.
-- `main` is development; release through a PR to protected `production`. PRs to `main` require `Static checks` only. Production PRs require `Static checks`, `Full validation`, `PostgreSQL integration`, and `Playwright E2E`, plus an up-to-date branch and resolved review threads.
+- `main` is development; Railway deploys from `main` for now (Orbit is not live yet). Release through a PR to protected `production`, where the heavy CI runs. PRs to `main` require `Static checks` only. Production PRs require `Static checks`, `Full validation`, `PostgreSQL integration`, and `Playwright E2E`, plus an up-to-date branch and resolved review threads. Repository branch names do not establish what Railway currently runs.
 - Heavy tests (Docker image builds, PostgreSQL simulation, Playwright) belong in the production-gated CI jobs or the E2E workflow so parallel work can extend those jobs without slowing every `main` PR.
 - React Doctor verification requires both score 100 and “No issues found”; an exit code without a score is insufficient.
 
