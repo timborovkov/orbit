@@ -367,10 +367,16 @@ async function recordRequestUsage(
 export async function reserveRequestQuota(
   agentId: string,
   upperBoundMicros?: number,
-  execution?: { runId: string; token: string; signal: AbortSignal },
+  execution?: {
+    runId: string;
+    token: string;
+    signal: AbortSignal;
+    /** When set, reservation is idempotent per run+stage across queue retries. */
+    stage?: 'evaluator' | 'main';
+  },
 ) {
-  const reservedMicros = BigInt(upperBoundMicros ?? 0);
-  const today = await retryableStore(() =>
+  const requestedMicros = BigInt(upperBoundMicros ?? 0);
+  const outcome = await retryableStore(() =>
     db().transaction(async (tx) => {
       const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
         0,
@@ -378,10 +384,16 @@ export async function reserveRequestQuota(
       if (!agent || agent.lifecycle === 'stopped' || execution?.signal.aborted) {
         throw new BudgetError('cancelled');
       }
+      let runRow:
+        | {
+            id: string;
+            result: (typeof runs)['$inferSelect']['result'];
+          }
+        | undefined;
       if (execution) {
-        const owned = (
+        runRow = (
           await tx
-            .select({ id: runs.id })
+            .select({ id: runs.id, result: runs.result })
             .from(runs)
             .where(
               and(
@@ -392,8 +404,22 @@ export async function reserveRequestQuota(
                 sql`${runs.expiresAt} > now()`,
               ),
             )
+            .for('update')
         ).at(0);
-        if (!owned) throw new BudgetError('cancelled');
+        if (!runRow) throw new BudgetError('cancelled');
+        if (execution.stage) {
+          const existing = runRow.result.quotaReservations?.find(
+            (entry) => entry.stage === execution.stage,
+          );
+          if (existing) {
+            return {
+              today: new Date().toISOString().slice(0, 10),
+              reservedMicros: BigInt(existing.reservedMicros),
+              reservation: existing,
+              reused: true as const,
+            };
+          }
+        }
       }
       const budgets = parseBudgets(agent.budgets);
       const today = new Date().toISOString().slice(0, 10);
@@ -413,24 +439,45 @@ export async function reserveRequestQuota(
             emptyUsage(),
           activeRuns: 0,
         },
-        reservedMicros,
+        requestedMicros,
       );
       if (violation) throw new BudgetError(violation);
       if (upperBoundMicros === undefined && hasSpendCap(budgets))
         throw new BudgetError('unknown-price');
-      await recordRequestUsage(tx, agentId, today, reservedMicros, 1);
-      return today;
+      await recordRequestUsage(tx, agentId, today, requestedMicros, 1);
+      const reservation =
+        execution?.stage !== undefined
+          ? { stage: execution.stage, reservedMicros: requestedMicros.toString() }
+          : undefined;
+      if (runRow && reservation) {
+        const quotaReservations = [...(runRow.result.quotaReservations ?? []), reservation];
+        await tx
+          .update(runs)
+          .set({ result: { ...runRow.result, quotaReservations } })
+          .where(eq(runs.id, runRow.id));
+      }
+      return {
+        today,
+        reservedMicros: requestedMicros,
+        reservation,
+        reused: false as const,
+      };
     }),
   );
 
   // Keep the full reservation after ambiguous failures or missing costs. Settlement is attempted
   // once per dispatch, so a connection loss during commit cannot double-apply the adjustment.
-  return async (billedMicros: number) => {
-    const adjustment = BigInt(billedMicros) - reservedMicros;
-    if (adjustment !== BigInt(0)) {
-      await db().transaction((tx) => recordRequestUsage(tx, agentId, today, adjustment, 0));
-    }
-  };
+  return Object.assign(
+    async (billedMicros: number) => {
+      const adjustment = BigInt(billedMicros) - outcome.reservedMicros;
+      if (adjustment !== BigInt(0)) {
+        await db().transaction((tx) =>
+          recordRequestUsage(tx, agentId, outcome.today, adjustment, 0),
+        );
+      }
+    },
+    { reservation: outcome.reservation, reused: outcome.reused },
+  );
 }
 
 /** Pure evaluation helper for unit tests without persistence. */

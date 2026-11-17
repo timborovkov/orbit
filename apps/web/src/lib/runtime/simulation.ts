@@ -64,6 +64,11 @@ export interface SimulationResult {
    * A reserved stage in this set without a saved step cannot be re-dispatched.
    */
   dispatchedStages?: ('evaluator' | 'main')[];
+  /**
+   * Per-stage spend/request quota already committed for this run. Retries must reuse
+   * these instead of calling reserveRequestQuota again for the same stage.
+   */
+  quotaReservations?: { stage: 'evaluator' | 'main'; reservedMicros: string }[];
   steps: SimulationStep[];
   actions: (Decision['actions'][number] & {
     intentId?: string;
@@ -87,7 +92,7 @@ export interface SimulateOptions {
    * provider requests. Known pre-dispatch faults stay retryable; after this returns the
    * stage is marked dispatched before `call`.
    */
-  prepare?: (request: Parameters<ModelCall>[0]) => Promise<void>;
+  prepare?: (request: Parameters<ModelCall>[0], partial: SimulationResult) => Promise<void>;
   onActions?: (
     actions: Decision['actions'],
     partial: SimulationResult,
@@ -100,6 +105,9 @@ function cloneSimulationResult(result: SimulationResult): SimulationResult {
     traceId: result.traceId,
     reservedStages: result.reservedStages ? [...result.reservedStages] : undefined,
     dispatchedStages: result.dispatchedStages ? [...result.dispatchedStages] : undefined,
+    quotaReservations: result.quotaReservations
+      ? result.quotaReservations.map((entry) => ({ ...entry }))
+      : undefined,
     steps: result.steps.map((step) => ({
       ...step,
       decision: {
@@ -124,7 +132,8 @@ export function hasSimulationProgress(result: SimulationResult): boolean {
   return (
     result.steps.length > 0 ||
     (result.reservedStages?.length ?? 0) > 0 ||
-    (result.dispatchedStages?.length ?? 0) > 0
+    (result.dispatchedStages?.length ?? 0) > 0 ||
+    (result.quotaReservations?.length ?? 0) > 0
   );
 }
 
@@ -228,7 +237,7 @@ export async function simulate(
       };
       if (options.prepare) {
         try {
-          await options.prepare(request);
+          await options.prepare(request, result);
         } catch (error) {
           if (isPreDispatchInfrastructureError(error)) {
             await releasePendingReservation();

@@ -129,6 +129,55 @@ test('reserveRequestQuota serializes concurrent reservations under the hard cap'
   expect(day.requests).toBe(1);
 });
 
+test('reserveRequestQuota reuses a per-stage reservation across retries', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const budgets = { ...uncapped, dailyRequests: 1, monthlyRequests: 1 };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'QuotaIdempotent','Mission','shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const [version] = await sql`INSERT INTO agent_configurations(agent_id,version,config,actor)
+      SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
+  const token = randomUUID();
+  const [run] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token)
+    VALUES (
+      ${id},
+      ${version.id},
+      'quota idempotency',
+      'running',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      'test@example.com',
+      ${new Date(Date.now() + 120_000)},
+      ${token}
+    )
+    RETURNING id
+  `;
+  const signal = AbortSignal.timeout(5_000);
+  const first = await reserveRequestQuota(id, 0, {
+    runId: run.id,
+    token,
+    signal,
+    stage: 'evaluator',
+  });
+  expect(first.reused).toBe(false);
+  expect(first.reservation).toEqual({ stage: 'evaluator', reservedMicros: '0' });
+  const second = await reserveRequestQuota(id, 0, {
+    runId: run.id,
+    token,
+    signal,
+    stage: 'evaluator',
+  });
+  expect(second.reused).toBe(true);
+  expect(second.reservation).toEqual({ stage: 'evaluator', reservedMicros: '0' });
+  const [day] =
+    await sql`SELECT requests FROM usage_counters WHERE agent_id=${id} AND period='day'`;
+  expect(day.requests).toBe(1);
+  const [stored] = await sql`SELECT result FROM simulation_runs WHERE id=${run.id}`;
+  expect(stored.result.quotaReservations).toEqual([{ stage: 'evaluator', reservedMicros: '0' }]);
+});
+
 test('stale execution tokens cannot overwrite a reclaimed run', async () => {
   const id = randomUUID();
   ids.push(id);
