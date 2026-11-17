@@ -24,6 +24,8 @@ export default defineConfig({
       S3_ACCESS_KEY_ID: 'orbit_local',
       S3_SECRET_ACCESS_KEY: 'orbit_local_storage_only',
       ORBIT_ENCRYPTION_KEY: 'a'.repeat(64),
+      // Explicitly empty so a developer shell export cannot leak into Access "none" states.
+      OPENROUTER_API_KEY: '',
       ORBIT_ADMIN_EMAIL: 'admin@example.com',
       ORBIT_ADMIN_PASSWORD: 'test-only-password-123456',
     },

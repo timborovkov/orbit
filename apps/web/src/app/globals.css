@@ -1690,15 +1690,19 @@ fieldset[aria-disabled='true'] textarea {
   font-size: 0.8125rem;
   margin-top: 4px;
 }
-.access-workbench > .workspace-form + .workspace-form {
+.access-credential-forms > .workspace-form + .workspace-form {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
 }
-.access-workbench > .workspace-form + .workspace-form .button {
+.access-credential-forms > .workspace-form + .workspace-form .button {
   background: var(--surface);
   color: var(--ink);
   border: 1px solid var(--border);
+}
+.access-credential-forms > [role='status'],
+.access-credential-forms > .form-error {
+  margin-top: 16px;
 }
 .playground-grid {
   display: grid;

@@ -4,6 +4,7 @@ import { and, desc, eq } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
 import type { AgentConfig } from '@/lib/runtime/config';
+import { environmentOpenRouterKey } from '@/lib/runtime/openrouter-key';
 import { encryptCredential } from '@/lib/runtime/secrets';
 import { agents, audit, configurations, credentials, templates } from '@/lib/schema';
 
@@ -86,5 +87,10 @@ export async function persistCredential(
       action: `${revoke ? 'Revoked' : 'Replaced'} OpenRouter credential for agent ${agentId}`,
     });
   });
-  return { message: revoke ? 'Credential removed.' : 'Credential saved encrypted.' };
+  if (!revoke) return { message: 'Credential saved encrypted.' };
+  return {
+    message: environmentOpenRouterKey()
+      ? 'Credential removed. Simulations will use the environment default.'
+      : 'Credential removed.',
+  };
 }

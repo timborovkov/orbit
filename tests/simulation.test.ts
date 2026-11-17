@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
 import type { AgentConfig } from '@/lib/runtime/config';
+import {
+  environmentOpenRouterKey,
+  openRouterKeySource,
+  resolveOpenRouterApiKey,
+} from '@/lib/runtime/openrouter-key';
 import { decryptCredential, encryptCredential } from '@/lib/runtime/secrets';
 import { simulate, type ModelCall, type SimulationResult } from '@/lib/runtime/simulation';
 
@@ -24,9 +29,12 @@ const decision = {
   ],
 };
 const originalKey = process.env.ORBIT_ENCRYPTION_KEY;
+const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
 afterEach(() => {
   if (originalKey) process.env.ORBIT_ENCRYPTION_KEY = originalKey;
   else delete process.env.ORBIT_ENCRYPTION_KEY;
+  if (originalOpenRouterKey) process.env.OPENROUTER_API_KEY = originalOpenRouterKey;
+  else delete process.env.OPENROUTER_API_KEY;
 });
 
 describe('credential isolation', () => {
@@ -40,6 +48,43 @@ describe('credential isolation', () => {
     expect(() => decryptCredential('john', encrypted.slice(0, -2) + 'ff')).toThrow();
     process.env.ORBIT_ENCRYPTION_KEY = 'b'.repeat(64);
     expect(() => decryptCredential('john', encrypted)).toThrow();
+  });
+});
+
+describe('OpenRouter key resolution', () => {
+  test('prefers the agent key over the environment default', () => {
+    process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.OPENROUTER_API_KEY = 'env-default-key';
+    const encrypted = encryptCredential('john', 'agent-secret-key');
+    const resolved = resolveOpenRouterApiKey('john', encrypted);
+    expect(resolved).toEqual({ apiKey: 'agent-secret-key', source: 'agent' });
+    expect(openRouterKeySource(true)).toBe('agent');
+  });
+  test('falls back to the environment default when the agent has no key', () => {
+    process.env.OPENROUTER_API_KEY = 'env-default-key';
+    delete process.env.ORBIT_ENCRYPTION_KEY;
+    const resolved = resolveOpenRouterApiKey('john', null);
+    expect(resolved).toEqual({ apiKey: 'env-default-key', source: 'environment' });
+    expect(openRouterKeySource(false)).toBe('environment');
+    expect(environmentOpenRouterKey()).toBe('env-default-key');
+  });
+  test('fails when neither an agent key nor an environment default exists', () => {
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.ORBIT_ENCRYPTION_KEY;
+    expect(() => resolveOpenRouterApiKey('john', null)).toThrow('Missing OpenRouter credential');
+    expect(openRouterKeySource(false)).toBe('none');
+    expect(environmentOpenRouterKey()).toBeUndefined();
+  });
+  test('uses the environment default without an encryption key', () => {
+    delete process.env.ORBIT_ENCRYPTION_KEY;
+    process.env.OPENROUTER_API_KEY = 'env-only-without-encryption';
+    expect(resolveOpenRouterApiKey('sarah', undefined)).toEqual({
+      apiKey: 'env-only-without-encryption',
+      source: 'environment',
+    });
+    expect(() => encryptCredential('sarah', 'cannot-save')).toThrow(
+      'Credential encryption is not configured.',
+    );
   });
 });
 describe('bounded manual simulation', () => {

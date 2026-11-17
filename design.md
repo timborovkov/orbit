@@ -200,9 +200,12 @@ one editor and one save bar. Playground places a composer beside the latest pers
 result and explicitly names paid inference and suppressed external actions. Empty
 results explain what will appear; failures and interrupted runs show actual state.
 History uses native details/summary for run content and exact configuration snapshots.
-Cost remains unavailable when not recorded, never fabricated. Access shows credential
-presence, accepts a password input, clears it after submission and never reads the
-secret back. Removal retains a visible missing-credential state.
+Cost remains unavailable when not recorded, never fabricated. Access shows which
+OpenRouter key source is active—agent key, environment default or none—by label only,
+never by value or prefix. It accepts a password input for an agent override, clears
+it after submission and never reads the secret back. Removing an agent key falls back
+to the environment default when configured; otherwise it retains a visible missing-key
+state. No loading skeletons on Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents

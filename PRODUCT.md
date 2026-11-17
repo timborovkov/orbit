@@ -15,8 +15,9 @@ and infrastructure specification is [architecture.md](architecture.md).
 ## Capabilities and constraints
 
 This milestone provides editable database-backed templates, immutable agent
-configuration versions, encrypted per-agent OpenRouter keys, and persisted manual
-simulations. Inference is real; every proposed external action is suppressed.
+configuration versions, an optional OpenRouter environment default with encrypted
+per-agent key overrides, and persisted manual simulations. Inference is real; every
+proposed external action is suppressed.
 Schedules, channel integrations and live actions are outside this milestone.
 No invented metrics, provider activity or successful model responses belong in the UI.
 

@@ -12,7 +12,8 @@ foundation. Use the emblem's violet only for the active editing section and tab
 indicator. Single-pixel boundaries divide work areas; no stacked generic cards.
 
 STORY: Identify the agent and saved version, edit its identity/behaviour/models,
-connect its private key, then test an input and inspect the resulting decisions.
+confirm its OpenRouter key source (agent override or environment default), then test
+an input and inspect the resulting decisions.
 
 FIRST VIEWPORT: Compact branded breadcrumb header; identity and version row;
 Configuration/Playground/History/Access tabs. Configuration has a narrow section

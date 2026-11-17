@@ -68,15 +68,38 @@ test('template copies, independent versions, encrypted keys and durable manual r
   }
   await page.getByRole('radio', { name: 'Light', exact: true }).check();
   await page.getByRole('tab', { name: 'Access', exact: true }).click();
-  await page.getByLabel('API key', { exact: true }).fill('test-only-secret-never-use');
-  await page.getByRole('button', { name: 'Save credential', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'No key available', exact: true })).toBeVisible();
+  await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.screenshot({
+      path: `test-results/access-none-Light-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByLabel('Agent API key', { exact: true }).fill('test-only-secret-never-use');
+  await page.getByRole('button', { name: 'Save agent key', exact: true }).click();
   await expect(page.getByText('Credential saved encrypted.', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('API key', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('Agent API key', { exact: true })).toHaveValue('');
+  await expect(
+    page.getByRole('heading', { name: "Using this agent's key", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Agent key', { exact: true })).toBeVisible();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.screenshot({
+      path: `test-results/access-agent-Light-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   const [john] =
     await sql`SELECT a.id,c.encrypted_key FROM agents a JOIN agent_credentials c ON c.agent_id=a.id WHERE a.name='John'`;
   expect(john.encrypted_key).not.toContain('test-only-secret');
-  await page.getByRole('button', { name: 'Remove credential', exact: true }).click();
-  await expect(page.getByText('No credential saved.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Remove agent key', exact: true }).click();
+  await expect(page.getByText('Credential removed.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'No key available', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Playground', exact: true }).click();
   const input = 'Can you help me with product setup and choosing a plan?';
   await expect(page.getByLabel('Configuration version')).toHaveValue(

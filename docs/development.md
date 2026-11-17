@@ -40,6 +40,6 @@ S3_BUCKET=orbit-test bun run storage:setup
 bun run test:e2e
 ```
 
-The production-build suite checks password login, session revocation, throttling, PostgreSQL persistence, controls, themes and accessibility at five viewport widths. The development suite checks cookie-free local bypass and audit identity. Screenshots and failure evidence are written to ignored `test-results/`. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium installation.
+The production-build suite checks password login, session revocation, throttling, PostgreSQL persistence, controls, themes and accessibility at five viewport widths. A separate OpenRouter environment-default suite starts the built app with `OPENROUTER_API_KEY` and checks Access tab source states. The development suite checks cookie-free local bypass and audit identity. Screenshots and failure evidence are written to ignored `test-results/`. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium installation.
 
 The profile-picture browser test uses the local Compose RustFS instance, stopping and starting it to verify storage failure handling and durable images. It requires the local-only storage credentials in `.env.example`; it never uses a remote bucket. Do not run PostgreSQL-mutating suites concurrently.
