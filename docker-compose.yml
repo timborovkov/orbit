@@ -16,6 +16,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  rustfs:
+    image: rustfs/rustfs:1.0.6
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ENABLE: 'true'
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-orbit_local}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-orbit_local_storage_only}
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:9000/health']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
   web:
     profiles: ['app']
     build:
@@ -28,6 +48,12 @@ services:
       APP_URL: ${APP_URL:-http://localhost:3000}
       ORBIT_ADMIN_EMAIL: ${ORBIT_ADMIN_EMAIL:-}
       ORBIT_ADMIN_PASSWORD: ${ORBIT_ADMIN_PASSWORD:-}
+      ORBIT_ENCRYPTION_KEY: ${ORBIT_ENCRYPTION_KEY:-}
+      S3_ENDPOINT: http://rustfs:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-orbit}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-orbit_local}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-orbit_local_storage_only}
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,4 +64,5 @@ services:
       dockerfile: docker/worker.Dockerfile
 
 volumes:
+  rustfs_data:
   postgres_data:

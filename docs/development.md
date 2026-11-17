@@ -35,7 +35,11 @@ Browser tests use a **disposable `orbit_test` database and truncate its foundati
 ```sh
 docker compose exec postgres createdb -U orbit orbit_test
 DATABASE_URL=postgres://orbit:orbit_dev@localhost:5432/orbit_test bun run db:migrate
+docker compose up -d --wait rustfs
+S3_BUCKET=orbit-test bun run storage:setup
 bun run test:e2e
 ```
 
 The production-build suite checks password login, session revocation, throttling, PostgreSQL persistence, controls, themes and accessibility at five viewport widths. The development suite checks cookie-free local bypass and audit identity. Screenshots and failure evidence are written to ignored `test-results/`. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium installation.
+
+The profile-picture browser test uses the local Compose RustFS instance, stopping and starting it to verify storage failure handling and durable images. It requires the local-only storage credentials in `.env.example`; it never uses a remote bucket. Do not run PostgreSQL-mutating suites concurrently.

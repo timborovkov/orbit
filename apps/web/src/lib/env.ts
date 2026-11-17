@@ -3,7 +3,17 @@ import { z } from 'zod';
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 const isLoopback = (value: string) =>
   URL.canParse(value) && loopbackHosts.has(new URL(value).hostname);
-const base = z.object({ DATABASE_URL: z.url(), APP_URL: z.url() });
+const base = z.object({
+  DATABASE_URL: z.url(),
+  APP_URL: z.url(),
+  ORBIT_ENCRYPTION_KEY: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z
+      .string()
+      .regex(/^[a-fA-F0-9]{64}$/)
+      .optional(),
+  ),
+});
 const passwordAuth = base
   .extend({
     AUTH_DISABLED: z.literal('false'),

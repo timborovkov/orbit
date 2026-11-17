@@ -10,6 +10,16 @@ Read [architecture.md](architecture.md) before making product or infrastructure 
 
 Before building or changing UI, read [design.md](design.md). Follow its current design direction and task-appropriate design skills. After implementing UI changes, capture established decisions, style guidance and verification in `design.md`, as requested by the user. Keep this as the single design reference rather than creating a duplicate uppercase file.
 
+## Next.js UI and logic boundaries
+
+- Use App Router Server Components by default. Pages compose views and load data through `lib/server` queries; keep SQL, transactions, storage orchestration and business rules out of JSX components.
+- Client Components own interactive UI state, event handlers and browser APIs. Keep client boundaries small; pass only the data the view needs, never credentials or server configuration. UI-specific logic may stay with its component; do not extract every event handler into a hook.
+- Server Actions and Route Handlers are request adapters. Authenticate every entry point, check mutation origins, validate untrusted input, invoke a feature service, then handle redirects, HTTP responses and revalidation. Do not treat `'use server'` as authorization.
+- Put web data access and mutation services in `apps/web/src/lib/server`, guarded by `import 'server-only'`. Query entry points enforce authorization and return view data rather than secret-bearing records. Internal mutation services accept validated typed inputs and the authenticated audit actor; only authorized server adapters may invoke them.
+- Keep worker-shared execution in `lib/runtime`, without React, Next.js request APIs, `FormData` or `server-only` imports. Web and worker callers provide their own authorization context. Schemas and pure transformations can be shared with UI where safe; never import database, encryption or provider modules into Client Components.
+- Server Components may call server queries directly; do not introduce an internal HTTP API or client-side fetching merely to separate files. Use feature-focused modules, not generic repositories or extra service layers without a concrete need.
+- Verify refactors with existing behavior tests, including authentication, independent versions, persistence and error handling. Separation should preserve behavior and visual output.
+
 ## Repository work
 
 - Use `@/*` for application imports. Prettier owns import ordering; run it after adding imports. Keep server actions grouped by feature and reusable authentication behaviour in `lib/auth.ts`.

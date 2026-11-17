@@ -35,7 +35,7 @@ async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 test.beforeEach(async () => {
-  await sql`TRUNCATE sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE simulation_runs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 test.afterAll(async () => {
@@ -71,7 +71,11 @@ test('private login, persisted workspace, keyboard dialog, themes and screenshot
   await trigger.click();
   await expect(page.getByLabel(/^Name/)).toBeFocused();
   await page.keyboard.press('Shift+Tab');
+  await expect(page.getByLabel('Template', { exact: true })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
   await expect(page.getByRole('button', { name: 'Close dialog' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Template', { exact: true })).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByLabel(/^Name/)).toBeFocused();
   await page.keyboard.press('Tab');

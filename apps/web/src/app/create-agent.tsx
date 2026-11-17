@@ -12,7 +12,11 @@ const empty = {
   error: '',
   errors: {} as { name?: string[]; mission?: string[] },
 };
-export function CreateAgent() {
+export function CreateAgent({
+  templates,
+}: {
+  templates: { id: string; title: string; mission: string }[];
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
   const missionInput = useRef<HTMLTextAreaElement>(null);
@@ -83,6 +87,23 @@ export function CreateAgent() {
           }}
         >
           <fieldset aria-disabled={pending}>
+            <label htmlFor="agent-template">Template</label>
+            <select
+              id="agent-template"
+              name="templateId"
+              defaultValue="blank"
+              disabled={pending}
+              onChange={(event) => {
+                const template = templates.find((item) => item.id === event.target.value);
+                setForm((previous) => ({ ...previous, mission: template?.mission ?? '' }));
+              }}
+            >
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.title}
+                </option>
+              ))}
+            </select>
             <label htmlFor="agent-name">
               Name <span className="field-required">Required</span>
             </label>

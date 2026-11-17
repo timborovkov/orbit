@@ -24,6 +24,7 @@ Orbit is not a multi-tenant SaaS in its first incarnation, nor a single-purpose 
 | --- | --- |
 | UI | Next.js App Router, TypeScript, Bun, Tailwind, shadcn/ui |
 | Data | PostgreSQL, pgvector, Drizzle ORM |
+| Object storage | RustFS using its S3-compatible API; persistent volume and private buckets |
 | Agents | Vercel AI SDK with OpenRouter; model and API key per agent |
 | Workers | Separate Bun worker process sharing application modules |
 | Scheduling | Durable PostgreSQL-backed jobs; LISTEN/NOTIFY only as a wake-up signal |
@@ -33,7 +34,7 @@ Orbit is not a multi-tenant SaaS in its first incarnation, nor a single-purpose 
 | Email | Resend for sending and inbound routing; PostgreSQL-backed virtual inboxes |
 | Research | Exa web search; optional Firecrawl extraction and Browserbase later |
 
-Deployment target: one web service, one worker service and PostgreSQL on Railway. No Go, Redis, Kafka, Kubernetes or per-agent containers for the MVP. Separate credentials and data scopes provide logical isolation.
+Deployment target: one web service, one worker service, PostgreSQL and RustFS on Railway. RustFS uses a persistent data volume; the web service accesses its private S3 endpoint. No Go, Redis, Kafka, Kubernetes or per-agent containers for the MVP. Separate credentials and data scopes provide logical isolation.
 
 ## 4. Core agent model
 | Element | Meaning |
@@ -49,6 +50,8 @@ Deployment target: one web service, one worker service and PostgreSQL on Railway
 | Knowledge | Agent-scoped documents and retrieved source passages |
 | Memory | Structured person/conversation state and searchable facts |
 | Execution mode | Fixture simulation, real-data shadow mode or permitted live mode |
+
+Profile pictures are mutable agent identity, separate from versioned runtime configuration. Administrators can upload, replace or remove a picture; the web service validates and normalizes it, stores it in a private RustFS bucket, and saves only its object key in PostgreSQL. Authenticated routes serve pictures. Pictures are not included in model prompts or simulation snapshots.
 
 An agent is a durable identity. Changing prompts, models, tools or policies creates a versioned configuration; relationships and conversation history survive revisions. Agents can be paused or archived. No internal agent-to-agent handoff framework is required: agents can introduce one another through ordinary authorised channels.
 
@@ -193,7 +196,7 @@ Event coordination and research may be added as further templates without new ru
 - Jobs: use a PostgreSQL-backed durable queue with transactional enqueue, SKIP LOCKED claims, leases, retries, dead-letter state and periodic recovery polling. LISTEN/NOTIFY is an optional wake-up optimisation, never the sole delivery mechanism. Codex chooses a maintained library or a small implementation that satisfies these recovery semantics.
 - External writes: store an action intent and idempotency key before dispatch. If the provider response is ambiguous, reconcile the provider state before any retry. Preserve the complete audit trail.
 - Tool policies: read-only tools can execute automatically within budgets. Public posting and relationship actions require explicit per-agent enablement and platform permission. Private messages, introductions, personal-data sharing, bookings and other consequential actions require applicable recipient consent; sensitive or irreversible operations additionally require administrator approval. All checks occur in deterministic code.
-- Knowledge files: use Railway-compatible S3 object storage for originals and attachments; PostgreSQL holds metadata, extraction state, text chunks and pgvector embeddings. Initially accept PDF, TXT and Markdown. Expand formats through extractors without changing the core data model.
+- Knowledge files: use RustFS through its S3-compatible API for originals and attachments; PostgreSQL holds metadata, extraction state, text chunks and pgvector embeddings. Initially accept PDF, TXT and Markdown. Expand formats through extractors without changing the core data model.
 - Budgets: every agent has configurable daily and monthly OpenRouter spending caps, provider request quotas, outbound-action caps, concurrency limits, a maximum of 10 tool steps per run and a five-minute run deadline as initial defaults. Reject or defer work when limits are reached; do not treat limits as activity targets.
 - Cross-agent data: default to isolated agent memories, conversations, credentials and knowledge. Administrators may explicitly attach shared knowledge libraries; private relationship memories do not automatically cross agent boundaries. No automatic cross-agent relationship visibility. Identity links within an agent are evidence-backed, autonomous and reversible; shared libraries require explicit grants.
 - Email: use Resend for outbound sending and inbound routing to agent-specific addresses on a dedicated subdomain, with PostgreSQL-backed virtual inboxes. Validate provider account features, domain verification, webhooks and deliverability during integration; use supported APIs only. If an account lacks inbound access, keep email receiving disabled until enabled rather than changing the architecture.
@@ -277,7 +280,7 @@ Event coordination and research may be added as further templates without new ru
 - Evaluations combine deterministic assertions, model judges and human feedback. Administrators can rate, correct and save regression cases, and compare model/prompt versions side by side.
 - Orbit shows detailed execution timelines, operational metrics and goal outcomes; Langfuse stores diagnostic traces, not the authoritative job/action ledger.
 - Authentication initially supports environment-configured administrator credentials, with OAuth and magic links with allowlisted emails planned; local-only `AUTH_DISABLED` bypass is explicitly guarded. Secrets are encrypted in PostgreSQL with an external master key. Zod validates environment configuration.
-- Web + worker + PostgreSQL deploy on Railway with Docker, Compose and per-service Railway config. S3-compatible object storage holds files. Jobs recover with reconciliation, integration failures degrade only affected capabilities, hard per-agent budgets apply, and automated backups are periodically restore-tested.
+- Web + worker + PostgreSQL deploy on Railway with Docker, Compose and per-service Railway config. RustFS provides S3-compatible object storage for files on a persistent volume; back up object data alongside PostgreSQL references. Jobs recover with reconciliation, integration failures degrade only affected capabilities, hard per-agent budgets apply, and automated backups are periodically restore-tested.
 - Evaluation and safety checks must pass before live activation, but **only an administrator** can enable live mode, pause, resume or stop an agent. The first complete release must support permitted real external actions, not merely a shadow demo.
 
 ## 20. Definition of success

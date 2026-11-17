@@ -4,8 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { agents, audit } from '@/lib/schema';
+import { createAgentFromTemplate } from '@/lib/server/agents-mutations';
 
 export async function createAgent(form: FormData) {
   await checkOrigin();
@@ -18,11 +17,12 @@ export async function createAgent(form: FormData) {
     .safeParse({ name: form.get('name'), mission: form.get('mission') });
   if (!parsed.success)
     return { ok: false as const, errors: z.flattenError(parsed.error).fieldErrors };
-  const data = parsed.data;
-  await db().transaction(async (tx) => {
-    await tx.insert(agents).values(data);
-    await tx.insert(audit).values({ actor, action: `Created paused agent: ${data.name}` });
-  });
+  const templateId = z
+    .string()
+    .max(80)
+    .parse(form.get('templateId') ?? 'blank');
+  const result = await createAgentFromTemplate(actor, templateId, parsed.data);
+  if (!result.ok) return result;
   revalidatePath('/');
   return { ok: true as const };
 }
