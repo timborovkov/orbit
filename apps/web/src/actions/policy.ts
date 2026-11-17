@@ -4,10 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
-import { recordConsent } from '@/lib/policy/consent';
-import { reviewProposedAction } from '@/lib/policy/gateway';
 import { consentScope, proposalTypes, recipientId } from '@/lib/policy/scopes';
 import { persistApprovalTools } from '@/lib/server/lifecycle-mutations';
+import { recordConsent, reviewProposedAction } from '@/lib/server/policy-mutations';
 
 export async function saveApprovalTools(form: FormData) {
   await checkOrigin();

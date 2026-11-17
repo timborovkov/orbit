@@ -4,13 +4,7 @@ import postgres from 'postgres';
 
 import { budgetDefaults, BudgetError, budgetViolationMessage } from '@/lib/budgets';
 import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
-import { recordConsent } from '@/lib/policy/consent';
-import {
-  authorizeAction,
-  loadPolicyContext,
-  reserveRequestQuota,
-  reviewProposedAction,
-} from '@/lib/policy/gateway';
+import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import {
   enqueueSimulation,
   finalizeExhaustedSimulationJob,
@@ -19,6 +13,7 @@ import {
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
+import { recordConsent, reviewProposedAction } from '@/lib/server/policy-mutations';
 
 const databaseUrl = 'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
 process.env.DATABASE_URL = databaseUrl;
@@ -399,11 +394,12 @@ test('queue retries keep reservation-only progress under the hard cap', async ()
   expect('runId' in queued && queued.runId).toBeTruthy();
   const runId = queued.runId!;
 
-  // Mimic a durable post-call checkpoint failure: allowance claimed, response never saved.
+  // Mimic a durable post-dispatch checkpoint failure: provider was reached, response never saved.
   await sql`
     UPDATE simulation_runs
     SET result = ${sql.json({
       reservedStages: ['evaluator'],
+      dispatchedStages: ['evaluator'],
       steps: [],
       actions: [],
       error: null,

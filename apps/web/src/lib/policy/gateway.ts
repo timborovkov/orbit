@@ -124,7 +124,7 @@ export async function loadPolicyContext(
   };
 }
 
-function evaluateCandidate(
+export function evaluateCandidate(
   ctx: PolicyContext,
   action: CandidateAction,
   consentFailure: string | null = null,
@@ -337,83 +337,6 @@ export async function authorizeAction(
       reasons: evaluated.reasons,
       intentId: intent.id,
       violation: evaluated.violation,
-    };
-  });
-}
-
-/** A review records the human decision. Authorizing a real dispatch is outside simulation. */
-export async function reviewProposedAction(
-  actor: string,
-  agentId: string,
-  intentId: string,
-  reviewStatus: 'approved' | 'rejected',
-) {
-  return db().transaction(async (tx) => {
-    const agent = (
-      await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update')
-    ).at(0);
-    if (!agent) return { error: 'Agent not found.' };
-    const intent = (
-      await tx
-        .select()
-        .from(actionIntents)
-        .where(and(eq(actionIntents.id, intentId), eq(actionIntents.agentId, agentId)))
-        .for('update')
-    ).at(0);
-    if (intent?.reviewStatus !== 'pending')
-      return { error: 'This proposal is no longer awaiting review.' };
-
-    const ctx = await loadPolicyContext(agentId, actor, intent.runId, tx);
-    if (!ctx) return { error: 'Agent not found.' };
-    const consentFailure = await missingRecipientConsent(
-      tx,
-      agentId,
-      intent.actionType,
-      intent.recipients,
-    );
-    const policy = evaluateCandidate(
-      ctx,
-      { type: intent.actionType, idempotencyKey: intent.idempotencyKey },
-      consentFailure,
-    );
-    const run = intent.runId
-      ? (await tx.select({ status: runs.status }).from(runs).where(eq(runs.id, intent.runId))).at(0)
-      : undefined;
-    const approvalBlock =
-      (run && run.status !== 'completed'
-        ? 'The simulation must complete before approval.'
-        : null) ?? (policy.decision === 'deny' ? policy.reasons.join(' ') : null);
-
-    const reviewBlocked = reviewStatus === 'approved' && approvalBlock !== null;
-    const decision = reviewStatus === 'approved' && !reviewBlocked ? 'suppressed' : 'deny';
-    const reason = reviewBlocked
-      ? approvalBlock
-      : reviewStatus === 'approved'
-        ? 'Administrator approved this proposal for simulation.'
-        : 'Administrator rejected this proposal.';
-    await tx.insert(policyDecisions).values({
-      agentId,
-      runId: intent.runId,
-      actionType: intent.actionType,
-      decision,
-      reasons: [reason],
-      intentId,
-      actor,
-    });
-    if (reviewBlocked) return { error: approvalBlock };
-    await tx
-      .update(actionIntents)
-      .set({
-        decision,
-        reasons: [reason],
-        reviewStatus,
-        reviewedBy: actor,
-        reviewedAt: new Date(),
-      })
-      .where(eq(actionIntents.id, intentId));
-    return {
-      message:
-        reviewStatus === 'approved' ? 'Proposal approved for simulation.' : 'Proposal rejected.',
     };
   });
 }

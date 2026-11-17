@@ -105,6 +105,14 @@ describe('bounded manual simulation', () => {
     ).toBe(true);
     expect(
       hasSimulationProgress({
+        dispatchedStages: ['evaluator'],
+        steps: [],
+        actions: [],
+        error: null,
+      }),
+    ).toBe(true);
+    expect(
+      hasSimulationProgress({
         steps: [
           {
             stage: 'evaluator',
@@ -274,7 +282,7 @@ describe('bounded manual simulation', () => {
     expect(resumed.steps).toHaveLength(2);
     expect(resumed.error).toBeNull();
   });
-  test('ambiguous post-dispatch retryables keep the reservation', async () => {
+  test('ambiguous post-dispatch retryables mark the stage dispatched', async () => {
     const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
     let durable: SimulationResult | undefined;
     const first = await simulate(
@@ -290,37 +298,40 @@ describe('bounded manual simulation', () => {
     ).catch((error: unknown) => error);
     expect(first).toBeInstanceOf(RetryableInfrastructureError);
     expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.dispatchedStages).toEqual(['evaluator']);
     expect(durable?.steps).toHaveLength(0);
   });
-  test('failed post-inference checkpoint keeps the reserved step across retries', async () => {
-    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+  test('pre-dispatch cleanup write failures remain retryable', async () => {
+    const { PreDispatchInfrastructureError, RetryableInfrastructureError } =
+      await import('@/lib/runtime/errors');
     const models: string[] = [];
     let durable: SimulationResult | undefined;
-    let failStepCheckpoint = false;
+    let releaseAttempts = 0;
     const first = await simulate(
       config,
       'question',
       async (request) => {
         models.push(request.model);
-        failStepCheckpoint = true;
-        return { decision, inputTokens: 1, outputTokens: 1 };
+        throw new PreDispatchInfrastructureError('quota reservation db blip');
       },
       async (partial) => {
-        // Mimic a durable store: only commit on success. The post-call step write fails
-        // after reservation already landed, so retry sees reservedStages without steps.
-        if (failStepCheckpoint && partial.steps.some((step) => step.stage === 'evaluator')) {
-          failStepCheckpoint = false;
-          throw new RetryableInfrastructureError('post-call checkpoint blip');
+        // First write reserves; cleanup tries to clear and fails — pending reservation remains.
+        if (
+          durable?.reservedStages?.includes('evaluator') &&
+          !(partial.reservedStages?.includes('evaluator') ?? false)
+        ) {
+          releaseAttempts += 1;
+          throw new RetryableInfrastructureError('cleanup checkpoint blip');
         }
         durable = structuredClone(partial);
       },
       { maxSteps: 2 },
     ).catch((error: unknown) => error);
-    expect(first).toBeInstanceOf(RetryableInfrastructureError);
-    expect(models).toEqual(['test/evaluator']);
+    expect(first).toBeInstanceOf(PreDispatchInfrastructureError);
+    expect(releaseAttempts).toBe(1);
     expect(durable?.reservedStages).toEqual(['evaluator']);
-    expect(durable?.steps).toHaveLength(0);
-    if (!durable) throw new Error('expected reservation checkpoint');
+    expect(durable?.dispatchedStages).toBeUndefined();
+    if (!durable) throw new Error('expected pending reservation');
 
     const resumed = await simulate(
       config,
@@ -334,10 +345,58 @@ describe('bounded manual simulation', () => {
       },
       { maxSteps: 2, initial: durable },
     );
-    // Must not re-dispatch evaluator or continue to main — reservation already burned the slot.
+    expect(models).toEqual(['test/evaluator', 'test/evaluator', 'test/main']);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.error).toBeNull();
+  });
+  test('failed post-inference checkpoint keeps the dispatched step across retries', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    let failStepCheckpoint = false;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        failStepCheckpoint = true;
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        // Mimic a durable store: only commit on success. After dispatch is marked, the step
+        // body write fails — retry must see dispatchedStages and refuse a redo.
+        if (failStepCheckpoint && partial.steps.some((step) => step.stage === 'evaluator')) {
+          failStepCheckpoint = false;
+          throw new RetryableInfrastructureError('post-call checkpoint blip');
+        }
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(RetryableInfrastructureError);
+    expect(models).toEqual(['test/evaluator']);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.steps).toHaveLength(0);
+    if (!durable) throw new Error('expected dispatch checkpoint');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2, initial: durable },
+    );
+    // Must not re-dispatch evaluator or continue to main — dispatch already burned the slot.
     expect(models).toEqual(['test/evaluator']);
     expect(resumed.steps).toHaveLength(0);
     expect(resumed.reservedStages).toEqual(['evaluator']);
+    expect(resumed.dispatchedStages).toEqual(['evaluator']);
     expect(resumed.error).toContain('already used this model step');
   });
   test('ownership loss at checkpoint stops before the next model stage', async () => {

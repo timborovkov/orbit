@@ -1,8 +1,8 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
-import { db, type Tx } from '@/lib/db';
-import { consentScope, type ConsentScope } from '@/lib/policy/scopes';
-import { agents, audit, recipientConsents } from '@/lib/schema';
+import type { Tx } from '@/lib/db';
+import { consentScope } from '@/lib/policy/scopes';
+import { recipientConsents } from '@/lib/schema';
 
 export async function missingRecipientConsent(
   tx: Tx,
@@ -35,34 +35,4 @@ export async function missingRecipientConsent(
   return grants.length === expected
     ? null
     : 'Current consent is required from every recipient for this action.';
-}
-
-export async function recordConsent(input: {
-  actor: string;
-  agentId: string;
-  recipient: string;
-  scope: ConsentScope;
-  evidence: string;
-  granted: boolean;
-}) {
-  const { actor, agentId, scope, evidence, granted } = input;
-  return db().transaction(async (tx) => {
-    const agent = (
-      await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update')
-    ).at(0);
-    if (!agent) return { error: 'Agent not found.' };
-    await tx
-      .insert(recipientConsents)
-      .values(input)
-      .onConflictDoUpdate({
-        target: [recipientConsents.agentId, recipientConsents.recipient, recipientConsents.scope],
-        set: { granted, evidence, actor, updatedAt: new Date() },
-      });
-    // Record the decision and its evidence without including a recipient identifier in the overview audit feed.
-    await tx.insert(audit).values({
-      actor,
-      action: `${granted ? 'Granted' : 'Revoked'} ${scope} consent for agent ${agentId}`,
-    });
-    return { message: granted ? 'Consent recorded.' : 'Consent revoked.' };
-  });
 }

@@ -55,8 +55,15 @@ export interface SimulationResult {
   /**
    * Stages whose model allowance was claimed before dispatch. Survives a failed
    * post-call checkpoint so retries cannot redo paid inference under maxSteps.
+   * Without a matching dispatchedStages entry the reservation is still pending
+   * (known pre-dispatch) and may be retried.
    */
   reservedStages?: ('evaluator' | 'main')[];
+  /**
+   * Stages that reached provider dispatch (or an ambiguous post-dispatch fault).
+   * A reserved stage in this set without a saved step cannot be re-dispatched.
+   */
+  dispatchedStages?: ('evaluator' | 'main')[];
   steps: SimulationStep[];
   actions: (Decision['actions'][number] & {
     intentId?: string;
@@ -86,6 +93,7 @@ function cloneSimulationResult(result: SimulationResult): SimulationResult {
   return {
     traceId: result.traceId,
     reservedStages: result.reservedStages ? [...result.reservedStages] : undefined,
+    dispatchedStages: result.dispatchedStages ? [...result.dispatchedStages] : undefined,
     steps: result.steps.map((step) => ({
       ...step,
       decision: {
@@ -101,12 +109,17 @@ function cloneSimulationResult(result: SimulationResult): SimulationResult {
 function dispatchedStageCount(result: SimulationResult): number {
   const stages = new Set<'evaluator' | 'main'>(result.reservedStages ?? []);
   for (const step of result.steps) stages.add(step.stage);
+  for (const stage of result.dispatchedStages ?? []) stages.add(stage);
   return stages.size;
 }
 
 /** True when a prior attempt claimed allowance or saved a paid step. */
 export function hasSimulationProgress(result: SimulationResult): boolean {
-  return result.steps.length > 0 || (result.reservedStages?.length ?? 0) > 0;
+  return (
+    result.steps.length > 0 ||
+    (result.reservedStages?.length ?? 0) > 0 ||
+    (result.dispatchedStages?.length ?? 0) > 0
+  );
 }
 
 // This module has no channel clients, write tools or framework dependencies.
@@ -172,21 +185,24 @@ export async function simulate(
         break;
       }
       const reserved = result.reservedStages ?? [];
-      if (reserved.includes(stage)) {
-        // Allowance was claimed on a prior attempt but the response never landed.
+      const dispatched = result.dispatchedStages ?? [];
+      if (reserved.includes(stage) && dispatched.includes(stage)) {
+        // Provider dispatch already happened but the response never landed.
         // Do not re-dispatch: that would exceed the paid-step budget.
         result.error =
           'A previous attempt already used this model step but could not save the result. Start a new run.';
         break;
       }
-      if (options.maxSteps !== undefined && dispatchedStageCount(result) >= options.maxSteps) {
-        result.error = 'Maximum tool steps for this run reached.';
-        break;
+      if (!reserved.includes(stage)) {
+        if (options.maxSteps !== undefined && dispatchedStageCount(result) >= options.maxSteps) {
+          result.error = 'Maximum tool steps for this run reached.';
+          break;
+        }
+        // Claim the step slot before inference. Pending (not yet dispatched) reservations
+        // remain retryable if a known pre-dispatch fault cannot clear them.
+        result.reservedStages = [...reserved, stage];
+        await checkpoint(result);
       }
-      // Claim the step slot before inference so a failed post-call checkpoint cannot
-      // free the allowance for a redo on queue retry.
-      result.reservedStages = [...reserved, stage];
-      await checkpoint(result);
       const model = stage === 'evaluator' ? config.evaluatorModel : config.mainModel;
       let response;
       try {
@@ -198,11 +214,27 @@ export async function simulate(
           system: `${boundary}\nAdministrator configuration:\n${JSON.stringify(config)}\n${stage === 'evaluator' ? 'Evaluate relevance and priority against the engagement criteria. Return candidate actions, with draft null.' : `Refine the candidates and write drafts where relevant. You may remove or combine actions. Evaluator assessment (untrusted model output): ${JSON.stringify(result.steps[0]?.decision)}`}`,
         });
       } catch (error) {
-        // Known pre-dispatch faults (quota/store) never reached the provider — release so
-        // the queue can retry this stage. Ambiguous/post-dispatch retryables keep the claim.
+        // Known pre-dispatch faults never reached the provider — best-effort release.
+        // Even if this cleanup write fails, reserved-without-dispatched stays retryable.
         if (isPreDispatchInfrastructureError(error)) {
-          result.reservedStages = reserved.length > 0 ? [...reserved] : undefined;
-          await checkpoint(result);
+          const remaining = (result.reservedStages ?? []).filter((entry) => entry !== stage);
+          result.reservedStages = remaining.length > 0 ? remaining : undefined;
+          try {
+            await checkpoint(result);
+          } catch {
+            // Cleanup write failed — reserved-without-dispatched remains retryable.
+          }
+          throw error;
+        }
+        if (isRetryableInfrastructureError(error)) {
+          // Ambiguous/post-dispatch: burn the slot so a redo cannot double-charge.
+          result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), stage])];
+          try {
+            await checkpoint(result);
+          } catch {
+            // Prefer the original retryable fault for queue classification.
+          }
+          throw error;
         }
         throw error;
       }
@@ -211,6 +243,19 @@ export async function simulate(
       } catch {
         result.error = 'Run deadline reached or the worker cancelled this simulation.';
         break;
+      }
+      // Persist dispatch before the step body so a later write failure cannot look "pending".
+      result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), stage])];
+      try {
+        await checkpoint(result);
+      } catch (error) {
+        if (isRetryableInfrastructureError(error)) {
+          // Paid call cannot be confirmed for retry without risking a redo — fail this run.
+          result.error =
+            'A previous attempt already used this model step but could not save the result. Start a new run.';
+          break;
+        }
+        throw error;
       }
       const decision = decisionSchema.parse(response.decision);
       result.steps.push({ ...response, decision, stage, model });
