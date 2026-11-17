@@ -275,24 +275,48 @@ async function processSimulationRun(
     ).at(0);
     if (!config) return null;
     const executionToken = randomUUID();
+    // First claim starts the wall-clock deadline; retries keep the original expiresAt.
+    const expiresAt =
+      run.status === 'queued'
+        ? new Date(Date.now() + budgets.runDeadlineSeconds * 1000)
+        : run.expiresAt;
     await tx
       .update(runs)
       .set({
         status: 'running',
         executionToken,
-        expiresAt: new Date(Date.now() + budgets.runDeadlineSeconds * 1000),
+        expiresAt,
       })
       .where(eq(runs.id, run.id));
-    return { skip: false as const, run, agent, config, budgets, executionToken };
+    return {
+      skip: false as const,
+      run: { ...run, status: 'running' as const, expiresAt },
+      agent,
+      config,
+      budgets,
+      executionToken,
+      expiresAt,
+    };
   });
 
   if (!claimed) return;
   if (claimed.skip) return;
 
-  const { run, config, budgets, executionToken } = claimed;
-  const startedAt = new Date();
-  const deadlineMs = budgets.runDeadlineSeconds * 1000;
-  const deadlineSignal = AbortSignal.timeout(deadlineMs);
+  const { run, config, budgets, executionToken, expiresAt } = claimed;
+  // Reconstruct the original start so deadline checks accumulate across retries.
+  const startedAt = new Date(expiresAt.getTime() - budgets.runDeadlineSeconds * 1000);
+  const remainingMs = expiresAt.getTime() - Date.now();
+  if (remainingMs <= 0) {
+    await retryableStore(() =>
+      updateIfOwned(run.id, executionToken, {
+        status: 'interrupted',
+        finishedAt: new Date(),
+        deferReason: budgetViolationMessage('run-deadline'),
+      }),
+    );
+    return;
+  }
+  const deadlineSignal = AbortSignal.timeout(remainingMs);
   const signal = externalSignal
     ? AbortSignal.any([deadlineSignal, externalSignal])
     : deadlineSignal;

@@ -207,6 +207,57 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
   expect(final.result.actions[0].draft).toBe('replacement draft');
 });
 
+test('retries preserve the original run deadline', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const budgets = { ...budgetDefaults, runDeadlineSeconds: 30 };
+  const config = { ...preset.config, name: 'DeadlineRetry' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'DeadlineRetry',${config.mission},'shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
+  await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'secret-deadline')})`;
+  await sql`UPDATE controls SET paused=false`;
+
+  const queued = await enqueueSimulation({
+    actor: 'test@example.com',
+    agentId: id,
+    configurationId: version.id,
+    input: 'Deadline retry prompt',
+  });
+  expect('runId' in queued && queued.runId).toBeTruthy();
+  const runId = queued.runId!;
+
+  const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+  await expect(
+    processSimulationJob({ runId, agentId: id }, () => async () => {
+      throw new RetryableInfrastructureError('policy store blip');
+    }),
+  ).rejects.toBeInstanceOf(RetryableInfrastructureError);
+
+  const [afterFirst] = await sql`SELECT status, expires_at FROM simulation_runs WHERE id=${runId}`;
+  expect(afterFirst.status).toBe('running');
+  const firstExpiry = new Date(afterFirst.expires_at).getTime();
+
+  await processSimulationJob({ runId, agentId: id }, () => async () => ({
+    decision: {
+      relevant: false,
+      priority: 0,
+      reason: 'done',
+      actions: [],
+    },
+    inputTokens: 1,
+    outputTokens: 1,
+  }));
+
+  const [afterSecond] = await sql`SELECT status, expires_at FROM simulation_runs WHERE id=${runId}`;
+  expect(afterSecond.status).toBe('completed');
+  expect(new Date(afterSecond.expires_at).getTime()).toBe(firstExpiry);
+});
+
 test('finalizeExhaustedSimulationJob clears running runs after dead-letter', async () => {
   const id = randomUUID();
   ids.push(id);
