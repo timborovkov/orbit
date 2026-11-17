@@ -27,7 +27,7 @@ export interface WorkerOptions {
 /**
  * Polling worker with lease heartbeats, expired-lease recovery and SIGTERM drain.
  * LISTEN/NOTIFY is intentionally omitted; polling is the delivery mechanism.
- * Shutdown drains in-flight work without aborting it so simulations stay retryable.
+ * Shutdown waits for an in-flight claim poll, then drains handlers without aborting them.
  */
 export function startJobWorker(options: WorkerOptions) {
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
@@ -36,35 +36,53 @@ export function startJobWorker(options: WorkerOptions) {
   const concurrency = options.concurrency ?? 1;
   const types = Object.keys(options.handlers);
   const inFlight = new Set<Promise<void>>();
+  let activeTick: Promise<void> | null = null;
   let stopped = false;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let recoveryTimer: ReturnType<typeof setInterval> | null = null;
+  // Accessor so awaits do not narrow away concurrent stop() flips.
+  const hasStopped = () => stopped;
 
   const schedulePoll = (delay = pollMs) => {
-    if (stopped) return;
+    if (hasStopped()) return;
     pollTimer = setTimeout(() => {
       void tick();
     }, delay);
   };
 
   const tick = async () => {
-    if (stopped) return;
-    try {
-      const slots = concurrency - inFlight.size;
-      if (slots > 0) {
-        const claimed = await claimJobs({
-          workerId: options.workerId,
-          types,
-          leaseMs,
-          limit: slots,
-        });
-        for (const job of claimed) {
-          const work = runClaimed(job).finally(() => inFlight.delete(work));
-          inFlight.add(work);
+    if (hasStopped()) return;
+    const run = (async () => {
+      try {
+        const slots = concurrency - inFlight.size;
+        if (slots > 0) {
+          const claimed = await claimJobs({
+            workerId: options.workerId,
+            types,
+            leaseMs,
+            limit: slots,
+          });
+          if (hasStopped()) {
+            // Release claims taken after stop began so another worker can retry.
+            await Promise.all(
+              claimed.map((job) => failJob(job.id, options.workerId, 'Worker shutting down')),
+            );
+            return;
+          }
+          for (const job of claimed) {
+            const work = runClaimed(job).finally(() => inFlight.delete(work));
+            inFlight.add(work);
+          }
         }
+      } catch (error) {
+        options.onError?.(error);
       }
-    } catch (error) {
-      options.onError?.(error);
+    })();
+    activeTick = run;
+    try {
+      await run;
+    } finally {
+      if (activeTick === run) activeTick = null;
     }
     schedulePoll(inFlight.size >= concurrency ? pollMs : Math.min(pollMs, 250));
   };
@@ -111,6 +129,7 @@ export function startJobWorker(options: WorkerOptions) {
     stopped = true;
     if (pollTimer) clearTimeout(pollTimer);
     clearInterval(recoveryTimer);
+    if (activeTick) await activeTick;
     // Drain in-flight inference; do not abort so runs can finish or stay retryable.
     await Promise.allSettled([...inFlight]);
   };

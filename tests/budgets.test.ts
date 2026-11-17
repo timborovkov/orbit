@@ -2,12 +2,15 @@ import { expect, test } from 'bun:test';
 
 import {
   budgetDefaults,
+  BudgetError,
   budgetsSchema,
   checkOutboundBudgets,
   checkRequestBudgets,
   checkRunDeadline,
   checkToolStepLimit,
   estimateSpendMicros,
+  isBudgetError,
+  isTrustedBudgetMessage,
   parseBudgets,
 } from '@/lib/budgets';
 
@@ -66,4 +69,14 @@ test('tool step and deadline limits', () => {
 test('spend estimation documents zero when pricing unavailable', () => {
   expect(estimateSpendMicros(100, 50)).toBe(BigInt(0));
   expect(estimateSpendMicros(100, 50, 12)).toBe(BigInt(1800));
+});
+
+test('BudgetError messages are exact trusted allowlist entries', () => {
+  const error = new BudgetError('daily-requests');
+  expect(isBudgetError(error)).toBe(true);
+  expect(isTrustedBudgetMessage(error.message)).toBe(true);
+  expect(isTrustedBudgetMessage('Provider deadline exceeded; Authorization: Bearer secret')).toBe(
+    false,
+  );
+  expect(isBudgetError(new Error(error.message))).toBe(false);
 });

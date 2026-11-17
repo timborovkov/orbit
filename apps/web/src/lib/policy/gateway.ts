@@ -184,61 +184,83 @@ function evaluateCandidate(
 
 /**
  * Single choke point for candidate actions. Always stores an action intent and
- * idempotency key before any dispatch would occur, then records the decision.
+ * idempotency key before any dispatch would occur, then records the decision
+ * in the same transaction so retries cannot leave intent without audit.
  */
 export async function authorizeAction(
   ctx: PolicyContext,
   action: CandidateAction,
-  store: Store = db(),
 ): Promise<PolicyResult> {
   const evaluated = evaluateCandidate(ctx, action);
-  const existing = (
-    await store
-      .select()
-      .from(actionIntents)
-      .where(eq(actionIntents.idempotencyKey, action.idempotencyKey))
-      .limit(1)
-  ).at(0);
-  if (existing) {
+
+  return await db().transaction(async (tx) => {
+    const existing = (
+      await tx
+        .select()
+        .from(actionIntents)
+        .where(eq(actionIntents.idempotencyKey, action.idempotencyKey))
+        .limit(1)
+        .for('update')
+    ).at(0);
+    if (existing) {
+      const audit = (
+        await tx
+          .select({ id: policyDecisions.id })
+          .from(policyDecisions)
+          .where(eq(policyDecisions.intentId, existing.id))
+          .limit(1)
+      ).at(0);
+      if (!audit) {
+        await tx.insert(policyDecisions).values({
+          agentId: ctx.agentId,
+          runId: ctx.runId ?? null,
+          actionType: action.type,
+          decision: existing.decision,
+          reasons: Array.isArray(existing.reasons) ? existing.reasons : [],
+          intentId: existing.id,
+          actor: ctx.actor,
+        });
+      }
+      return {
+        decision: existing.decision as PolicyDecision,
+        reasons: Array.isArray(existing.reasons) ? existing.reasons : [],
+        intentId: existing.id,
+      };
+    }
+
+    const intent = (
+      await tx
+        .insert(actionIntents)
+        .values({
+          agentId: ctx.agentId,
+          runId: ctx.runId ?? null,
+          actionType: action.type,
+          payload: action.payload ?? {},
+          idempotencyKey: action.idempotencyKey,
+          decision: evaluated.decision,
+          reasons: evaluated.reasons,
+        })
+        .returning()
+    ).at(0);
+    if (!intent) throw new Error('Failed to persist action intent');
+
+    await tx.insert(policyDecisions).values({
+      agentId: ctx.agentId,
+      runId: ctx.runId ?? null,
+      actionType: action.type,
+      decision: evaluated.decision,
+      reasons: evaluated.reasons,
+      intentId: intent.id,
+      actor: ctx.actor,
+    });
+
     return {
-      decision: existing.decision as PolicyDecision,
-      reasons: Array.isArray(existing.reasons) ? existing.reasons : [],
-      intentId: existing.id,
+      decision: evaluated.decision,
+      reasons: evaluated.reasons,
+      intentId: intent.id,
+      violation: evaluated.violation,
     };
-  }
-
-  const intent = (
-    await store
-      .insert(actionIntents)
-      .values({
-        agentId: ctx.agentId,
-        runId: ctx.runId ?? null,
-        actionType: action.type,
-        payload: action.payload ?? {},
-        idempotencyKey: action.idempotencyKey,
-        decision: evaluated.decision,
-        reasons: evaluated.reasons,
-      })
-      .returning()
-  ).at(0);
-  if (!intent) throw new Error('Failed to persist action intent');
-
-  await store.insert(policyDecisions).values({
-    agentId: ctx.agentId,
-    runId: ctx.runId ?? null,
-    actionType: action.type,
-    decision: evaluated.decision,
-    reasons: evaluated.reasons,
-    intentId: intent.id,
-    actor: ctx.actor,
   });
-
-  return {
-    decision: evaluated.decision,
-    reasons: evaluated.reasons,
-    intentId: intent.id,
-    violation: evaluated.violation,
-  };
 }
 
 export async function recordUsage(

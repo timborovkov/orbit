@@ -134,18 +134,6 @@ export function checkToolStepLimit(steps: number, budgets: AgentBudgets): Budget
   return steps > budgets.maxToolStepsPerRun ? 'tool-steps' : null;
 }
 
-/** Detect budget messages thrown inside inference so simulate can preserve them. */
-export function isBudgetViolationMessage(message: string): boolean {
-  return (
-    message.includes('cap reached') ||
-    message.includes('quota reached') ||
-    message.includes('deadline') ||
-    message.includes('concurrency') ||
-    message.includes('tool steps') ||
-    message.includes('cancelled this simulation')
-  );
-}
-
 export function checkRunDeadline(
   startedAt: Date,
   now: Date,
@@ -176,4 +164,45 @@ export function budgetViolationMessage(violation: BudgetViolation): string {
     case 'run-deadline':
       return 'Run deadline exceeded.';
   }
+}
+
+/** Trusted internal budget/cancellation errors — never built from provider text. */
+export class BudgetError extends Error {
+  readonly kind: BudgetViolation | 'cancelled';
+
+  constructor(kind: BudgetViolation | 'cancelled') {
+    super(
+      kind === 'cancelled'
+        ? 'Run deadline reached or the worker cancelled this simulation.'
+        : budgetViolationMessage(kind),
+    );
+    this.name = 'BudgetError';
+    this.kind = kind;
+  }
+}
+
+export function isBudgetError(error: unknown): error is BudgetError {
+  return error instanceof BudgetError;
+}
+
+const trustedBudgetMessages = new Set<string>([
+  ...(
+    [
+      'daily-spend',
+      'monthly-spend',
+      'daily-requests',
+      'monthly-requests',
+      'daily-outbound',
+      'monthly-outbound',
+      'concurrency',
+      'tool-steps',
+      'run-deadline',
+    ] as const satisfies readonly BudgetViolation[]
+  ).map((kind) => budgetViolationMessage(kind)),
+  new BudgetError('cancelled').message,
+]);
+
+/** Exact allowlist of messages we may surface from internal budget/cancel paths. */
+export function isTrustedBudgetMessage(message: string): boolean {
+  return trustedBudgetMessages.has(message);
 }

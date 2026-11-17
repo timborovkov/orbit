@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto';
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 
 import {
+  BudgetError,
   budgetViolationMessage,
   checkRequestBudgets,
   checkRunDeadline,
   checkToolStepLimit,
-  isBudgetViolationMessage,
+  isBudgetError,
+  isTrustedBudgetMessage,
   parseBudgets,
   type BudgetSnapshot,
 } from '@/lib/budgets';
@@ -279,12 +281,12 @@ async function processSimulationRun(
       run.input,
       async (request) => {
         if (checkRunDeadline(startedAt, new Date(), budgets)) {
-          throw new Error(budgetViolationMessage('run-deadline'));
+          throw new BudgetError('run-deadline');
         }
         try {
           signal.throwIfAborted();
         } catch {
-          throw new Error(budgetViolationMessage('run-deadline'));
+          throw new BudgetError('cancelled');
         }
         const ctx = await loadPolicyContext(run.agentId, run.actor, run.id);
         if (!ctx) throw new Error('Agent unavailable');
@@ -304,7 +306,7 @@ async function processSimulationRun(
           activeRuns: ctx.usage.activeRuns,
         };
         const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
-        if (violation) throw new Error(budgetViolationMessage(violation));
+        if (violation) throw new BudgetError(violation);
         // Reserve quota before dispatch so provider failures/timeouts still count.
         await recordUsage(run.agentId, {
           requests: 1,
@@ -312,12 +314,12 @@ async function processSimulationRun(
         });
         const response = await call(request);
         if (checkRunDeadline(startedAt, new Date(), budgets)) {
-          throw new Error(budgetViolationMessage('run-deadline'));
+          throw new BudgetError('run-deadline');
         }
         try {
           signal.throwIfAborted();
         } catch {
-          throw new Error(budgetViolationMessage('run-deadline'));
+          throw new BudgetError('cancelled');
         }
         return response;
       },
@@ -369,26 +371,24 @@ async function processSimulationRun(
     );
 
     const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
-    const isDeadline =
-      !!result.error &&
-      (result.error.includes('deadline') || result.error.includes('cancelled this simulation'));
     await updateIfRunning(run.id, {
       status: terminalStatus,
       finishedAt: new Date(),
       result,
-      deferReason: isDeadline ? result.error : null,
+      deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
     });
   } catch (error) {
     const fallback =
       'Unable to complete inference. Check the agent credential or OPENROUTER_API_KEY, server encryption key and provider availability, then try again.';
-    const message = error instanceof Error ? error.message : fallback;
-    const inspectable =
-      message === 'Missing OpenRouter credential'
-        ? 'No OpenRouter credential available. Save an agent key under Access or set OPENROUTER_API_KEY on the server.'
-        : message === fallback || message.startsWith('Unable to complete')
-          ? fallback
-          : message;
-    const isBudget = isBudgetViolationMessage(inspectable);
+    let inspectable = fallback;
+    let isBudget = false;
+    if (isBudgetError(error)) {
+      inspectable = error.message;
+      isBudget = true;
+    } else if (error instanceof Error && error.message === 'Missing OpenRouter credential') {
+      inspectable =
+        'No OpenRouter credential available. Save an agent key under Access or set OPENROUTER_API_KEY on the server.';
+    }
     await db()
       .update(runs)
       .set({
