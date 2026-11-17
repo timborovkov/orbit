@@ -4,6 +4,7 @@ import { closeDb } from '@/lib/db';
 import { startJobWorker } from '@/lib/queue/worker';
 import {
   finalizeExhaustedSimulationJob,
+  finalizeOrphanedDeadSimulationRuns,
   processSimulationJob,
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
@@ -34,6 +35,9 @@ const worker = startJobWorker({
   onDeadLetter: async (job, error) => {
     if (job.type !== SIMULATION_JOB_TYPE) return;
     await finalizeExhaustedSimulationJob(job.payload, error);
+  },
+  reconcileDeadLetters: async () => {
+    await finalizeOrphanedDeadSimulationRuns();
   },
   onError: (error) => {
     console.error('Worker job error', error instanceof Error ? error.message : error);

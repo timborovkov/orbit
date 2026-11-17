@@ -11,6 +11,7 @@ import {
   failJob,
   heartbeatJob,
   recoverExpiredLeases,
+  releaseClaim,
 } from '@/lib/queue/jobs';
 import { startJobWorker } from '@/lib/queue/worker';
 
@@ -126,6 +127,28 @@ test('idempotency keys reuse the same job row', async () => {
   });
   expect(second.id).toBe(first.id);
   expect(second.payload).toEqual({ a: 1 });
+});
+
+test('releaseClaim returns unexecuted work to pending without burning attempts', async () => {
+  const job = await enqueueJob(db(), {
+    type: `${prefix}.release`,
+    payload: {},
+    idempotencyKey: `${prefix}:release`,
+    maxAttempts: 1,
+  });
+  const [claimed] = await claimJobs({
+    workerId: `${prefix}-release`,
+    types: [`${prefix}.release`],
+  });
+  expect(claimed.attempts).toBe(1);
+  const released = await releaseClaim(claimed.id, `${prefix}-release`);
+  expect(released?.status).toBe('pending');
+  expect(released?.attempts).toBe(0);
+  const [row] =
+    await sqlClient()`SELECT status, attempts, claimed_by FROM jobs WHERE id = ${job.id}`;
+  expect(row.status).toBe('pending');
+  expect(row.attempts).toBe(0);
+  expect(row.claimed_by).toBeNull();
 });
 
 test('failJob does not overwrite a cancelled or reclaimed claim', async () => {

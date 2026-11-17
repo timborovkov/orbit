@@ -4,6 +4,7 @@ import {
   failJob,
   heartbeatJob,
   recoverExpiredLeases,
+  releaseClaim,
 } from '@/lib/queue/jobs';
 import {
   DEFAULT_LEASE_MS,
@@ -24,10 +25,16 @@ export interface WorkerOptions {
   onError?: (error: unknown) => void;
   /** Called when failJob dead-letters a job so callers can finalize linked domain state. */
   onDeadLetter?: (job: JobRecord, error: string) => Promise<void>;
+  /**
+   * Durable domain reconcile for dead jobs whose onDeadLetter callback previously failed.
+   * Invoked on every recovery tick after lease recovery.
+   */
+  reconcileDeadLetters?: () => Promise<void>;
   /** Optional test seams; production uses the Postgres-backed helpers. */
   claimJobs?: typeof claimJobs;
   completeJob?: typeof completeJob;
   failJob?: typeof failJob;
+  releaseClaim?: typeof releaseClaim;
   recoverExpiredLeases?: typeof recoverExpiredLeases;
   /** Must return false only for confirmed lease loss; transport errors should throw. */
   heartbeat?: (jobId: string, workerId: string, leaseMs?: number) => Promise<boolean>;
@@ -49,6 +56,7 @@ export function startJobWorker(options: WorkerOptions) {
   const claim = options.claimJobs ?? claimJobs;
   const complete = options.completeJob ?? completeJob;
   const fail = options.failJob ?? failJob;
+  const release = options.releaseClaim ?? releaseClaim;
   const recover = options.recoverExpiredLeases ?? recoverExpiredLeases;
   const beat = options.heartbeat ?? heartbeatJob;
   const inFlight = new Set<Promise<void>>();
@@ -58,6 +66,15 @@ export function startJobWorker(options: WorkerOptions) {
   let recoveryTimer: ReturnType<typeof setInterval> | null = null;
   // Accessor so awaits do not narrow away concurrent stop() flips.
   const hasStopped = () => stopped;
+
+  const notifyDeadLetter = async (job: JobRecord, errorMessage: string) => {
+    if (!options.onDeadLetter) return;
+    try {
+      await options.onDeadLetter(job, errorMessage);
+    } catch (error: unknown) {
+      options.onError?.(error);
+    }
+  };
 
   const schedulePoll = (delay = pollMs) => {
     if (hasStopped()) return;
@@ -79,10 +96,10 @@ export function startJobWorker(options: WorkerOptions) {
             limit: slots,
           });
           if (hasStopped()) {
-            // Release claims taken after stop began so another worker can retry.
+            // Release unexecuted claims without burning attempts or dead-lettering.
             await Promise.all(
               claimed.map((job) =>
-                fail(job.id, options.workerId, 'Worker shutting down').catch((error: unknown) => {
+                release(job.id, options.workerId).catch((error: unknown) => {
                   options.onError?.(error);
                 }),
               ),
@@ -132,8 +149,8 @@ export function startJobWorker(options: WorkerOptions) {
     const deadLetter = async (errorMessage: string) => {
       try {
         const failed = await fail(job.id, options.workerId, errorMessage);
-        if (failed?.status === 'dead' && options.onDeadLetter) {
-          await options.onDeadLetter(job, errorMessage);
+        if (failed?.status === 'dead') {
+          await notifyDeadLetter(job, errorMessage);
         }
       } catch (failError: unknown) {
         options.onError?.(failError);
@@ -159,14 +176,21 @@ export function startJobWorker(options: WorkerOptions) {
 
   recoveryTimer = setInterval(() => {
     void recover()
-      .then((recovered) => {
-        const notify = options.onDeadLetter;
-        if (!notify) return;
-        return Promise.all(
+      .then(async (recovered) => {
+        await Promise.all(
           recovered
             .filter((job) => job.status === 'dead')
-            .map((job) => notify(job, job.lastError ?? 'Lease expired after max attempts')),
+            .map((job) =>
+              notifyDeadLetter(job, job.lastError ?? 'Lease expired after max attempts'),
+            ),
         );
+        if (options.reconcileDeadLetters) {
+          try {
+            await options.reconcileDeadLetters();
+          } catch (error: unknown) {
+            options.onError?.(error);
+          }
+        }
       })
       .catch((error: unknown) => {
         options.onError?.(error);

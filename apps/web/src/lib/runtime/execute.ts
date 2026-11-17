@@ -408,6 +408,13 @@ export async function processSimulationJob(
   await processSimulationRun(runId, inference, signal);
 }
 
+function exhaustedJobMessage(reason: string) {
+  const detail = reason.trim().slice(0, 200);
+  return detail
+    ? `Job retries exhausted after repeated infrastructure failures (${detail}). Check database health and start a new run.`
+    : 'Job retries exhausted after repeated infrastructure failures. Check database health and start a new run.';
+}
+
 /**
  * When the queue dead-letters a simulation job, clear any non-terminal run so it no
  * longer consumes concurrency and surfaces an inspectable failure.
@@ -418,10 +425,7 @@ export async function finalizeExhaustedSimulationJob(
 ) {
   const runId = typeof payload.runId === 'string' ? payload.runId : null;
   if (!runId) return;
-  const detail = reason.trim().slice(0, 200);
-  const inspectable = detail
-    ? `Job retries exhausted after repeated infrastructure failures (${detail}). Check database health and start a new run.`
-    : 'Job retries exhausted after repeated infrastructure failures. Check database health and start a new run.';
+  const inspectable = exhaustedJobMessage(reason);
   await db()
     .update(runs)
     .set({
@@ -431,4 +435,29 @@ export async function finalizeExhaustedSimulationJob(
       result: sql`jsonb_set(coalesce(${runs.result}, '{"steps":[],"actions":[],"error":null}'::jsonb), '{error}', to_jsonb(${inspectable}::text))`,
     })
     .where(and(eq(runs.id, runId), inArray(runs.status, ['queued', 'running'])));
+}
+
+/**
+ * Durable reconcile for dead simulation jobs whose onDeadLetter callback previously failed.
+ * Idempotent: only touches queued/running runs linked to dead jobs.
+ */
+export async function finalizeOrphanedDeadSimulationRuns() {
+  const inspectable = exhaustedJobMessage('reconciled after dead-letter callback failure');
+  await db().execute(sql`
+    UPDATE simulation_runs AS r
+    SET
+      status = 'failed',
+      finished_at = now(),
+      defer_reason = ${inspectable},
+      result = jsonb_set(
+        coalesce(r.result, '{"steps":[],"actions":[],"error":null}'::jsonb),
+        '{error}',
+        to_jsonb(${inspectable}::text)
+      )
+    FROM jobs AS j
+    WHERE r.job_id = j.id
+      AND j.status = 'dead'
+      AND j.type = ${SIMULATION_JOB_TYPE}
+      AND r.status IN ('queued', 'running')
+  `);
 }

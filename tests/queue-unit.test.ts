@@ -113,6 +113,19 @@ class FakeJobStore {
     return { ...row };
   }
 
+  release(id: string, workerId: string, now = new Date()): JobRecord | null {
+    const row = this.rows.get(id);
+    if (!row || row.claimedBy !== workerId || row.status !== 'claimed') return null;
+    row.status = 'pending';
+    row.attempts = Math.max(row.attempts - 1, 0);
+    row.availableAt = now;
+    row.claimedAt = null;
+    row.claimExpiresAt = null;
+    row.claimedBy = null;
+    row.updatedAt = now;
+    return { ...row };
+  }
+
   complete(id: string, workerId: string, now = new Date()): boolean {
     const row = this.rows.get(id);
     if (!row || row.claimedBy !== workerId || row.status !== 'claimed') return false;
@@ -366,4 +379,98 @@ test('lease recovery dead-letters invoke onDeadLetter', async () => {
   expect(store.get(job.id)?.status).toBe('dead');
   expect(deadLetters.some((entry) => entry.id === job.id)).toBe(true);
   expect(deadLetters[0]?.error).toContain('Lease expired');
+});
+
+test('shutdown releases unexecuted claims without burning attempts', async () => {
+  const { startJobWorker } = await import('@/lib/queue/worker');
+  const store = new FakeJobStore();
+  const job = store.enqueue({
+    type: 'late',
+    payload: { runId: 'run-late' },
+    idempotencyKey: 'late-1',
+    maxAttempts: 1,
+  });
+  let releaseClaimGate: (() => void) | undefined;
+  const claimReady = new Promise<void>((resolve) => {
+    releaseClaimGate = resolve;
+  });
+
+  const worker = startJobWorker({
+    workerId: 'w-late',
+    pollMs: 20,
+    recoveryMs: 60_000,
+    leaseMs: 3_000,
+    claimJobs: async () => {
+      await claimReady;
+      return store.claim('w-late', 'late', 3_000);
+    },
+    completeJob: async () => {
+      throw new Error('should not complete');
+    },
+    failJob: async (id, workerId, error) => store.fail(id, workerId, error),
+    releaseClaim: async (id, workerId) => store.release(id, workerId),
+    recoverExpiredLeases: async () => [],
+    heartbeat: async () => true,
+    onDeadLetter: async () => {
+      throw new Error('should not dead-letter');
+    },
+    handlers: {
+      late: async () => {
+        throw new Error('should not run');
+      },
+    },
+  });
+
+  // Let the poll start awaiting claim, then stop before claims resolve.
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const stopping = worker.stop();
+  releaseClaimGate?.();
+  await stopping;
+  const released = store.get(job.id);
+  expect(released?.status).toBe('pending');
+  expect(released?.attempts).toBe(0);
+  expect(released?.claimedBy).toBeNull();
+});
+
+test('recovery tick reconciles orphaned dead letters after onDeadLetter failure', async () => {
+  const { startJobWorker } = await import('@/lib/queue/worker');
+  const store = new FakeJobStore();
+  const job = store.enqueue({
+    type: 'recover',
+    payload: { runId: 'run-orphan' },
+    idempotencyKey: 'orphan-1',
+    maxAttempts: 1,
+  });
+  store.claim('w-orphan', 'recover', 1);
+  store.get(job.id)!.claimExpiresAt = new Date(0);
+  let reconcileCalls = 0;
+  let deadLetterCalls = 0;
+
+  const worker = startJobWorker({
+    workerId: 'w-orphan',
+    pollMs: 50,
+    recoveryMs: 20,
+    leaseMs: 3_000,
+    claimJobs: async () => [],
+    completeJob: async () => {},
+    failJob: async (id, workerId, error) => store.fail(id, workerId, error),
+    recoverExpiredLeases: async () => store.recoverExpired(),
+    heartbeat: async () => true,
+    onDeadLetter: async () => {
+      deadLetterCalls += 1;
+      throw new Error('finalize db blip');
+    },
+    reconcileDeadLetters: async () => {
+      reconcileCalls += 1;
+    },
+    handlers: {
+      recover: async () => {},
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  await worker.stop();
+  expect(store.get(job.id)?.status).toBe('dead');
+  expect(deadLetterCalls).toBeGreaterThanOrEqual(1);
+  expect(reconcileCalls).toBeGreaterThanOrEqual(1);
 });

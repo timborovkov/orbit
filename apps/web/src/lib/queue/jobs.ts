@@ -215,6 +215,34 @@ export async function completeJob(
     .where(and(eq(jobs.id, jobId), eq(jobs.claimedBy, workerId), eq(jobs.status, 'claimed')));
 }
 
+/**
+ * Return an unexecuted claim to pending without counting a failure.
+ * Decrements the attempt that claimJobs reserved so shutdown does not burn retries.
+ */
+export async function releaseClaim(
+  jobId: string,
+  workerId: string,
+  store: Store = db(),
+): Promise<JobRecord | null> {
+  const now = new Date();
+  const updated = (
+    await store
+      .update(jobs)
+      .set({
+        status: 'pending',
+        attempts: sql`greatest(${jobs.attempts} - 1, 0)`,
+        availableAt: now,
+        claimedAt: null,
+        claimExpiresAt: null,
+        claimedBy: null,
+        updatedAt: now,
+      })
+      .where(and(eq(jobs.id, jobId), eq(jobs.claimedBy, workerId), eq(jobs.status, 'claimed')))
+      .returning()
+  ).at(0);
+  return updated ? mapJob(updated) : null;
+}
+
 export async function failJob(
   jobId: string,
   workerId: string,
