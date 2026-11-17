@@ -72,7 +72,7 @@ export async function simulate(
   } catch {
     // Provider exceptions can contain request headers, keys and raw response bodies.
     result.error =
-      'Inference failed or timed out. Check the credential, model availability and provider balance, then start a new run.';
+      'Inference failed or timed out. Check the OpenRouter key, model availability and provider balance, then start a new run.';
   }
   await checkpoint(result);
   return result;

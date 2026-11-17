@@ -60,7 +60,8 @@ export function CreateAgent({
           </Button>
         </div>
         <p id="create-description" className="muted">
-          Define an identity and a mission. New agents start paused in shadow mode.
+          Define an identity and a mission. New agents start paused in shadow mode and can use the
+          server OpenRouter key until you add an agent-specific override under Access.
         </p>
         <form
           action={(data) => {

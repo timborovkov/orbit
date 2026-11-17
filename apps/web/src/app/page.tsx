@@ -167,8 +167,8 @@ export default async function Home() {
               <div className="section-footnote">
                 <LockKeyhole size={13} />
                 <span>
-                  Open an agent to configure it and run a simulation. External actions remain
-                  disabled.
+                  Open an agent to configure it and run a simulation. An optional server OpenRouter
+                  key covers agents without their own credential. External actions remain disabled.
                 </span>
               </div>
             </section>

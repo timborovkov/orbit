@@ -9,8 +9,10 @@ Set these variables on the web service:
 | `ORBIT_ADMIN_EMAIL`    | Administrator login email.                                                         |
 | `ORBIT_ADMIN_PASSWORD` | Random password of at least 16 characters.                                         |
 | `AUTH_DISABLED`        | Leave unset or set to `false`. Local development bypass is rejected in production. |
+| `OPENROUTER_API_KEY`   | Optional. Default OpenRouter key for agents without a per-agent override.          |
+| `ORBIT_ENCRYPTION_KEY` | Optional until you save per-agent keys. Random 64-character hex master key.        |
 
-Set `ORBIT_ENCRYPTION_KEY` to a random 64-character hex value before saving per-agent OpenRouter credentials. No channel credentials are needed for manual simulation. OAuth and magic links are deferred. Password sessions expire after eight hours; rotating the password invalidates existing sessions. Login allows ten account-wide attempts per fifteen minutes.
+Set `OPENROUTER_API_KEY` when you want a deployment-wide OpenRouter default; agents may still store an encrypted override under **Access**. Set `ORBIT_ENCRYPTION_KEY` before saving those per-agent credentials. The environment default works without an encryption key because it is never written to PostgreSQL. No channel credentials are needed for manual simulation. OAuth and magic links are deferred. Password sessions expire after eight hours; rotating the password invalidates existing sessions. Login allows ten account-wide attempts per fifteen minutes.
 
 Before starting the web service, run `bun run db:migrate` from a source checkout against the target database. Migrations are transactional, advisory-locked and tracked in `orbit_migrations`; the standalone web image does not run them automatically.
 

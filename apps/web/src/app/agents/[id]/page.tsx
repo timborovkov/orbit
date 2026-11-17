@@ -1,8 +1,9 @@
 import { notFound } from 'next/navigation';
-import { ChevronDown, FlaskConical, History, KeyRound, ShieldCheck } from 'lucide-react';
+import { ChevronDown, FlaskConical, History, ShieldCheck } from 'lucide-react';
 import { z } from 'zod';
 
-import { runSimulation, saveConfiguration, saveCredential } from '@/actions/workspace';
+import { runSimulation, saveConfiguration } from '@/actions/workspace';
+import { AccessPanel } from '@/app/access-panel';
 import { AgentAvatar } from '@/app/agent-avatar';
 import { ConfigFields } from '@/app/config-fields';
 import { ProfilePictureEditor } from '@/app/profile-picture-editor';
@@ -13,6 +14,7 @@ import { WorkspaceHeader } from '@/app/workspace-header';
 import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
+import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
 
@@ -23,7 +25,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   if (!z.uuid().safeParse(id).success) notFound();
   const workspace = await getAgentWorkspace(id);
   if (!workspace) notFound();
-  const { agent, versions, hasCredential, history, current } = workspace;
+  const { agent, versions, hasAgentCredential, keySource, history, current } = workspace;
   const viewedHistory = history;
   const latest = history.at(0);
   const versionFor = (configurationId: string) =>
@@ -54,45 +56,12 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     </section>
   );
   const access = (
-    <section id="credential" className="access-workbench">
-      <div className="editor-section-heading">
-        <h2>OpenRouter connection</h2>
-        <p className="muted">
-          A private API key for {agent.name}. Encrypted at rest and never included in prompts.
-        </p>
-      </div>
-      <div className="connection-status">
-        <KeyRound size={20} aria-hidden="true" />
-        <div>
-          <h3>{hasCredential ? 'Credential saved' : 'Connect OpenRouter'}</h3>
-          <p className="muted" role="status">
-            {hasCredential
-              ? 'A credential is saved. Enter a new key to replace it.'
-              : 'No credential saved. Add a key to run simulations.'}
-          </p>
-        </div>
-        <span className="state-label">{hasCredential ? 'Configured' : 'Not connected'}</span>
-      </div>
-      <WorkspaceForm action={saveCredential} label="Save credential">
-        <input type="hidden" name="agentId" value={id} />
-        <label htmlFor="credential-key">API key</label>
-        <input
-          id="credential-key"
-          type="password"
-          name="credential"
-          autoComplete="new-password"
-          required
-          maxLength={512}
-          placeholder="Enter your OpenRouter key"
-        />
-      </WorkspaceForm>
-      {hasCredential && (
-        <WorkspaceForm action={saveCredential} label="Remove credential">
-          <input type="hidden" name="agentId" value={id} />
-          <input type="hidden" name="revoke" value="true" />
-        </WorkspaceForm>
-      )}
-    </section>
+    <AccessPanel
+      agentId={id}
+      agentName={agent.name}
+      hasAgentCredential={hasAgentCredential}
+      keySource={keySource}
+    />
   );
   const playground = (
     <div className="playground-grid">
@@ -241,9 +210,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
           </div>
           <div className="agent-version">
             <span>Configuration v{current.version}</span>
-            <span className="muted">
-              {hasCredential ? 'OpenRouter configured' : 'OpenRouter not connected'}
-            </span>
+            <span className="muted">{openRouterConnectionLabel(keySource)}</span>
           </div>
         </div>
         <WorkspaceTabs

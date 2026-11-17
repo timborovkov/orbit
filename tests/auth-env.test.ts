@@ -106,4 +106,12 @@ describe('password authentication configuration', () => {
     expect(() => parseEnv({ ...production, APP_URL: 'invalid' })).toThrow();
     expect(() => parseEnv({ ...local, DATABASE_URL: 'invalid' })).toThrow();
   });
+  test('treats OPENROUTER_API_KEY as an optional non-empty server secret', () => {
+    expect(parseEnv(production).OPENROUTER_API_KEY).toBeUndefined();
+    expect(parseEnv({ ...production, OPENROUTER_API_KEY: '' }).OPENROUTER_API_KEY).toBeUndefined();
+    expect(
+      parseEnv({ ...production, OPENROUTER_API_KEY: 'sk-or-test-key' }).OPENROUTER_API_KEY,
+    ).toBe('sk-or-test-key');
+    expect(() => parseEnv({ ...production, OPENROUTER_API_KEY: 'has spaces' })).toThrow();
+  });
 });
