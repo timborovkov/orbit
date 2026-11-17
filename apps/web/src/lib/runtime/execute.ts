@@ -329,6 +329,7 @@ async function processSimulationRun(
     const { apiKey } = resolveOpenRouterApiKey(run.agentId, credential?.encryptedKey);
     const call = inference(apiKey);
 
+    const checkpointed = run.result.steps.length > 0 ? run.result : undefined;
     const result = await simulate(
       config.config,
       run.input,
@@ -366,6 +367,7 @@ async function processSimulationRun(
       {
         maxSteps: budgets.maxToolStepsPerRun,
         signal,
+        initial: checkpointed,
         onActions: async (actions, partial, stage) => {
           await assertOwned(run.id, executionToken);
           const stepLimit = checkToolStepLimit(partial.steps.length, budgets);

@@ -207,6 +207,80 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
   expect(final.result.actions[0].draft).toBe('replacement draft');
 });
 
+test('queue retries resume checkpointed steps under the hard cap', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const budgets = { ...budgetDefaults, maxToolStepsPerRun: 2, runDeadlineSeconds: 120 };
+  const config = { ...preset.config, name: 'StepResume' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'StepResume',${config.mission},'shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
+  await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'secret-steps')})`;
+  await sql`UPDATE controls SET paused=false`;
+
+  const queued = await enqueueSimulation({
+    actor: 'test@example.com',
+    agentId: id,
+    configurationId: version.id,
+    input: 'Step resume prompt',
+  });
+  expect('runId' in queued && queued.runId).toBeTruthy();
+  const runId = queued.runId!;
+
+  const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+  let calls = 0;
+  await expect(
+    processSimulationJob({ runId, agentId: id }, () => async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          decision: {
+            relevant: true,
+            priority: 0.8,
+            reason: 'needs reply',
+            actions: [{ type: 'reply', reason: 'help', draft: null }],
+          },
+          inputTokens: 1,
+          outputTokens: 1,
+        };
+      }
+      throw new RetryableInfrastructureError('main-stage blip');
+    }),
+  ).rejects.toBeInstanceOf(RetryableInfrastructureError);
+
+  const [afterFirst] = await sql`SELECT result FROM simulation_runs WHERE id=${runId}`;
+  expect(afterFirst.result.steps).toHaveLength(1);
+  expect(afterFirst.result.steps[0].stage).toBe('evaluator');
+
+  await processSimulationJob({ runId, agentId: id }, () => async () => {
+    calls += 1;
+    return {
+      decision: {
+        relevant: true,
+        priority: 0.9,
+        reason: 'refined',
+        actions: [{ type: 'reply', reason: 'help', draft: 'Here to help.' }],
+      },
+      inputTokens: 2,
+      outputTokens: 2,
+    };
+  });
+
+  // Evaluator once, failed main once, resumed main once — never a second evaluator.
+  expect(calls).toBe(3);
+  const [done] = await sql`SELECT status, result FROM simulation_runs WHERE id=${runId}`;
+  expect(done.status).toBe('completed');
+  expect(done.result.steps).toHaveLength(2);
+  expect(done.result.steps.map((step: { stage: string }) => step.stage)).toEqual([
+    'evaluator',
+    'main',
+  ]);
+});
+
 test('retries preserve the original run deadline', async () => {
   const id = randomUUID();
   ids.push(id);

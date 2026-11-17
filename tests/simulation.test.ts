@@ -156,6 +156,61 @@ describe('bounded manual simulation', () => {
     expect(result.error).not.toBeNull();
     expect(result.actions).toEqual([]);
   });
+  test('retries resume checkpointed stages without reusing the step allowance', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async () => {
+        throw new RetryableInfrastructureError('checkpoint blip');
+      },
+      { maxSteps: 2 },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(RetryableInfrastructureError);
+    expect(models).toEqual(['test/evaluator']);
+
+    // Pretend the evaluator stage was checkpointed before the failure.
+    const checkpointed: SimulationResult = {
+      steps: [
+        {
+          stage: 'evaluator',
+          model: 'test/evaluator',
+          decision,
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+      ],
+      actions: decision.actions.map((action) => ({
+        ...action,
+        policy: 'suppressed' as const,
+        effect: 'Simulation only. No external action performed.',
+      })),
+      error: null,
+    };
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return {
+          decision: { ...decision, reason: 'refined' },
+          inputTokens: 2,
+          outputTokens: 2,
+        };
+      },
+      async () => {},
+      { maxSteps: 2, initial: checkpointed },
+    );
+    expect(models).toEqual(['test/evaluator', 'test/main']);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.steps[0].stage).toBe('evaluator');
+    expect(resumed.steps[1].stage).toBe('main');
+  });
   test('ownership loss at checkpoint stops before the next model stage', async () => {
     const { BudgetError } = await import('@/lib/budgets');
     let calls = 0;
