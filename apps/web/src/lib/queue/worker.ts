@@ -158,7 +158,14 @@ export function startJobWorker(options: WorkerOptions) {
   };
 
   recoveryTimer = setInterval(() => {
-    void recover().catch((error: unknown) => {
+    void (async () => {
+      const recovered = await recover();
+      if (!options.onDeadLetter) return;
+      for (const job of recovered) {
+        if (job.status !== 'dead') continue;
+        await options.onDeadLetter(job, job.lastError ?? 'Lease expired after max attempts');
+      }
+    })().catch((error: unknown) => {
       options.onError?.(error);
     });
   }, recoveryMs);

@@ -70,8 +70,8 @@ class FakeJobStore {
     return [first, second];
   }
 
-  recoverExpired(now = new Date()): number {
-    let count = 0;
+  recoverExpired(now = new Date()): JobRecord[] {
+    const updated: JobRecord[] = [];
     for (const row of this.rows.values()) {
       if (row.status !== 'claimed' || !row.claimExpiresAt || row.claimExpiresAt > now) continue;
       if (row.attempts >= row.maxAttempts) {
@@ -86,9 +86,9 @@ class FakeJobStore {
       row.claimExpiresAt = null;
       row.claimedBy = null;
       row.updatedAt = now;
-      count += 1;
+      updated.push({ ...row });
     }
-    return count;
+    return updated;
   }
 
   fail(id: string, workerId: string, error: string, now = new Date()): JobRecord | null {
@@ -169,7 +169,7 @@ test('fake store: exclusive claim, lease recovery, retry, dead-letter and idempo
   expect(claimed.id).toBe(job.id);
 
   claimed.claimExpiresAt = new Date(0);
-  expect(store.recoverExpired(new Date())).toBe(1);
+  expect(store.recoverExpired(new Date())).toHaveLength(1);
   expect(store.get(job.id)?.status).toBe('pending');
 
   const [first] = store.claim('w3', 'sim');
@@ -195,7 +195,9 @@ test('fake store: exhausted lease recovery dead-letters instead of retrying', ()
   const [claimed] = store.claim('w', 'once', 1);
   expect(claimed.attempts).toBe(1);
   claimed.claimExpiresAt = new Date(0);
-  expect(store.recoverExpired()).toBe(1);
+  const recovered = store.recoverExpired();
+  expect(recovered).toHaveLength(1);
+  expect(recovered[0].status).toBe('dead');
   expect(store.get(job.id)?.status).toBe('dead');
   expect(store.claim('w2', 'once')).toHaveLength(0);
 });
@@ -272,7 +274,7 @@ test('transient heartbeat errors do not abort; confirmed lease loss does', async
       store.complete(id, workerId);
     },
     failJob: async (id, workerId, error) => store.fail(id, workerId, error),
-    recoverExpiredLeases: async () => 0,
+    recoverExpiredLeases: async () => [],
     heartbeat: async () => false,
     handlers: {
       lost: async (_job, signal) => {
@@ -309,7 +311,7 @@ test('dead-lettered jobs invoke onDeadLetter for domain finalization', async () 
       throw new Error('should not complete');
     },
     failJob: async (id, workerId, error) => store.fail(id, workerId, error),
-    recoverExpiredLeases: async () => 0,
+    recoverExpiredLeases: async () => [],
     heartbeat: async () => true,
     onDeadLetter: async (job, error) => {
       deadLetters.push({ id: job.id, error });
@@ -325,4 +327,43 @@ test('dead-lettered jobs invoke onDeadLetter for domain finalization', async () 
   await worker.stop();
   expect(store.get('fake-1')?.status).toBe('dead');
   expect(deadLetters).toEqual([{ id: 'fake-1', error: 'quota reservation db blip' }]);
+});
+
+test('lease recovery dead-letters invoke onDeadLetter', async () => {
+  const { startJobWorker } = await import('@/lib/queue/worker');
+  const store = new FakeJobStore();
+  const job = store.enqueue({
+    type: 'recover',
+    payload: { runId: 'run-recover' },
+    idempotencyKey: 'dl-recover',
+    maxAttempts: 1,
+  });
+  store.claim('w-recover', 'recover', 1);
+  const claimed = store.get(job.id)!;
+  claimed.claimExpiresAt = new Date(0);
+  const deadLetters: { id: string; error: string }[] = [];
+
+  const worker = startJobWorker({
+    workerId: 'w-recover',
+    pollMs: 50,
+    recoveryMs: 20,
+    leaseMs: 3_000,
+    claimJobs: async () => [],
+    completeJob: async () => {},
+    failJob: async (id, workerId, error) => store.fail(id, workerId, error),
+    recoverExpiredLeases: async () => store.recoverExpired(),
+    heartbeat: async () => true,
+    onDeadLetter: async (row, error) => {
+      deadLetters.push({ id: row.id, error });
+    },
+    handlers: {
+      recover: async () => {},
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  await worker.stop();
+  expect(store.get(job.id)?.status).toBe('dead');
+  expect(deadLetters.some((entry) => entry.id === job.id)).toBe(true);
+  expect(deadLetters[0]?.error).toContain('Lease expired');
 });

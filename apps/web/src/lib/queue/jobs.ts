@@ -256,8 +256,11 @@ export async function failJob(
   return updated ? mapJob(updated) : null;
 }
 
-/** Recover expired leases: retry when attempts remain, otherwise dead-letter. */
-export async function recoverExpiredLeases(store: Store = db()): Promise<number> {
+/**
+ * Recover expired leases: retry when attempts remain, otherwise dead-letter.
+ * Returns every updated job so callers can finalize domain state for dead letters.
+ */
+export async function recoverExpiredLeases(store: Store = db()): Promise<JobRecord[]> {
   const now = new Date().toISOString();
   const result = await store.execute(sql`
     UPDATE jobs
@@ -276,9 +279,10 @@ export async function recoverExpiredLeases(store: Store = db()): Promise<number>
     WHERE status = 'claimed'
       AND claim_expires_at IS NOT NULL
       AND claim_expires_at < ${now}::timestamptz
-    RETURNING id
+    RETURNING *
   `);
-  return Array.isArray(result) ? result.length : 0;
+  if (!Array.isArray(result)) return [];
+  return result.map((row) => mapRawJob(row));
 }
 
 /**

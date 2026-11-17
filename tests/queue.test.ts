@@ -57,7 +57,8 @@ test('lease expiry recovery returns jobs to pending', async () => {
   expect(claimed.id).toBe(job.id);
   await new Promise((resolve) => setTimeout(resolve, 5));
   const recovered = await recoverExpiredLeases();
-  expect(recovered).toBeGreaterThanOrEqual(1);
+  expect(recovered.length).toBeGreaterThanOrEqual(1);
+  expect(recovered.every((row) => row.status === 'pending')).toBe(true);
   const again = await claimJobs({
     workerId: `${prefix}-lease-2`,
     types: [`${prefix}.lease`],
@@ -83,7 +84,8 @@ test('expired leases at max attempts are dead-lettered instead of reclaimed', as
   expect(claimed.attempts).toBe(1);
   await new Promise((resolve) => setTimeout(resolve, 5));
   const recovered = await recoverExpiredLeases();
-  expect(recovered).toBeGreaterThanOrEqual(1);
+  expect(recovered.length).toBeGreaterThanOrEqual(1);
+  expect(recovered.some((row) => row.id === job.id && row.status === 'dead')).toBe(true);
   const [row] = await sqlClient()`SELECT status FROM jobs WHERE id = ${job.id}`;
   expect(row.status).toBe('dead');
   expect(
