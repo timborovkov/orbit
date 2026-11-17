@@ -219,9 +219,11 @@ test('stale workers cannot rotate the execution token after losing their job cla
   ids.push(id);
   const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
   const config = { ...preset.config, name: 'ClaimFence' };
+  // Turn off spend caps so the fixture inference mock does not need OpenRouter pricing quotes.
+  const budgets = { ...budgetDefaults, dailySpendCents: null, monthlySpendCents: null };
   await sql`
     INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
-    VALUES (${id},'ClaimFence',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+    VALUES (${id},'ClaimFence',${config.mission},'shadow',${sql.json(budgets)},${sql.json([])})
   `;
   const [version] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
