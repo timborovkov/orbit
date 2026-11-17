@@ -53,7 +53,8 @@ test('request and outbound budget violations', () => {
 });
 
 test('tool step and deadline limits', () => {
-  expect(checkToolStepLimit(10, budgetDefaults)).toBe('tool-steps');
+  expect(checkToolStepLimit(10, budgetDefaults)).toBeNull();
+  expect(checkToolStepLimit(11, budgetDefaults)).toBe('tool-steps');
   expect(checkToolStepLimit(9, budgetDefaults)).toBeNull();
   const started = new Date('2026-01-01T00:00:00Z');
   expect(checkRunDeadline(started, new Date('2026-01-01T00:05:00Z'), budgetDefaults)).toBe(

@@ -6,6 +6,7 @@ import {
   checkRequestBudgets,
   checkRunDeadline,
   checkToolStepLimit,
+  isBudgetViolationMessage,
   parseBudgets,
   type BudgetSnapshot,
 } from '@/lib/budgets';
@@ -387,13 +388,7 @@ async function processSimulationRun(
         : message === fallback || message.startsWith('Unable to complete')
           ? fallback
           : message;
-    const isBudget =
-      inspectable.includes('cap reached') ||
-      inspectable.includes('quota reached') ||
-      inspectable.includes('deadline') ||
-      inspectable.includes('concurrency') ||
-      inspectable.includes('tool steps') ||
-      inspectable.includes('cancelled this simulation');
+    const isBudget = isBudgetViolationMessage(inspectable);
     await db()
       .update(runs)
       .set({

@@ -27,6 +27,7 @@ export interface WorkerOptions {
 /**
  * Polling worker with lease heartbeats, expired-lease recovery and SIGTERM drain.
  * LISTEN/NOTIFY is intentionally omitted; polling is the delivery mechanism.
+ * Shutdown drains in-flight work without aborting it so simulations stay retryable.
  */
 export function startJobWorker(options: WorkerOptions) {
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
@@ -34,7 +35,6 @@ export function startJobWorker(options: WorkerOptions) {
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
   const concurrency = options.concurrency ?? 1;
   const types = Object.keys(options.handlers);
-  const shutdown = new AbortController();
   const inFlight = new Set<Promise<void>>();
   let stopped = false;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -71,21 +71,24 @@ export function startJobWorker(options: WorkerOptions) {
 
   const runClaimed = async (job: JobRecord) => {
     const handler = options.handlers[job.type];
-    // Per-job cancellation for lost leases; worker shutdown is a separate signal.
+    // Lease-loss / heartbeat failure cancels only this job; shutdown drains without abort.
     const jobCancel = new AbortController();
-    const signal = AbortSignal.any([shutdown.signal, jobCancel.signal]);
     const heartbeat = setInterval(
       () => {
-        void heartbeatJob(job.id, options.workerId, leaseMs).then((ok) => {
-          if (!ok) jobCancel.abort();
-        });
+        void heartbeatJob(job.id, options.workerId, leaseMs)
+          .then((ok) => {
+            if (!ok) jobCancel.abort();
+          })
+          .catch((error: unknown) => {
+            options.onError?.(error);
+            jobCancel.abort();
+          });
       },
       Math.max(1_000, Math.floor(leaseMs / 3)),
     );
     try {
-      await handler(job, signal);
-      if (!stopped) await completeJob(job.id, options.workerId);
-      else await failJob(job.id, options.workerId, 'Worker shutting down');
+      await handler(job, jobCancel.signal);
+      await completeJob(job.id, options.workerId);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Job failed';
       await failJob(job.id, options.workerId, message);
@@ -106,9 +109,9 @@ export function startJobWorker(options: WorkerOptions) {
   const stop = async () => {
     if (stopped) return;
     stopped = true;
-    shutdown.abort();
     if (pollTimer) clearTimeout(pollTimer);
     clearInterval(recoveryTimer);
+    // Drain in-flight inference; do not abort so runs can finish or stay retryable.
     await Promise.allSettled([...inFlight]);
   };
 

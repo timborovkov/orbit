@@ -129,8 +129,21 @@ export function checkOutboundBudgets(snapshot: BudgetSnapshot): BudgetViolation 
   return null;
 }
 
+/** True when completed steps have exceeded the allowed count (exactly max is still permitted). */
 export function checkToolStepLimit(steps: number, budgets: AgentBudgets): BudgetViolation | null {
-  return steps >= budgets.maxToolStepsPerRun ? 'tool-steps' : null;
+  return steps > budgets.maxToolStepsPerRun ? 'tool-steps' : null;
+}
+
+/** Detect budget messages thrown inside inference so simulate can preserve them. */
+export function isBudgetViolationMessage(message: string): boolean {
+  return (
+    message.includes('cap reached') ||
+    message.includes('quota reached') ||
+    message.includes('deadline') ||
+    message.includes('concurrency') ||
+    message.includes('tool steps') ||
+    message.includes('cancelled this simulation')
+  );
 }
 
 export function checkRunDeadline(

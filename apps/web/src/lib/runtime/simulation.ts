@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { isBudgetViolationMessage } from '@/lib/budgets';
 import type { AgentConfig } from '@/lib/runtime/config';
 
 const action = z.object({
@@ -106,14 +107,20 @@ export async function simulate(
     }
   } catch (error) {
     // Provider exceptions can contain request headers, keys and raw response bodies.
+    const message = error instanceof Error ? error.message : '';
     const cancelled =
       (error instanceof Error && error.name === 'AbortError') ||
       (typeof DOMException !== 'undefined' &&
         error instanceof DOMException &&
         error.name === 'AbortError');
-    result.error = cancelled
-      ? 'Run deadline reached or the worker cancelled this simulation.'
-      : 'Inference failed or timed out. Check the OpenRouter key, model availability and provider balance, then start a new run.';
+    if (cancelled) {
+      result.error = 'Run deadline reached or the worker cancelled this simulation.';
+    } else if (message && isBudgetViolationMessage(message)) {
+      result.error = message;
+    } else {
+      result.error =
+        'Inference failed or timed out. Check the OpenRouter key, model availability and provider balance, then start a new run.';
+    }
   }
   await checkpoint(result);
   return result;
