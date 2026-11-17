@@ -374,6 +374,65 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
   ]);
 });
 
+test('queue retries keep reservation-only progress under the hard cap', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const budgets = { ...uncapped, maxToolStepsPerRun: 2, runDeadlineSeconds: 120 };
+  const config = { ...preset.config, name: 'ReserveOnly' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'ReserveOnly',${config.mission},'shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
+  await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'secret-reserve')})`;
+  await sql`UPDATE controls SET paused=false`;
+
+  const queued = await enqueueSimulation({
+    actor: 'test@example.com',
+    agentId: id,
+    configurationId: version.id,
+    input: 'Reservation-only resume prompt',
+  });
+  expect('runId' in queued && queued.runId).toBeTruthy();
+  const runId = queued.runId!;
+
+  // Mimic a durable post-call checkpoint failure: allowance claimed, response never saved.
+  await sql`
+    UPDATE simulation_runs
+    SET result = ${sql.json({
+      reservedStages: ['evaluator'],
+      steps: [],
+      actions: [],
+      error: null,
+    })}
+    WHERE id = ${runId}
+  `;
+
+  let calls = 0;
+  await processSimulationJob({ runId, agentId: id }, () => async () => {
+    calls += 1;
+    return {
+      decision: {
+        relevant: true,
+        priority: 0.8,
+        reason: 'should not run',
+        actions: [{ type: 'reply', reason: 'help', draft: 'nope' }],
+      },
+      inputTokens: 1,
+      outputTokens: 1,
+    };
+  });
+
+  expect(calls).toBe(0);
+  const [done] = await sql`SELECT status, result FROM simulation_runs WHERE id=${runId}`;
+  expect(done.status).toBe('failed');
+  expect(done.result.reservedStages).toEqual(['evaluator']);
+  expect(done.result.steps).toHaveLength(0);
+  expect(done.result.error).toContain('already used this model step');
+});
+
 test('retries preserve the original run deadline', async () => {
   const id = randomUUID();
   ids.push(id);

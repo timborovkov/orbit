@@ -20,7 +20,12 @@ import { enqueueJob } from '@/lib/queue/jobs';
 import { isRetryableInfrastructureError, retryableStore } from '@/lib/runtime/errors';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
-import { simulate, type ModelCall, type SimulationResult } from '@/lib/runtime/simulation';
+import {
+  hasSimulationProgress,
+  simulate,
+  type ModelCall,
+  type SimulationResult,
+} from '@/lib/runtime/simulation';
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
 import { agents, configurations, credentials, jobs, runs, usageCounters } from '@/lib/schema';
 
@@ -369,7 +374,8 @@ async function processSimulationRun(
     const { apiKey } = resolveOpenRouterApiKey(run.agentId, credential?.encryptedKey);
     const call = inference(apiKey);
 
-    const checkpointed = run.result.steps.length > 0 ? run.result : undefined;
+    // Include reservation-only progress so a failed post-call checkpoint cannot free the step slot.
+    const checkpointed = hasSimulationProgress(run.result) ? run.result : undefined;
     const result = await simulate(
       config.config,
       run.input,

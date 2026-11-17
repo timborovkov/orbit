@@ -7,7 +7,12 @@ import {
   resolveOpenRouterApiKey,
 } from '@/lib/runtime/openrouter-key';
 import { decryptCredential, encryptCredential } from '@/lib/runtime/secrets';
-import { simulate, type ModelCall, type SimulationResult } from '@/lib/runtime/simulation';
+import {
+  hasSimulationProgress,
+  simulate,
+  type ModelCall,
+  type SimulationResult,
+} from '@/lib/runtime/simulation';
 
 const config: AgentConfig = {
   name: 'John',
@@ -88,6 +93,32 @@ describe('OpenRouter key resolution', () => {
   });
 });
 describe('bounded manual simulation', () => {
+  test('hasSimulationProgress includes reservation-only checkpoints', () => {
+    expect(hasSimulationProgress({ steps: [], actions: [], error: null })).toBe(false);
+    expect(
+      hasSimulationProgress({
+        reservedStages: ['evaluator'],
+        steps: [],
+        actions: [],
+        error: null,
+      }),
+    ).toBe(true);
+    expect(
+      hasSimulationProgress({
+        steps: [
+          {
+            stage: 'evaluator',
+            model: 'test/evaluator',
+            decision,
+            inputTokens: 1,
+            outputTokens: 1,
+          },
+        ],
+        actions: [],
+        error: null,
+      }),
+    ).toBe(true);
+  });
   test('evaluates multiple actions, drafts them and suppresses every effect', async () => {
     const requests: Parameters<ModelCall>[0][] = [];
     const checkpoints: SimulationResult[] = [];

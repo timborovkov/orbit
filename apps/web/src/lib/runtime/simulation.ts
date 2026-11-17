@@ -101,6 +101,11 @@ function dispatchedStageCount(result: SimulationResult): number {
   return stages.size;
 }
 
+/** True when a prior attempt claimed allowance or saved a paid step. */
+export function hasSimulationProgress(result: SimulationResult): boolean {
+  return result.steps.length > 0 || (result.reservedStages?.length ?? 0) > 0;
+}
+
 // This module has no channel clients, write tools or framework dependencies.
 // Both web and worker can supply inference, policy and durable checkpoint callbacks.
 export async function simulate(
