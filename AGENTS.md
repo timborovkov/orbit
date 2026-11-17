@@ -20,6 +20,14 @@ Before building or changing UI, read [design.md](design.md). Follow its current 
 - Server Components may call server queries directly; do not introduce an internal HTTP API or client-side fetching merely to separate files. Use feature-focused modules, not generic repositories or extra service layers without a concrete need.
 - Verify refactors with existing behavior tests, including authentication, independent versions, persistence and error handling. Separation should preserve behavior and visual output.
 
+## Validation and delivery
+
+- Scope local checks to changed behavior. Prose-only work needs changed-file formatting, links and diff review, not application suites. Follow [testing policy](docs/testing/README.md) for which suites run on `main` versus `production`.
+- GitHub owns broad validation. Required checks gate merging, not commits, pushes or PR creation. Never bypass or weaken checks; report pending and unrelated failures accurately.
+- `main` is development; Railway deploys from `main` for now (Orbit is not live yet). Release through a PR to protected `production`, where the heavy CI runs. PRs to `main` require `Static checks` only. Production PRs require `Static checks`, `Full validation`, `PostgreSQL integration`, and `Playwright E2E`, plus an up-to-date branch and resolved review threads. Repository branch names do not establish what Railway currently runs.
+- Heavy tests (Docker image builds, PostgreSQL simulation, Playwright) belong in the production-gated CI jobs or the E2E workflow so parallel work can extend those jobs without slowing every `main` PR.
+- React Doctor verification requires both score 100 and “No issues found”; an exit code without a score is insufficient.
+
 ## Repository work
 
 - Use `@/*` for application imports. Prettier owns import ordering; run it after adding imports. Keep server actions grouped by feature and reusable authentication behaviour in `lib/auth.ts`.

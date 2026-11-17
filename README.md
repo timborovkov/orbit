@@ -72,13 +72,16 @@ interrupted. The most recent 50 runs are displayed with job status. Shared queue
 policy, budgets and runtime modules live under `apps/web/src/lib` and are imported by
 `apps/worker`.
 
-Validation: `bun run test:unit` for the light main-CI suite (including in-memory queue
-logic). Against a migrated `orbit_test` database run `bun run test:queue`,
-`bun run test:simulation` and `bun run test:integration`. After a production build,
-`bun run test:e2e` covers browser flows with the worker stack. Runtime tests inject
-deterministic inference and do not spend API credit. Browser tests exercise admin
+Validation: `bun run test:unit` on every `main` PR (auth/env, pure simulation helpers,
+pictures, budgets, lifecycle, policy gateway and in-memory queue logic — no database).
+PostgreSQL suites (`bun run test:queue`, `bun run test:simulation`,
+`bun run test:integration`) and Playwright (`bun run test:e2e` after a production
+build) run on the production release path or manual workflow dispatch — see
+[testing policy](docs/testing/README.md). Runtime and persistence tests inject
+deterministic inference; they do not spend API credit. Browser tests exercise admin
 actions, lifecycle/budget controls, Access key-source states and persisted failure
-details.
+details. Real provider quality requires a configured OpenRouter key (environment
+default or per-agent) and a live manual test.
 
 ### Agent profile pictures
 

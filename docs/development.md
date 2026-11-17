@@ -21,16 +21,25 @@ No password or session is used in this mode. The dashboard displays the local id
 
 ## Checks
 
+`main` is development (Railway deploys from it for now); `production` is the
+protected release branch via a PR from `main`, where heavy CI runs. Which suites
+run where, and how to trigger the heavy path manually, is owned by
+[testing policy](testing/README.md).
+
+Fast path (every `main` PR — `Static checks`):
+
 ```sh
 bun run validate
 bun run build
 bun run test:unit
-bunx playwright install chromium
 ```
 
-`bun run test:unit` is the light suite for main CI: auth/env, pure simulation helpers, pictures, budgets, lifecycle, policy gateway and in-memory queue state transitions. It must not require PostgreSQL.
+Validation includes formatting/import order, types, strict lint, unused code and React Doctor 100. Application imports use `@/*`; Prettier sorts imports automatically. Fast unit tests need no database: auth/env, pure simulation helpers, pictures, budgets, lifecycle, policy gateway and in-memory queue state transitions.
 
-PostgreSQL-backed suites are separate and intended for production or manually triggered workflows:
+Heavy suites (production PRs/pushes, or manual workflow dispatch): Docker image
+builds and smoke (`Full validation`), migrated `orbit_test` PostgreSQL suites
+(`test:queue`, `test:simulation`, worker integration), and Playwright
+(`Playwright E2E`). Prefer GitHub for those unless iterating locally.
 
 ```sh
 bun run test:queue          # SKIP LOCKED, leases, retries, worker drain against orbit_test
@@ -47,6 +56,7 @@ docker compose exec postgres createdb -U orbit orbit_test
 DATABASE_URL=postgres://orbit:orbit_dev@localhost:5432/orbit_test bun run db:migrate
 docker compose up -d --wait rustfs
 S3_BUCKET=orbit-test bun run storage:setup
+bunx playwright install chromium
 bun run test:e2e
 ```
 
