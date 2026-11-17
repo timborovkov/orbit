@@ -74,7 +74,14 @@ class FakeJobStore {
     let count = 0;
     for (const row of this.rows.values()) {
       if (row.status !== 'claimed' || !row.claimExpiresAt || row.claimExpiresAt > now) continue;
-      row.status = 'pending';
+      if (row.attempts >= row.maxAttempts) {
+        row.status = 'dead';
+        row.finishedAt = now;
+        row.lastError = row.lastError ?? 'Lease expired after max attempts';
+      } else {
+        row.status = 'pending';
+        row.availableAt = now;
+      }
       row.claimedAt = null;
       row.claimExpiresAt = null;
       row.claimedBy = null;
@@ -175,6 +182,22 @@ test('fake store: exclusive claim, lease recovery, retry, dead-letter and idempo
   const [last] = store.claim('w4', 'sim');
   expect(store.fail(last.id, 'w4', 'boom again')?.status).toBe('dead');
   expect(store.get(job.id)?.status).toBe('dead');
+});
+
+test('fake store: exhausted lease recovery dead-letters instead of retrying', () => {
+  const store = new FakeJobStore();
+  const job = store.enqueue({
+    type: 'once',
+    payload: {},
+    idempotencyKey: 'once-lease',
+    maxAttempts: 1,
+  });
+  const [claimed] = store.claim('w', 'once', 1);
+  expect(claimed.attempts).toBe(1);
+  claimed.claimExpiresAt = new Date(0);
+  expect(store.recoverExpired()).toBe(1);
+  expect(store.get(job.id)?.status).toBe('dead');
+  expect(store.claim('w2', 'once')).toHaveLength(0);
 });
 
 test('fake store: worker drain completes in-flight work before stop resolves', async () => {

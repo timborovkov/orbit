@@ -30,9 +30,9 @@ ALTER TABLE agents ADD COLUMN enabled_tools jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE simulation_runs DROP CONSTRAINT IF EXISTS simulation_runs_status_check;
 ALTER TABLE simulation_runs ADD CONSTRAINT simulation_runs_status_check
   CHECK (status IN ('queued','running','completed','failed','interrupted'));
+-- Concurrency is enforced in enqueueSimulation against agent budgets.maxConcurrentRuns
+-- (with a row lock on agents), not a unique index that caps every agent at one active run.
 DROP INDEX IF EXISTS simulation_runs_one_active;
-CREATE UNIQUE INDEX simulation_runs_one_active ON simulation_runs(agent_id)
-  WHERE status IN ('queued','running');
 ALTER TABLE simulation_runs ALTER COLUMN status SET DEFAULT 'queued';
 ALTER TABLE simulation_runs ADD COLUMN job_id uuid;
 ALTER TABLE simulation_runs ADD COLUMN defer_reason text;

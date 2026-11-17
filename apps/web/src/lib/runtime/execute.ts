@@ -15,13 +15,25 @@ import { authorizeAction, loadPolicyContext, recordUsage } from '@/lib/policy/ga
 import { enqueueJob } from '@/lib/queue/jobs';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
-import { simulate, type ModelCall } from '@/lib/runtime/simulation';
+import { simulate, type ModelCall, type SimulationResult } from '@/lib/runtime/simulation';
 import { agents, configurations, credentials, jobs, runs, usageCounters } from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
 
 function idempotencyKey(parts: string[]) {
   return createHash('sha256').update(parts.join(':')).digest('hex');
+}
+
+/** Persist run mutations only while the row is still owned as running (never overwrite interrupted). */
+async function updateIfRunning(
+  runId: string,
+  values: Partial<typeof runs.$inferInsert> & { result?: SimulationResult },
+) {
+  return await db()
+    .update(runs)
+    .set(values)
+    .where(and(eq(runs.id, runId), eq(runs.status, 'running')))
+    .returning({ id: runs.id });
 }
 
 async function expireStaleRuns(
@@ -130,8 +142,7 @@ export async function enqueueSimulation({
     ).at(0);
     if (!config) {
       return {
-        error:
-          'A run is already in progress or the configuration is unavailable. Refresh and try again.' as const,
+        error: 'The configuration is unavailable. Refresh and try again.' as const,
       };
     }
 
@@ -194,6 +205,7 @@ export async function executeSimulation(
 async function processSimulationRun(
   runId: string,
   inference: (key: string) => ModelCall = openRouterInference,
+  externalSignal?: AbortSignal,
 ) {
   const claimed = await db().transaction(async (tx) => {
     const run = (await tx.select().from(runs).where(eq(runs.id, runId)).for('update')).at(0);
@@ -237,6 +249,11 @@ async function processSimulationRun(
 
   const { run, config, budgets } = claimed;
   const startedAt = new Date();
+  const deadlineMs = budgets.runDeadlineSeconds * 1000;
+  const deadlineSignal = AbortSignal.timeout(deadlineMs);
+  const signal = externalSignal
+    ? AbortSignal.any([deadlineSignal, externalSignal])
+    : deadlineSignal;
 
   try {
     const credential = (
@@ -245,7 +262,6 @@ async function processSimulationRun(
     // Agent key → OPENROUTER_API_KEY → inspectable failure. Same path for web and worker.
     const { apiKey } = resolveOpenRouterApiKey(run.agentId, credential?.encryptedKey);
     const call = inference(apiKey);
-    let requestCount = 0;
 
     const result = await simulate(
       config.config,
@@ -254,18 +270,24 @@ async function processSimulationRun(
         if (checkRunDeadline(startedAt, new Date(), budgets)) {
           throw new Error(budgetViolationMessage('run-deadline'));
         }
+        try {
+          signal.throwIfAborted();
+        } catch {
+          throw new Error(budgetViolationMessage('run-deadline'));
+        }
         const ctx = await loadPolicyContext(run.agentId, run.actor, run.id);
         if (!ctx) throw new Error('Agent unavailable');
+        // Counters already include persisted usage from prior calls in this run.
         const snapshot: BudgetSnapshot = {
           budgets: ctx.budgets,
           day: {
             spendMicros: ctx.usage.spendMicros,
-            requests: ctx.usage.requests + requestCount,
+            requests: ctx.usage.requests,
             outboundActions: ctx.usage.outboundActions,
           },
           month: {
             spendMicros: ctx.usage.month.spendMicros,
-            requests: ctx.usage.month.requests + requestCount,
+            requests: ctx.usage.month.requests,
             outboundActions: ctx.usage.month.outboundActions,
           },
           activeRuns: ctx.usage.activeRuns,
@@ -273,7 +295,14 @@ async function processSimulationRun(
         const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
         if (violation) throw new Error(budgetViolationMessage(violation));
         const response = await call(request);
-        requestCount += 1;
+        if (checkRunDeadline(startedAt, new Date(), budgets)) {
+          throw new Error(budgetViolationMessage('run-deadline'));
+        }
+        try {
+          signal.throwIfAborted();
+        } catch {
+          throw new Error(budgetViolationMessage('run-deadline'));
+        }
         await recordUsage(run.agentId, {
           requests: 1,
           spendMicros: BigInt(0), // Token spend tracked; monetary pricing unavailable → documented as 0.
@@ -281,11 +310,12 @@ async function processSimulationRun(
         return response;
       },
       async (partial) => {
-        await db().update(runs).set({ result: partial }).where(eq(runs.id, run.id));
+        await updateIfRunning(run.id, { result: partial });
       },
       {
         maxSteps: budgets.maxToolStepsPerRun,
-        onActions: async (actions, partial) => {
+        signal,
+        onActions: async (actions, partial, stage) => {
           const stepLimit = checkToolStepLimit(partial.steps.length, budgets);
           if (stepLimit) {
             return actions.map((action) => ({
@@ -307,7 +337,13 @@ async function processSimulationRun(
               const decision = await authorizeAction(ctx, {
                 type: action.type,
                 payload: { draft: action.draft, reason: action.reason },
-                idempotencyKey: idempotencyKey([run.id, action.type, String(index), action.reason]),
+                idempotencyKey: idempotencyKey([
+                  run.id,
+                  stage,
+                  action.type,
+                  String(index),
+                  action.reason,
+                ]),
               });
               return {
                 ...action,
@@ -320,15 +356,16 @@ async function processSimulationRun(
       },
     );
 
-    await db()
-      .update(runs)
-      .set({
-        status: result.error ? 'failed' : 'completed',
-        finishedAt: new Date(),
-        result,
-        deferReason: null,
-      })
-      .where(eq(runs.id, run.id));
+    const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
+    const isDeadline =
+      !!result.error &&
+      (result.error.includes('deadline') || result.error.includes('cancelled this simulation'));
+    await updateIfRunning(run.id, {
+      status: terminalStatus,
+      finishedAt: new Date(),
+      result,
+      deferReason: isDeadline ? result.error : null,
+    });
   } catch (error) {
     const fallback =
       'Unable to complete inference. Check the agent credential or OPENROUTER_API_KEY, server encryption key and provider availability, then try again.';
@@ -344,7 +381,8 @@ async function processSimulationRun(
       inspectable.includes('quota reached') ||
       inspectable.includes('deadline') ||
       inspectable.includes('concurrency') ||
-      inspectable.includes('tool steps');
+      inspectable.includes('tool steps') ||
+      inspectable.includes('cancelled this simulation');
     await db()
       .update(runs)
       .set({
@@ -353,15 +391,16 @@ async function processSimulationRun(
         deferReason: isBudget ? inspectable : null,
         result: sql`jsonb_set(${runs.result}, '{error}', to_jsonb(${inspectable}::text))`,
       })
-      .where(eq(runs.id, run.id));
+      .where(and(eq(runs.id, run.id), eq(runs.status, 'running')));
   }
 }
 
 export async function processSimulationJob(
   payload: Record<string, unknown>,
   inference: (key: string) => ModelCall = openRouterInference,
+  signal?: AbortSignal,
 ) {
   const runId = typeof payload.runId === 'string' ? payload.runId : null;
   if (!runId) throw new Error('simulation.run payload missing runId');
-  await processSimulationRun(runId, inference);
+  await processSimulationRun(runId, inference, signal);
 }

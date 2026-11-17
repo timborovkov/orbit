@@ -23,8 +23,8 @@ console.info(`Orbit worker started (${workerId})`);
 const worker = startJobWorker({
   workerId,
   handlers: {
-    [SIMULATION_JOB_TYPE]: async (job) => {
-      await processSimulationJob(job.payload);
+    [SIMULATION_JOB_TYPE]: async (job, signal) => {
+      await processSimulationJob(job.payload, undefined, signal);
     },
   },
   onError: (error) => {

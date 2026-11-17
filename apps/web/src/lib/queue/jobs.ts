@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import { db, sqlClient, type Db, type Tx } from '@/lib/db';
 import {
@@ -118,13 +118,19 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
   const expiry = new Date(Date.now() + leaseMs).toISOString();
   const client = sqlClient();
 
+  // Expired claims are only reclaimable while attempts remain; exhausted leases are dead-lettered by recovery.
   const rows = options.types?.length
     ? await client`
         WITH candidate AS (
           SELECT id FROM jobs
           WHERE (
             (status = 'pending' AND available_at <= ${now}::timestamptz)
-            OR (status = 'claimed' AND claim_expires_at IS NOT NULL AND claim_expires_at < ${now}::timestamptz)
+            OR (
+              status = 'claimed'
+              AND claim_expires_at IS NOT NULL
+              AND claim_expires_at < ${now}::timestamptz
+              AND attempts < max_attempts
+            )
           )
           AND type = ANY(${options.types})
           ORDER BY available_at ASC, created_at ASC
@@ -148,7 +154,12 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
           SELECT id FROM jobs
           WHERE (
             (status = 'pending' AND available_at <= ${now}::timestamptz)
-            OR (status = 'claimed' AND claim_expires_at IS NOT NULL AND claim_expires_at < ${now}::timestamptz)
+            OR (
+              status = 'claimed'
+              AND claim_expires_at IS NOT NULL
+              AND claim_expires_at < ${now}::timestamptz
+              AND attempts < max_attempts
+            )
           )
           ORDER BY available_at ASC, created_at ASC
           FOR UPDATE SKIP LOCKED
@@ -241,24 +252,29 @@ export async function failJob(
   return updated ? mapJob(updated) : null;
 }
 
-/** Recover expired leases back to pending without waiting for a claim race. */
+/** Recover expired leases: retry when attempts remain, otherwise dead-letter. */
 export async function recoverExpiredLeases(store: Store = db()): Promise<number> {
-  const now = new Date();
-  const recovered = await store
-    .update(jobs)
-    .set({
-      status: 'pending',
-      claimedAt: null,
-      claimExpiresAt: null,
-      claimedBy: null,
-      updatedAt: now,
-      availableAt: now,
-    })
-    .where(
-      and(eq(jobs.status, 'claimed'), isNotNull(jobs.claimExpiresAt), lt(jobs.claimExpiresAt, now)),
-    )
-    .returning({ id: jobs.id });
-  return recovered.length;
+  const now = new Date().toISOString();
+  const result = await store.execute(sql`
+    UPDATE jobs
+    SET
+      status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
+      last_error = CASE
+        WHEN attempts >= max_attempts THEN coalesce(last_error, 'Lease expired after max attempts')
+        ELSE last_error
+      END,
+      finished_at = CASE WHEN attempts >= max_attempts THEN ${now}::timestamptz ELSE NULL END,
+      claimed_at = NULL,
+      claim_expires_at = NULL,
+      claimed_by = NULL,
+      updated_at = ${now}::timestamptz,
+      available_at = ${now}::timestamptz
+    WHERE status = 'claimed'
+      AND claim_expires_at IS NOT NULL
+      AND claim_expires_at < ${now}::timestamptz
+    RETURNING id
+  `);
+  return Array.isArray(result) ? result.length : 0;
 }
 
 export async function cancelPendingJobsForAgent(

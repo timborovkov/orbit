@@ -66,6 +66,30 @@ test('lease expiry recovery returns jobs to pending', async () => {
   expect(await heartbeatJob(job.id, `${prefix}-lease-2`)).toBe(false);
 });
 
+test('expired leases at max attempts are dead-lettered instead of reclaimed', async () => {
+  const job = await enqueueJob(db(), {
+    type: `${prefix}.exhausted`,
+    payload: {},
+    idempotencyKey: `${prefix}:exhausted`,
+    maxAttempts: 1,
+  });
+  const [claimed] = await claimJobs({
+    workerId: `${prefix}-ex`,
+    types: [`${prefix}.exhausted`],
+    leaseMs: 1,
+  });
+  expect(claimed.id).toBe(job.id);
+  expect(claimed.attempts).toBe(1);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const recovered = await recoverExpiredLeases();
+  expect(recovered).toBeGreaterThanOrEqual(1);
+  const [row] = await sqlClient()`SELECT status FROM jobs WHERE id = ${job.id}`;
+  expect(row.status).toBe('dead');
+  expect(
+    await claimJobs({ workerId: `${prefix}-ex-2`, types: [`${prefix}.exhausted`] }),
+  ).toHaveLength(0);
+});
+
 test('retries with backoff and dead-letter after max attempts', async () => {
   const job = await enqueueJob(db(), {
     type: `${prefix}.retry`,
