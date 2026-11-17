@@ -1,5 +1,4 @@
 import { notFound } from 'next/navigation';
-import { and, desc, eq } from 'drizzle-orm';
 import { ChevronDown, FlaskConical, History, KeyRound, ShieldCheck } from 'lucide-react';
 import { z } from 'zod';
 
@@ -13,9 +12,8 @@ import { WorkspaceForm } from '@/app/workspace-form';
 import { WorkspaceHeader } from '@/app/workspace-header';
 import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { requireAdmin } from '@/lib/auth';
-import { db } from '@/lib/db';
 import { env } from '@/lib/env';
-import { agents, configurations, credentials, runs } from '@/lib/schema';
+import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
 
 export const dynamic = 'force-dynamic';
@@ -23,32 +21,11 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   const email = await requireAdmin();
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
-  const agent = (await db().select().from(agents).where(eq(agents.id, id))).at(0);
-  if (!agent) notFound();
-  const [versions, keys, history] = await Promise.all([
-    db()
-      .select()
-      .from(configurations)
-      .where(eq(configurations.agentId, id))
-      .orderBy(desc(configurations.version)),
-    db()
-      .select({ agentId: credentials.agentId })
-      .from(credentials)
-      .where(eq(credentials.agentId, id)),
-    db()
-      .select()
-      .from(runs)
-      .where(and(eq(runs.agentId, id)))
-      .orderBy(desc(runs.createdAt))
-      .limit(50),
-  ]);
-  const current = versions.at(0);
-  if (!current) notFound();
-  const viewedHistory = history.map((run) => ({
-    ...run,
-    interrupted: run.status === 'running' && run.expiresAt < new Date(),
-  }));
-  const latest = viewedHistory.at(0);
+  const workspace = await getAgentWorkspace(id);
+  if (!workspace) notFound();
+  const { agent, versions, hasCredential, history, current } = workspace;
+  const viewedHistory = history;
+  const latest = history.at(0);
   const versionFor = (configurationId: string) =>
     versions.find((version) => version.id === configurationId)?.version;
   const configuration = (
@@ -87,14 +64,14 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       <div className="connection-status">
         <KeyRound size={20} aria-hidden="true" />
         <div>
-          <h3>{keys.length ? 'Credential saved' : 'Connect OpenRouter'}</h3>
+          <h3>{hasCredential ? 'Credential saved' : 'Connect OpenRouter'}</h3>
           <p className="muted" role="status">
-            {keys.length
+            {hasCredential
               ? 'A credential is saved. Enter a new key to replace it.'
               : 'No credential saved. Add a key to run simulations.'}
           </p>
         </div>
-        <span className="state-label">{keys.length ? 'Configured' : 'Not connected'}</span>
+        <span className="state-label">{hasCredential ? 'Configured' : 'Not connected'}</span>
       </div>
       <WorkspaceForm action={saveCredential} label="Save credential">
         <input type="hidden" name="agentId" value={id} />
@@ -109,7 +86,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
           placeholder="Enter your OpenRouter key"
         />
       </WorkspaceForm>
-      {keys.length > 0 && (
+      {hasCredential && (
         <WorkspaceForm action={saveCredential} label="Remove credential">
           <input type="hidden" name="agentId" value={id} />
           <input type="hidden" name="revoke" value="true" />
@@ -265,7 +242,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
           <div className="agent-version">
             <span>Configuration v{current.version}</span>
             <span className="muted">
-              {keys.length ? 'OpenRouter configured' : 'OpenRouter not connected'}
+              {hasCredential ? 'OpenRouter configured' : 'OpenRouter not connected'}
             </span>
           </div>
         </div>

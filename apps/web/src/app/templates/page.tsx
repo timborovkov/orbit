@@ -1,19 +1,15 @@
-import { asc } from 'drizzle-orm';
 import { ChevronDown, Layers } from 'lucide-react';
 
 import { saveTemplate } from '@/actions/workspace';
 import { ConfigFields } from '@/app/config-fields';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { WorkspaceHeader } from '@/app/workspace-header';
-import { requireAdmin } from '@/lib/auth';
-import { db } from '@/lib/db';
 import { env } from '@/lib/env';
-import { templates } from '@/lib/schema';
+import { getTemplates } from '@/lib/server/workspace-queries';
 
 export const dynamic = 'force-dynamic';
 export default async function Templates() {
-  const email = await requireAdmin();
-  const items = await db().select().from(templates).orderBy(asc(templates.title));
+  const { email, items } = await getTemplates();
   return (
     <div className="agent-shell">
       <WorkspaceHeader name="Templates" />

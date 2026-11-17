@@ -1,15 +1,16 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
-import { db } from '@/lib/db';
 import { configSchema } from '@/lib/runtime/config';
 import { executeSimulation } from '@/lib/runtime/execute';
-import { encryptCredential } from '@/lib/runtime/secrets';
-import { agents, audit, configurations, credentials, templates } from '@/lib/schema';
+import {
+  persistConfiguration,
+  persistCredential,
+  persistTemplate,
+} from '@/lib/server/workspace-mutations';
 
 const uuid = z.uuid();
 export async function saveConfiguration(form: FormData) {
@@ -22,29 +23,7 @@ export async function saveConfiguration(form: FormData) {
     };
   const agentId = uuid.parse(form.get('agentId'));
   const version = z.coerce.number().int().positive().parse(form.get('version'));
-  const saved = await db().transaction(async (tx) => {
-    await tx.select().from(agents).where(eq(agents.id, agentId)).for('update');
-    const current = (
-      await tx
-        .select()
-        .from(configurations)
-        .where(eq(configurations.agentId, agentId))
-        .orderBy(desc(configurations.version))
-        .limit(1)
-    ).at(0);
-    if (current?.version !== version) return false;
-    await tx
-      .insert(configurations)
-      .values({ agentId, version: version + 1, config: parsed.data, actor });
-    await tx
-      .update(agents)
-      .set({ name: parsed.data.name, mission: parsed.data.mission })
-      .where(eq(agents.id, agentId));
-    await tx
-      .insert(audit)
-      .values({ actor, action: `Saved configuration v${version + 1} for agent ${agentId}` });
-    return true;
-  });
+  const saved = await persistConfiguration(actor, agentId, version, parsed.data);
   if (!saved) return { error: 'This configuration changed in another tab. Reload before saving.' };
   revalidatePath('/');
   revalidatePath(`/agents/${agentId}`);
@@ -58,16 +37,7 @@ export async function saveTemplate(form: FormData) {
   if (!parsed.success) return { error: 'Check text lengths and model IDs.' };
   const id = z.string().max(80).parse(form.get('templateId'));
   const revision = z.coerce.number().int().positive().parse(form.get('revision'));
-  const saved = await db().transaction(async (tx) => {
-    const rows = await tx
-      .update(templates)
-      .set({ config: { ...parsed.data, name: '' }, revision: revision + 1 })
-      .where(and(eq(templates.id, id), eq(templates.revision, revision)))
-      .returning();
-    if (!rows.length) return false;
-    await tx.insert(audit).values({ actor, action: `Updated template ${id} defaults` });
-    return true;
-  });
+  const saved = await persistTemplate(actor, id, revision, parsed.data);
   if (!saved) return { error: 'Template changed in another tab. Reload before saving.' };
   revalidatePath('/templates');
   revalidatePath('/');
@@ -81,31 +51,10 @@ export async function saveCredential(form: FormData) {
   const revoke = form.get('revoke') === 'true';
   if (!revoke && (!secret.success || !secret.data || /\s/.test(secret.data)))
     return { error: 'Enter an OpenRouter API key without spaces.' };
-  let encryptedKey = '';
-  if (!revoke) {
-    try {
-      encryptedKey = encryptCredential(agentId, secret.success ? secret.data : '');
-    } catch {
-      return {
-        error:
-          'Set ORBIT_ENCRYPTION_KEY to a 64-character hex key on the server before saving credentials.',
-      };
-    }
-  }
-  await db().transaction(async (tx) => {
-    if (revoke) await tx.delete(credentials).where(eq(credentials.agentId, agentId));
-    else
-      await tx
-        .insert(credentials)
-        .values({ agentId, encryptedKey })
-        .onConflictDoUpdate({ target: credentials.agentId, set: { encryptedKey } });
-    await tx.insert(audit).values({
-      actor,
-      action: `${revoke ? 'Revoked' : 'Replaced'} OpenRouter credential for agent ${agentId}`,
-    });
-  });
+  const result = await persistCredential(actor, agentId, secret.success ? secret.data : '', revoke);
+  if ('error' in result) return result;
   revalidatePath(`/agents/${agentId}`);
-  return { message: revoke ? 'Credential removed.' : 'Credential saved encrypted.' };
+  return result;
 }
 export async function runSimulation(form: FormData) {
   await checkOrigin();

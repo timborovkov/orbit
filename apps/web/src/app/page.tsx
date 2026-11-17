@@ -1,6 +1,5 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { desc } from 'drizzle-orm';
 import { ArrowDownLeft, CirclePause, LockKeyhole, ShieldCheck, Users } from 'lucide-react';
 
 import { logout } from '@/actions/auth';
@@ -9,22 +8,12 @@ import { AgentAvatar } from '@/app/agent-avatar';
 import { CreateAgent } from '@/app/create-agent';
 import { ThemeSwitch } from '@/app/theme';
 import { SubmitButton } from '@/components/ui/submit-button';
-import { requireAdmin } from '@/lib/auth';
-import { db } from '@/lib/db';
 import { env } from '@/lib/env';
-import { agents, audit, controls, templates } from '@/lib/schema';
+import { getOverview } from '@/lib/server/workspace-queries';
 
 export const dynamic = 'force-dynamic';
 export default async function Home() {
-  const { email, team, events, state, presets } = await requireAdmin().then(async (email) => {
-    const [team, events, state, presets] = await Promise.all([
-      db().select().from(agents).orderBy(desc(agents.createdAt)),
-      db().select().from(audit).orderBy(desc(audit.createdAt)).limit(12),
-      db().select().from(controls),
-      db().select().from(templates),
-    ]);
-    return { email, team, events, state, presets };
-  });
+  const { email, team, events, state, presets } = await getOverview();
   const paused = state.at(0)?.paused ?? true;
   const localAuth = env().AUTH_DISABLED;
   return (
