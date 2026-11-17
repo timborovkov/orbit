@@ -73,12 +73,14 @@ in `apps/web/src/lib/runtime`; the persistence service has no Next.js dependency
 can be invoked by the Bun worker with an authenticated job context later. Nothing
 starts autonomous work yet.
 
-Validation: `bun run test:unit`, `bun run test:simulation` (requires migrated
-`orbit_test` PostgreSQL), and `bun run test:e2e` after a production build. Runtime
-and persistence tests inject deterministic inference; they do not spend API credit.
-Browser tests exercise real admin actions, template/configuration edits, encryption,
-Access key-source states and persisted failure details. Real provider quality requires
-a configured OpenRouter key (environment default or per-agent) and a live manual test.
+Validation: `bun run test:unit` on every `main` PR; `bun run test:simulation`
+(requires migrated `orbit_test` PostgreSQL) and `bun run test:e2e` after a production
+build on the production release path — see [testing policy](docs/testing/README.md).
+Runtime and persistence tests inject deterministic inference; they do not spend API
+credit. Browser tests exercise real admin actions, template/configuration edits,
+encryption, Access key-source states and persisted failure details. Real provider
+quality requires a configured OpenRouter key (environment default or per-agent) and
+a live manual test.
 
 ### Agent profile pictures
 

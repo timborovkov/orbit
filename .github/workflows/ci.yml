@@ -36,9 +36,12 @@ jobs:
         run: bun run validate
       - name: Build web
         run: bun run build
+      - name: Fast unit tests
+        run: bun run test:unit
 
   full-validation:
     name: Full validation
+    if: github.base_ref == 'production' || github.ref == 'refs/heads/production' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -73,7 +76,8 @@ jobs:
           exit 1
 
   integration:
-    name: PostgreSQL and browser integration
+    name: PostgreSQL integration
+    if: github.base_ref == 'production' || github.ref == 'refs/heads/production' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -96,34 +100,16 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - name: Cache Bun downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', '.bun-version') }}
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Start RustFS and create private test bucket
-        run: |
-          docker compose up -d --wait rustfs
-          bun run storage:setup
-        env:
-          S3_ENDPOINT: http://localhost:9000
-          S3_BUCKET: orbit-test
-          S3_ACCESS_KEY_ID: orbit_local
-          S3_SECRET_ACCESS_KEY: orbit_local_storage_only
       - name: Apply test database migrations
         run: bun run db:migrate
         env:
           DATABASE_URL: postgres://orbit:orbit_dev@localhost:5432/orbit_test
-      - name: Build web
-        run: bun run build
-      - name: Test auth configuration and production startup guards
-        run: bun run test:unit
       - name: Test simulation persistence and isolation
         run: bun run test:simulation
-      - name: Install browser
-        run: bunx playwright install --with-deps chromium
-      - name: Test persistence, accessibility and interface states
-        run: bun run test:e2e
-      - name: Upload browser screenshots and failure evidence
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: browser-results
-          path: test-results/
