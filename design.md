@@ -1,26 +1,222 @@
+---
+name: Orbit
+description: A focused administration console for independent AI agents.
+colors:
+  bg: '#fafafa'
+  surface: '#fff'
+  subtle: '#f5f5f5'
+  ink: '#171717'
+  muted: '#666'
+  faint: '#6b6b6b'
+  border: '#e5e5e5'
+  strong-border: '#d4d4d4'
+  control-border: '#888'
+  button: '#171717'
+  button-ink: '#fff'
+  hover: '#f0f0f0'
+  focus: '#0070f3'
+  danger: '#b42318'
+  danger-bg: '#fff5f4'
+  bg-dark: '#0a0a0a'
+  surface-dark: '#0a0a0a'
+  subtle-dark: '#111'
+  ink-dark: '#ededed'
+  muted-dark: '#a1a1a1'
+  faint-dark: '#888'
+  border-dark: '#292929'
+  strong-border-dark: '#444'
+  control-border-dark: '#777'
+  button-dark: '#ededed'
+  button-ink-dark: '#0a0a0a'
+  hover-dark: '#1a1a1a'
+  focus-dark: '#52a8ff'
+  danger-dark: '#ff8a80'
+  danger-bg-dark: '#251211'
+  workspace-accent: '#563cc7'
+  workspace-selection: '#f1edfc'
+  workspace-accent-dark: '#baa9ff'
+  workspace-selection-dark: '#241f35'
+typography:
+  headline:
+    fontFamily: 'IBM Plex Sans Variable, Arial, sans-serif'
+    fontSize: '1.5rem'
+    fontWeight: 600
+    lineHeight: 1.35
+    letterSpacing: '-0.025em'
+  title:
+    fontFamily: 'IBM Plex Sans Variable, Arial, sans-serif'
+    fontSize: '1rem'
+    fontWeight: 600
+    letterSpacing: '-0.015em'
+  body:
+    fontFamily: 'IBM Plex Sans Variable, Arial, sans-serif'
+    fontSize: '0.875rem'
+    lineHeight: 1.5
+  label:
+    fontFamily: 'IBM Plex Sans Variable, Arial, sans-serif'
+    fontSize: '0.8125rem'
+    fontWeight: 500
+  metadata:
+    fontFamily: 'IBM Plex Mono, monospace'
+    fontSize: '0.75rem'
+    fontWeight: 400
+rounded:
+  control: '6px'
+  panel: '8px'
+  tag: '5px'
+spacing:
+  small: '8px'
+  medium: '16px'
+  large: '24px'
+  editor: '32px'
+components:
+  button-primary:
+    backgroundColor: '{colors.button}'
+    textColor: '{colors.button-ink}'
+    rounded: '{rounded.control}'
+    height: '36px'
+    padding: '0 13px'
+  button-outline:
+    backgroundColor: '{colors.surface}'
+    textColor: '{colors.ink}'
+    rounded: '{rounded.control}'
+  button-ghost:
+    backgroundColor: 'transparent'
+    textColor: '{colors.muted}'
+    rounded: '{rounded.control}'
+  button-destructive:
+    backgroundColor: '{colors.surface}'
+    textColor: '{colors.danger}'
+    rounded: '{rounded.control}'
+  workspace-input:
+    backgroundColor: '{colors.surface}'
+    textColor: '{colors.ink}'
+    rounded: '{rounded.control}'
+    padding: '10px 12px'
+  workspace-tab:
+    backgroundColor: 'transparent'
+    textColor: '{colors.muted}'
+    padding: '12px 2px'
+  state-label:
+    textColor: '{colors.muted}'
+    rounded: '{rounded.tag}'
+    padding: '3px 8px'
+  configuration-workbench:
+    backgroundColor: '{colors.surface}'
+    rounded: '{rounded.panel}'
+---
+
 # Orbit design foundation
 
-## Direction
+## Overview
+
+**Creative North Star: "Vercel-inspired administration UI"**
 
 Vercel-inspired administration UI: neutral surfaces, crisp one-pixel borders, restrained density and clear type. The product opens on its operational content. No promotional hero, decorative gradients or invented metrics. The supplied luminous orbital logo retains its original colour in the header and favicon; its violet/cyan illumination is a brand signature, not a wash over every surface.
 
 Taste Skill 2.5.1 informs plain copy, consistent spacing, alignment, keyboard access and browser review. Its marketing-site rules (full-screen sections, hero animation, random layout deals, static exports) do not apply to an authenticated server-rendered control centre. The user selected the Vercel-inspired direction explicitly.
 
-## Foundations
+**Key Characteristics:**
 
-Self-hosted IBM Plex Sans Variable provides UI typography, paired with IBM Plex Mono (400) for activity timestamps and small counts. The user rejected Geist as overused in PR review. Keep the existing type scale and neutral surfaces; the new pair supplies character through letterforms rather than decoration. Fonts load from the application without a font-service request. Heading sizes are 24px for the page, 14px for sections and 13px for row titles. Metadata uses at least 0.75rem (12px at the default browser size). Type uses rem units so browser text enlargement applies. The main content is capped at 1280px with 40px desktop and 16px mobile gutters. A 4px spacing rhythm, 6px control corners and 8px panel corners keep controls and containers related.
+- Neutral surfaces with crisp one-pixel boundaries.
+- Operational content and explicit state before decoration.
+- Original Orbit emblem, self-hosted IBM Plex typography and responsive themes.
 
-Light: #fafafa canvas, #ffffff surfaces, #171717 text, #666666 secondary text, #e5e5e5 borders. Dark: #0a0a0a canvas/surfaces, #111111 subtle surfaces, #ededed text, #a1a1a1 secondary text and #292929 borders. Primary actions reverse foreground/background. Red is reserved for form errors and destructive actions. The reversible global pause uses a neutral outlined control. Form boundaries use a separate control-border token (#888 in light mode and #777 in dark mode), with at least 3:1 contrast against their adjacent surface. Blue marks keyboard focus. Status is always written in text.
+## Colors
 
-Buttons use a shared shadcn-style Slot/CVA primitive with primary, outline, ghost and destructive variants. Hover feedback is limited to hover-capable, precise pointers. Pointer presses scale by 0.97 over 150ms with an ease-out curve; keyboard activation and reduced-motion mode remain immediate. Colour changes are instantaneous so switching themes never interpolates through a low-contrast frame.
+Primary actions reverse the neutral foreground/background pair. The workspace accent
+is restrained violet: selected section text/fill, active task underline, text caret
+and precise-pointer link hover. Selection fill uses the workspace-selection token.
+Blue is reserved for visible keyboard focus. Red marks errors and destructive actions;
+the reversible global pause remains neutral. Status always includes text.
 
-## Layout and behaviour
+Neutral tokens distinguish canvas, surface, subtle area, readable secondary text,
+separators and stronger control boundaries. The frontmatter records light tokens and
+their `-dark` counterparts; Auto resolves to the operating-system preference.
+The supplied logo retains its own violet/cyan illumination rather than recolouring
+surfaces. Control boundaries use their dedicated token, independently of separators.
+
+## Typography
+
+IBM Plex Sans Variable (Arial, sans-serif fallback) is self-hosted throughout. IBM
+Plex Mono (monospace fallback), weight 400, is limited to activity timestamps and
+small counts. The user rejected Geist as overused. Typography gains character through
+letterforms rather than display decoration. Page headings use the headline role;
+workspace editor/result headings use title. Ordinary sections remain 0.875rem/600,
+row titles and labels 0.8125rem/500. Metadata is at least 0.75rem. Narrow page headings
+use 1.375rem; mobile workspace fields use 1rem to avoid focus zoom. Rem units preserve
+browser text enlargement. Editor explanatory copy stays within 68ch.
+
+## Layout
+
+The main container is capped at 1280px with 40px desktop and 16px phone gutters.
+Spacing follows a mostly 4px rhythm. The workspace header is at least 64px tall;
+main content starts with 36px top padding, reduced to 24px below 600px. The configuration
+editor uses a 192px section navigator (156px below 900px) and a flexible field area;
+below 600px the navigator becomes a horizontal row and identity fields stack.
+Playground uses 0.9fr/1.1fr composer/result columns; history uses a flexible run list
+and 280px version column. Both become single-column below 900px. Task tabs can scroll
+horizontally on narrow screens. Overview-specific responsive behavior remains below.
 
 A compact identity header sits above workspace tabs. The overview contains three database-derived agent counts, an agent table, recent audit activity and a global outbound control. The sidebar and decorative statistic cards have been removed. At tablet widths, activity stacks below the agent area; at phone widths, controls stack and names wrap within the table. Missions appear directly beneath agent names as muted, wrapping text. Show the full value without a disclosure, repeated “View mission” controls or hover-only access. Preserve line breaks and allow long words to wrap.
 
 Create agent opens a native modal dialog with a visible title, field labels, initial focus, an inert background, native dialog tab behaviour, Escape/cancel behaviour, pending feedback, explicit required indicators, and field-specific server validation linked through aria-describedby/aria-invalid. Pending text fields are read-only so focus can return to a validation error. Failed requests retain entries and name a recovery action. Success closes the dialog only after the server action completes. Agents start paused in shadow mode; the UI explains that execution is not yet configured.
 
 Sign-in is a centred 400px form panel with one primary action, the supplied 64px orbital emblem, and a 24px heading. The form uses 44px-high inputs and submit action; a keyboard-accessible eye button reveals or hides the password without submitting the form or changing its value. Appearance uses a compact three-segment native radio control: sun (Light), moon (Dark), and monitor (Auto). The selected segment has a visible border and surface treatment. One tab stop and native arrow-key navigation change selection; touch targets grow to 44px. Preference persists locally and applies before paint; Auto tracks OS preference changes, and the browser theme-color follows the resolved appearance. There is no public registration. A skip link, explicit navigation labels, semantic table headers and visible focus rings support keyboard and assistive technology use.
+
+## Elevation & Depth
+
+Surfaces rely primarily on borders and tonal separation. Inputs retain a subtle
+`0 1px 2px #00000005` shadow, selected appearance segments `0 1px 2px #00000008`,
+and the native create dialog `0 16px 64px #00000020`. Its backdrop is `#0007` with
+2px blur. These are local roles, not permission to add shadows to every panel.
+
+## Shapes
+
+Controls use 6px corners, panels 8px, state labels 5px, and dialog/login shells 10px.
+The workspace monogram uses 12px corners. One-pixel boundaries distinguish areas;
+the active workspace tab adds a two-pixel underline. Workspace rows stay flat until
+an expanded template reveals its bordered editor.
+
+## Components
+
+Buttons share the Slot/CVA primary, outline, ghost and destructive variants. Standard
+height is 36px with 0 13px padding; workspace save controls are at least 40px, login
+and key mobile controls at least 44px. Fine-pointer hover is capability-gated.
+Pointer press uses scale(0.97) over 150ms with cubic-bezier(0.23, 1, 0.32, 1);
+keyboard activation and reduced-motion remain immediate. Theme colours switch
+instantly. Focus uses a two-pixel focus-token outline with three-pixel offset.
+
+Workspace fields use visible labels, required indicators and the dedicated control
+border. The shared form shows pending feedback, errors and optional saved/unsaved
+status. Its save bar is separated by a top border and subtle fill. Identity,
+Behaviour and Models section buttons show one field group at a time; hidden fields
+remain mounted. Invalid required fields reveal their section before receiving focus.
+
+Task tabs are Configuration, Playground, History and Access, with one keyboard tab
+stop plus Left/Right/Home/End navigation. Hidden panels remain mounted, preserving
+unsaved configuration and pasted input when changing tasks. Configuration presents
+one editor and one save bar. Playground places a composer beside the latest persisted
+result and explicitly names paid inference and suppressed external actions. Empty
+results explain what will appear; failures and interrupted runs show actual state.
+History uses native details/summary for run content and exact configuration snapshots.
+Cost remains unavailable when not recorded, never fabricated. Access shows credential
+presence, accepts a password input, clears it after submission and never reads the
+secret back. Removal retains a visible missing-credential state.
+
+Templates are flat disclosure rows with title, role and revision. Expanding a row
+uses the same section editor and save bar; saving defaults leaves existing agents
+unchanged. Appearance, sign-in and the native create dialog retain the behavior in
+Layout and the historical decisions below.
+
+## Do's and Don'ts
+
+- Do preserve the original Orbit logo, IBM Plex fonts and Light/Dark/Auto appearance.
+- Do keep status explicit in text and retain user input through recoverable errors.
+- Do verify both themes, keyboard behavior and narrow layouts after UI changes.
+- Don't invent metrics, activity, successful provider responses or unavailable cost.
+- Don't restore the rejected tall configuration/simulation wall in the workspace.
+- Don't treat this workspace composition as an approved comp or a universal layout rule.
 
 ## Review
 
@@ -92,7 +288,7 @@ Verification results:
 - React Doctor local full analysis: `ok: true`, zero errors, zero warnings, zero diagnostics.
 - The unchanged `bun run validate` gate cannot complete in this environment: the required React Doctor score API at `https://www.react.doctor/api/score` is refused by the network proxy with HTTP 403. No 100/100 remote score has been verified, and no score or rule was bypassed to turn this green.
 
-Screenshots in `test-results/` show real database-backed test operations, not runtime-provider activity. The full agent runtime and provider connections remain unavailable as documented in the architecture. Keep those limits visible in the console.
+Screenshots in `test-results/` show real database-backed test operations, not runtime-provider activity. At that review milestone, the full agent runtime and provider connections were unavailable. The later workspace milestone below adds manual provider inference; schedules, channel integrations and live actions remain outside scope. Keep current limits visible in the console.
 
 ### Login refinement — 16 November 2026
 
@@ -123,3 +319,82 @@ Both Docker images were built and run. Testing found unreadable copied files und
 The user rejected the repeated “View mission” controls. Missions now appear as ordinary text directly below agent names, using the shared muted colour and 13px body style with 1.6 line-height. The full mission wraps without clipping or disclosure controls, including on narrow screens. This replaces the earlier details/summary pattern.
 
 Verified with a production build and all six PostgreSQL/browser tests, including both themes at five viewport widths, a 2,000-character mission, 320px reflow, 200% text and RTL. Fresh desktop/mobile captures were visually inspected. Formatting, types, lint and Knip passed. The unchanged React Doctor remote score request remains blocked by the environment proxy (403).
+
+### Templates and agent workspace — 16 November 2026
+
+The user rejected the tall workspace form/panel layout and requested Impeccable with
+“Both: rethink the layout and visual treatment,” retaining the Orbit logo, IBM Plex
+fonts and both themes. The task tabs and section editor described in Components
+supersede the previous side-by-side configuration/simulation and mobile anchor links.
+No concept-seed round, approved decision comp or QUALITY BAR was produced. This is a
+code-led composition within the confirmed Vercel-inspired brand; it is not evidence
+of fidelity to an approved comp or completion of every Impeccable workflow.
+
+The create dialog's native template selector fills the mission; creation copies the
+stored defaults. Template changes never alter existing agents. Name remains the
+initial dialog focus, with the selector preceding it in tab order. Every configuration
+save creates an immutable snapshot; conflict errors retain unsaved values. The
+simulation version resets to the newest save but preserves historical selection
+across replay submissions. DeepSeek V4.1 Flash 1017 is the current default; migration
+0002 preserves existing snapshots and customized model IDs.
+
+Earlier milestone verification (before this redesign):
+
+Verification: production build and the seven browser/PostgreSQL tests passed,
+including the new template-copy, independent configuration, encryption/removal,
+persisted failure and reload flow. Both themes passed axe and overflow checks at
+1440, 1024, 768, 390 and 320px; desktop light and mobile dark screenshots were
+visually inspected. Existing keyboard dialog, local-auth, text enlargement and RTL
+checks remain intact. Runtime tests cover multiple/no actions, suppressed effects,
+partial failure, provider credential boundaries and encrypted-secret isolation.
+Persistence tests invoke the shared runtime in separate Bun processes, stop those
+processes, then inspect distinct John/Sarah results from fresh PostgreSQL connections.
+Inference is mocked in these tests; real OpenRouter response quality remains untested
+without an administrator-supplied key. React Doctor returned 100/100 with no local
+diagnostics. No architecture document changes or live integrations are included.
+
+Worker packaging verification: the Docker image builds with the environment’s trusted proxy CA and imports the shared persistence runtime as the non-root user. Package manifests now belong to that user, resolving Bun’s read-permission warning.
+
+Redesign verification: final validation passed, including React Doctor 100/100.
+Production build, seven browser/PostgreSQL tests, 20 unit
+tests and three persistence tests passed. Both themes passed axe and overflow checks
+at 320, 390, 768, 1024 and 1440px. Keyboard task tabs, retained unsaved configuration
+across tab changes, configuration snapshots and provider-key save/removal were
+exercised. Desktop 1440px and mobile 390px captures of the workspace views, template
+editor and empty Playground in both themes are in `.impeccable/review/` and
+`test-results/`. The finish review found no material rendered defect. Its documentation finding is
+resolved by this update. The surface contract now discloses that no concept-seed
+round occurred; the reviewer retained that procedural gap as a partial finding.
+This is not a claim that the complete Impeccable workflow passed.
+The source detector returned `[]`. No real provider call was made: no administrator
+key was available. Mocked inference does not establish real provider response quality.
+Automated checks do not establish complete WCAG conformance, physical-device behavior
+or screen-reader speech output.
+
+### Agent profile pictures — 16 November 2026
+
+The user requested editable agent pictures and selected RustFS for durable storage.
+Identity now begins with a compact preview and Upload/Change picture and Remove
+picture controls. Pictures save immediately and independently of configuration
+versions; upload events do not clear or mark configuration fields as changed.
+The workspace header and agent list share the image component, retaining an initial
+when no picture is set or storage cannot serve it. Uploaded pictures remain visible
+in the agent list on narrow screens; the previous small-screen initials rule remains.
+The 64px desktop / 48px mobile preview uses existing border, radius and theme tokens.
+Accept JPEG, PNG and WebP up to 5 MB, normalize to a 512px square WebP, and strip
+metadata. Pending, failure and storage-setup messages are inline. Private RustFS
+objects are served through authenticated Orbit routes.
+
+Desktop light and mobile dark screenshots were visually inspected. Automated tests
+cover both themes at 1440, 390 and 320px, including overflow and axe checks. The
+RustFS integration exercises authentication, private objects, independent agents,
+unsaved-edit preservation, failed storage writes, stop/start persistence, replacement
+and removal. Screenshot fixtures use a generated silhouette, not a real person.
+
+Final picture milestone verification: production build, all eight browser tests,
+22 unit tests, strict validation and React Doctor 100/100 passed. The web Docker
+image builds, and its packaged native WebP processor and S3 client were exercised
+as the non-root runtime user. Captures are saved in
+`.impeccable/review/profile-picture-Light-1440.png` and
+`.impeccable/review/profile-picture-Dark-390.png`. No remote infrastructure was
+provisioned and no real OpenRouter call was made during this milestone.

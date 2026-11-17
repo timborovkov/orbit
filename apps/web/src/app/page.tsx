@@ -5,23 +5,25 @@ import { ArrowDownLeft, CirclePause, LockKeyhole, ShieldCheck, Users } from 'luc
 
 import { logout } from '@/actions/auth';
 import { setGlobalPause } from '@/actions/controls';
+import { AgentAvatar } from '@/app/agent-avatar';
 import { CreateAgent } from '@/app/create-agent';
 import { ThemeSwitch } from '@/app/theme';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { env } from '@/lib/env';
-import { agents, audit, controls } from '@/lib/schema';
+import { agents, audit, controls, templates } from '@/lib/schema';
 
 export const dynamic = 'force-dynamic';
 export default async function Home() {
-  const { email, team, events, state } = await requireAdmin().then(async (email) => {
-    const [team, events, state] = await Promise.all([
+  const { email, team, events, state, presets } = await requireAdmin().then(async (email) => {
+    const [team, events, state, presets] = await Promise.all([
       db().select().from(agents).orderBy(desc(agents.createdAt)),
       db().select().from(audit).orderBy(desc(audit.createdAt)).limit(12),
       db().select().from(controls),
+      db().select().from(templates),
     ]);
-    return { email, team, events, state };
+    return { email, team, events, state, presets };
   });
   const paused = state.at(0)?.paused ?? true;
   const localAuth = env().AUTH_DISABLED;
@@ -59,6 +61,7 @@ export default async function Home() {
             </Link>
             <a href="#agents">Agents</a>
             <a href="#activity">Activity</a>
+            <Link href="/templates">Templates</Link>
             <a href="#controls">Controls</a>
           </div>
         </nav>
@@ -76,7 +79,7 @@ export default async function Home() {
           </div>
           <span className="runtime-status">
             <span className="status-dot" />
-            Execution not configured
+            Manual simulation available
           </span>
         </div>
         <dl className="metrics" aria-label="Agent summary">
@@ -110,7 +113,13 @@ export default async function Home() {
                   <h2 id="agents-title">Agents</h2>
                   <span className="count">{team.length}</span>
                 </div>
-                <CreateAgent />
+                <CreateAgent
+                  templates={presets.map((t) => ({
+                    id: t.id,
+                    title: t.title,
+                    mission: t.config.mission,
+                  }))}
+                />
               </div>
               {team.length ? (
                 <div className="agent-table-wrap">
@@ -128,12 +137,12 @@ export default async function Home() {
                         <tr key={a.id}>
                           <td>
                             <div className="agent-identity">
-                              <span className="avatar" aria-hidden="true">
-                                {a.name.charAt(0).toUpperCase()}
-                              </span>
+                              <AgentAvatar id={a.id} name={a.name} pictureKey={a.pictureKey} />
                               <div>
                                 <h3>
-                                  <bdi>{a.name}</bdi>
+                                  <Link href={`/agents/${a.id}`}>
+                                    <bdi>{a.name}</bdi>
+                                  </Link>
                                 </h3>
                                 <p className="agent-mission">{a.mission}</p>
                               </div>
@@ -168,7 +177,10 @@ export default async function Home() {
               )}
               <div className="section-footnote">
                 <LockKeyhole size={13} />
-                <span>Agents remain paused until execution is configured.</span>
+                <span>
+                  Open an agent to configure it and run a simulation. External actions remain
+                  disabled.
+                </span>
               </div>
             </section>
             <section

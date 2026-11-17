@@ -1,0 +1,617 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-16T23:22:43.516716+00:00",
+  "title": "Design System: Orbit",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "displayName": "Bg",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "surface": {
+        "displayName": "Surface",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "subtle": {
+        "displayName": "Subtle",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "ink": {
+        "displayName": "Ink",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "muted": {
+        "displayName": "Muted",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "faint": {
+        "displayName": "Faint",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "border": {
+        "displayName": "Border",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "strong-border": {
+        "displayName": "Strong Border",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "control-border": {
+        "displayName": "Control Border",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "button": {
+        "displayName": "Button",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "button-ink": {
+        "displayName": "Button Ink",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "hover": {
+        "displayName": "Hover",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "focus": {
+        "displayName": "Focus",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.033 212.3)",
+          "oklch(26% 0.068 212.3)",
+          "oklch(38% 0.107 212.3)",
+          "oklch(49% 0.143 212.3)",
+          "oklch(61% 0.169 212.3)",
+          "oklch(72% 0.121 212.3)",
+          "oklch(84% 0.069 212.3)",
+          "oklch(95% 0.022 212.3)"
+        ]
+      },
+      "danger": {
+        "displayName": "Danger",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.033 4.2)",
+          "oklch(26% 0.068 4.2)",
+          "oklch(38% 0.107 4.2)",
+          "oklch(49% 0.143 4.2)",
+          "oklch(61% 0.169 4.2)",
+          "oklch(72% 0.121 4.2)",
+          "oklch(84% 0.069 4.2)",
+          "oklch(95% 0.022 4.2)"
+        ]
+      },
+      "danger-bg": {
+        "displayName": "Danger Bg",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 5.5)",
+          "oklch(26% 0.000 5.5)",
+          "oklch(38% 0.000 5.5)",
+          "oklch(49% 0.000 5.5)",
+          "oklch(61% 0.000 5.5)",
+          "oklch(72% 0.000 5.5)",
+          "oklch(84% 0.000 5.5)",
+          "oklch(95% 0.000 5.5)"
+        ]
+      },
+      "bg-dark": {
+        "displayName": "Bg Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "surface-dark": {
+        "displayName": "Surface Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "subtle-dark": {
+        "displayName": "Subtle Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "ink-dark": {
+        "displayName": "Ink Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "muted-dark": {
+        "displayName": "Muted Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "faint-dark": {
+        "displayName": "Faint Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "border-dark": {
+        "displayName": "Border Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "strong-border-dark": {
+        "displayName": "Strong Border Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "control-border-dark": {
+        "displayName": "Control Border Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "button-dark": {
+        "displayName": "Button Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "button-ink-dark": {
+        "displayName": "Button Ink Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "hover-dark": {
+        "displayName": "Hover Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 0.0)",
+          "oklch(26% 0.000 0.0)",
+          "oklch(38% 0.000 0.0)",
+          "oklch(49% 0.000 0.0)",
+          "oklch(61% 0.000 0.0)",
+          "oklch(72% 0.000 0.0)",
+          "oklch(84% 0.000 0.0)",
+          "oklch(95% 0.000 0.0)"
+        ]
+      },
+      "focus-dark": {
+        "displayName": "Focus Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.033 210.2)",
+          "oklch(26% 0.068 210.2)",
+          "oklch(38% 0.107 210.2)",
+          "oklch(49% 0.143 210.2)",
+          "oklch(61% 0.169 210.2)",
+          "oklch(72% 0.121 210.2)",
+          "oklch(84% 0.069 210.2)",
+          "oklch(95% 0.022 210.2)"
+        ]
+      },
+      "danger-dark": {
+        "displayName": "Danger Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.033 4.7)",
+          "oklch(26% 0.068 4.7)",
+          "oklch(38% 0.107 4.7)",
+          "oklch(49% 0.143 4.7)",
+          "oklch(61% 0.169 4.7)",
+          "oklch(72% 0.121 4.7)",
+          "oklch(84% 0.069 4.7)",
+          "oklch(95% 0.022 4.7)"
+        ]
+      },
+      "danger-bg-dark": {
+        "displayName": "Danger Bg Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.033 3.0)",
+          "oklch(26% 0.068 3.0)",
+          "oklch(38% 0.107 3.0)",
+          "oklch(49% 0.143 3.0)",
+          "oklch(61% 0.169 3.0)",
+          "oklch(72% 0.121 3.0)",
+          "oklch(84% 0.069 3.0)",
+          "oklch(95% 0.022 3.0)"
+        ]
+      },
+      "workspace-accent": {
+        "displayName": "Workspace Accent",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.033 251.2)",
+          "oklch(26% 0.068 251.2)",
+          "oklch(38% 0.107 251.2)",
+          "oklch(49% 0.143 251.2)",
+          "oklch(61% 0.169 251.2)",
+          "oklch(72% 0.121 251.2)",
+          "oklch(84% 0.069 251.2)",
+          "oklch(95% 0.022 251.2)"
+        ]
+      },
+      "workspace-selection": {
+        "displayName": "Workspace Selection",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.000 256.0)",
+          "oklch(26% 0.000 256.0)",
+          "oklch(38% 0.000 256.0)",
+          "oklch(49% 0.000 256.0)",
+          "oklch(61% 0.000 256.0)",
+          "oklch(72% 0.000 256.0)",
+          "oklch(84% 0.000 256.0)",
+          "oklch(95% 0.000 256.0)"
+        ]
+      },
+      "workspace-accent-dark": {
+        "displayName": "Workspace Accent Dark",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.033 251.9)",
+          "oklch(26% 0.068 251.9)",
+          "oklch(38% 0.107 251.9)",
+          "oklch(49% 0.143 251.9)",
+          "oklch(61% 0.169 251.9)",
+          "oklch(72% 0.121 251.9)",
+          "oklch(84% 0.069 251.9)",
+          "oklch(95% 0.022 251.9)"
+        ]
+      },
+      "workspace-selection-dark": {
+        "displayName": "Workspace Selection Dark",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.033 253.6)",
+          "oklch(26% 0.068 253.6)",
+          "oklch(38% 0.107 253.6)",
+          "oklch(49% 0.143 253.6)",
+          "oklch(61% 0.169 253.6)",
+          "oklch(72% 0.121 253.6)",
+          "oklch(84% 0.069 253.6)",
+          "oklch(95% 0.022 253.6)"
+        ]
+      }
+    },
+    "shadows": [
+      {
+        "name": "input",
+        "value": "0 1px 2px #00000005",
+        "purpose": "Subtle field depth."
+      },
+      {
+        "name": "appearance-selected",
+        "value": "0 1px 2px #00000008",
+        "purpose": "Selected appearance segment."
+      },
+      {
+        "name": "dialog",
+        "value": "0 16px 64px #00000020",
+        "purpose": "Native create dialog."
+      }
+    ],
+    "motion": [
+      {
+        "name": "pointer-press",
+        "value": "transform 150ms cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "Scale 0.97 on fine-pointer presses; disabled for reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "workspace-phone",
+        "value": "600px"
+      },
+      {
+        "name": "workspace-stack",
+        "value": "900px"
+      },
+      {
+        "name": "overview-phone",
+        "value": "540px"
+      },
+      {
+        "name": "overview-stack",
+        "value": "800px"
+      },
+      {
+        "name": "overview-tablet",
+        "value": "1100px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Shared primary action.",
+      "html": "<button class=\"ds-control ds-button\">Save configuration</button>",
+      "css": ".ds-button{font-family:'IBM Plex Sans Variable',Arial,sans-serif;font-size:.8125rem;font-weight:500;display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 13px;border:1px solid var(--button,#171717);border-radius:6px;background:var(--button,#171717);color:var(--button-ink,#fff);cursor:pointer}.ds-control:focus-visible{outline:2px solid var(--focus,#0070f3);outline-offset:3px;}@media(hover:hover) and (pointer:fine){.ds-button:hover{opacity:.85}.ds-button{transition:transform 150ms cubic-bezier(.23,1,.32,1)}.ds-button:active:not(:focus-visible){transform:scale(.97)}}@media(prefers-reduced-motion:reduce){.ds-button{transition:none!important}.ds-button:active{transform:none!important}}"
+    },
+    {
+      "name": "Outline button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Shared outline action.",
+      "html": "<button class=\"ds-control ds-button\">Save configuration</button>",
+      "css": ".ds-button{font-family:'IBM Plex Sans Variable',Arial,sans-serif;font-size:.8125rem;font-weight:500;display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 13px;border:1px solid var(--strong-border,#d4d4d4);border-radius:6px;background:var(--surface,#fff);color:var(--ink,#171717);cursor:pointer}.ds-control:focus-visible{outline:2px solid var(--focus,#0070f3);outline-offset:3px;}@media(hover:hover) and (pointer:fine){.ds-button:hover{background:var(--hover,#f0f0f0)}.ds-button{transition:transform 150ms cubic-bezier(.23,1,.32,1)}.ds-button:active:not(:focus-visible){transform:scale(.97)}}@media(prefers-reduced-motion:reduce){.ds-button{transition:none!important}.ds-button:active{transform:none!important}}"
+    },
+    {
+      "name": "Ghost button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Shared ghost action.",
+      "html": "<button class=\"ds-control ds-button\">Save configuration</button>",
+      "css": ".ds-button{font-family:'IBM Plex Sans Variable',Arial,sans-serif;font-size:.8125rem;font-weight:500;display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 13px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted,#666);cursor:pointer}.ds-control:focus-visible{outline:2px solid var(--focus,#0070f3);outline-offset:3px;}@media(hover:hover) and (pointer:fine){.ds-button:hover{background:var(--hover,#f0f0f0)}.ds-button{transition:transform 150ms cubic-bezier(.23,1,.32,1)}.ds-button:active:not(:focus-visible){transform:scale(.97)}}@media(prefers-reduced-motion:reduce){.ds-button{transition:none!important}.ds-button:active{transform:none!important}}"
+    },
+    {
+      "name": "Destructive button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Shared destructive action.",
+      "html": "<button class=\"ds-control ds-button\">Remove</button>",
+      "css": ".ds-button{font-family:'IBM Plex Sans Variable',Arial,sans-serif;font-size:.8125rem;font-weight:500;display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 13px;border:1px solid var(--strong-border,#d4d4d4);border-radius:6px;background:var(--surface,#fff);color:var(--danger,#b42318);cursor:pointer}.ds-control:focus-visible{outline:2px solid var(--focus,#0070f3);outline-offset:3px;}@media(hover:hover) and (pointer:fine){.ds-button:hover{background:var(--danger-bg,#fff5f4);border-color:var(--danger,#b42318)}.ds-button{transition:transform 150ms cubic-bezier(.23,1,.32,1)}.ds-button:active:not(:focus-visible){transform:scale(.97)}}@media(prefers-reduced-motion:reduce){.ds-button{transition:none!important}.ds-button:active{transform:none!important}}"
+    },
+    {
+      "name": "Workspace field",
+      "kind": "input",
+      "refersTo": "workspace-input",
+      "description": "Labelled configuration text field.",
+      "html": "<label class=\"ds-label\" for=\"ds-name\">Name <span>(required)</span></label><input class=\"ds-control ds-input\" id=\"ds-name\" value=\"John\" required>",
+      "css": ".ds-label{font-family:'IBM Plex Sans Variable',Arial,sans-serif;font-size:.8125rem;font-weight:500;display:block;margin-bottom:8px;color:var(--ink,#171717)}.ds-label span{font-weight:400;color:var(--muted,#666)}.ds-input{font-family:inherit;font-size:.875rem;line-height:1.6;padding:10px 12px;border:1px solid var(--control-border,#888);border-radius:6px;background:var(--surface,#fff);color:var(--ink,#171717)}.ds-control:focus-visible{outline:2px solid var(--focus,#0070f3);outline-offset:3px;}"
+    },
+    {
+      "name": "Task navigation",
+      "kind": "nav",
+      "refersTo": "workspace-tab",
+      "description": "Selected task uses the workspace violet underline.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Workspace\"><button class=\"ds-control\" aria-current=\"page\">Configuration</button><button class=\"ds-control\">Playground</button></nav>",
+      "css": ".ds-nav{display:flex;gap:24px;border-bottom:1px solid var(--border,#e5e5e5)}.ds-nav button{font-family:'IBM Plex Sans Variable',Arial,sans-serif;font-size:.8125rem;font-weight:500;padding:12px 2px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted,#666);cursor:pointer}.ds-nav [aria-current]{color:var(--ink,#171717);border-bottom-color:var(--workspace-accent,#563cc7)}@media(hover:hover) and (pointer:fine){.ds-nav button:hover{color:var(--ink,#171717)}}.ds-control:focus-visible{outline:2px solid var(--focus,#0070f3);outline-offset:3px;}"
+    },
+    {
+      "name": "State label",
+      "kind": "chip",
+      "refersTo": "state-label",
+      "description": "Text states remain readable without colour.",
+      "html": "<span class=\"ds-state\">Paused</span>",
+      "css": ".ds-state{font-family:IBM Plex Sans Variable,Arial,sans-serif;display:inline-flex;padding:3px 8px;border:1px solid var(--border,#e5e5e5);border-radius:5px;font-size:.75rem;line-height:1.3;color:var(--muted,#666)}"
+    },
+    {
+      "name": "Editor surface",
+      "kind": "card",
+      "refersTo": "configuration-workbench",
+      "description": "Border and subtle save bar separate the editing area.",
+      "html": "<div class=\"ds-editor\"><div class=\"ds-body\">Identity</div><div class=\"ds-footer\">All changes saved</div></div>",
+      "css": ".ds-editor{font-family:IBM Plex Sans Variable,Arial,sans-serif;background:var(--surface,#fff);border:1px solid var(--border,#e5e5e5);border-radius:8px;color:var(--ink,#171717)}.ds-body{padding:28px 32px 32px;font-size:1rem;font-weight:600}.ds-footer{padding:16px 32px;border-top:1px solid var(--border,#e5e5e5);background:var(--subtle,#f5f5f5);border-radius:0 0 8px 8px;font-size:.75rem;color:var(--muted,#666)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Vercel-inspired administration UI",
+    "overview": "Vercel-inspired administration UI: neutral surfaces, crisp one-pixel borders, restrained density and clear type. The product opens on its operational content. No promotional hero, decorative gradients or invented metrics. The supplied luminous orbital logo retains its original colour in the header and favicon; its violet/cyan illumination is a brand signature, not a wash over every surface.\n\nTaste Skill 2.5.1 informs plain copy, consistent spacing, alignment, keyboard access and browser review. Its marketing-site rules (full-screen sections, hero animation, random layout deals, static exports) do not apply to an authenticated server-rendered control centre. The user selected the Vercel-inspired direction explicitly.",
+    "keyCharacteristics": [
+      "Neutral surfaces with crisp one-pixel boundaries.",
+      "Operational content and explicit state before decoration.",
+      "Original Orbit emblem, self-hosted IBM Plex typography and responsive themes."
+    ],
+    "rules": [],
+    "dos": [
+      "Do preserve the original Orbit logo, IBM Plex fonts and Light/Dark/Auto appearance.",
+      "Do keep status explicit in text and retain user input through recoverable errors.",
+      "Do verify both themes, keyboard behavior and narrow layouts after UI changes."
+    ],
+    "donts": [
+      "Don't invent metrics, activity, successful provider responses or unavailable cost.",
+      "Don't restore the rejected tall configuration/simulation wall in the workspace.",
+      "Don't treat this workspace composition as an approved comp or a universal layout rule."
+    ]
+  }
+}

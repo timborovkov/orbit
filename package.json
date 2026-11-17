@@ -18,8 +18,10 @@
     "doctor": "bun scripts/run-react-doctor.mjs",
     "validate": "bun run format:check && bun run typecheck && bun run lint && bun run knip && bun run doctor",
     "db:migrate": "bun scripts/migrate.ts",
-    "test:unit": "bun test tests/auth-env.test.ts",
-    "test:e2e": "playwright test && playwright test --config playwright.local.config.ts"
+    "test:unit": "bun test tests/auth-env.test.ts tests/simulation.test.ts tests/pictures.test.ts",
+    "test:e2e": "playwright test && playwright test --config playwright.local.config.ts",
+    "test:simulation": "bun test tests/simulation-persistence.test.ts",
+    "storage:setup": "bun apps/web/scripts/setup-storage.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

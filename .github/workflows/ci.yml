@@ -98,6 +98,15 @@ jobs:
           bun-version-file: .bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      - name: Start RustFS and create private test bucket
+        run: |
+          docker compose up -d --wait rustfs
+          bun run storage:setup
+        env:
+          S3_ENDPOINT: http://localhost:9000
+          S3_BUCKET: orbit-test
+          S3_ACCESS_KEY_ID: orbit_local
+          S3_SECRET_ACCESS_KEY: orbit_local_storage_only
       - name: Apply test database migrations
         run: bun run db:migrate
         env:
@@ -106,6 +115,8 @@ jobs:
         run: bun run build
       - name: Test auth configuration and production startup guards
         run: bun run test:unit
+      - name: Test simulation persistence and isolation
+        run: bun run test:simulation
       - name: Install browser
         run: bunx playwright install --with-deps chromium
       - name: Test persistence, accessibility and interface states
