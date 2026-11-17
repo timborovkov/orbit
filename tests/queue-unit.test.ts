@@ -214,3 +214,76 @@ test('fake store: worker drain completes in-flight work before stop resolves', a
   expect(finished).toBe(true);
   expect(store.get(job.id)?.status).toBe('completed');
 });
+
+test('transient heartbeat errors do not abort; confirmed lease loss does', async () => {
+  const { startJobWorker } = await import('@/lib/queue/worker');
+  const store = new FakeJobStore();
+  store.enqueue({ type: 'hb', payload: {}, idempotencyKey: 'hb-1' });
+
+  let heartbeatCalls = 0;
+  let sawAbort = false;
+  const errors: unknown[] = [];
+
+  const worker = startJobWorker({
+    workerId: 'w-hb',
+    pollMs: 15,
+    recoveryMs: 60_000,
+    leaseMs: 3_000,
+    heartbeatIntervalMs: 20,
+    onError: (error) => errors.push(error),
+    claimJobs: async () => store.claim('w-hb', 'hb', 3_000),
+    completeJob: async (id, workerId) => {
+      expect(store.complete(id, workerId)).toBe(true);
+    },
+    failJob: async (id, workerId, error) => store.fail(id, workerId, error),
+    recoverExpiredLeases: async () => store.recoverExpired(),
+    heartbeat: async () => {
+      heartbeatCalls += 1;
+      if (heartbeatCalls === 1) throw new Error('transient db blip');
+      return true;
+    },
+    handlers: {
+      hb: async (_job, signal) => {
+        signal.addEventListener('abort', () => {
+          sawAbort = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 90));
+      },
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 140));
+  await worker.stop();
+  expect(store.get('fake-1')?.status).toBe('completed');
+  expect(sawAbort).toBe(false);
+  expect(errors.some((e) => e instanceof Error && e.message === 'transient db blip')).toBe(true);
+
+  // Confirmed lease loss still aborts the in-flight handler.
+  store.enqueue({ type: 'lost', payload: {}, idempotencyKey: 'hb-2' });
+  let lostAbort = false;
+  const lostWorker = startJobWorker({
+    workerId: 'w-lost',
+    pollMs: 15,
+    recoveryMs: 60_000,
+    leaseMs: 3_000,
+    heartbeatIntervalMs: 20,
+    claimJobs: async () => store.claim('w-lost', 'lost', 3_000),
+    completeJob: async (id, workerId) => {
+      store.complete(id, workerId);
+    },
+    failJob: async (id, workerId, error) => store.fail(id, workerId, error),
+    recoverExpiredLeases: async () => 0,
+    heartbeat: async () => false,
+    handlers: {
+      lost: async (_job, signal) => {
+        signal.addEventListener('abort', () => {
+          lostAbort = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      },
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await lostWorker.stop();
+  expect(lostAbort).toBe(true);
+});
