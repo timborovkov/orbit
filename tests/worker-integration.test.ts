@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, expect, test } from 'bun:test';
 import postgres from 'postgres';
 
-import { budgetDefaults } from '@/lib/budgets';
-import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
+import { budgetDefaults, BudgetError, budgetViolationMessage } from '@/lib/budgets';
+import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { enqueueSimulation, processSimulationJob } from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
 
@@ -96,4 +96,105 @@ test('policy gateway persists deny for global pause', async () => {
   expect(result.decision).toBe('deny');
   const [intent] = await sql`SELECT * FROM action_intents WHERE idempotency_key=${`pause-${id}`}`;
   expect(intent.decision).toBe('deny');
+});
+
+test('reserveRequestQuota serializes concurrent reservations under the hard cap', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const budgets = { ...budgetDefaults, dailyRequests: 1, monthlyRequests: 1 };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'QuotaRace','Mission','shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const results = await Promise.allSettled([reserveRequestQuota(id), reserveRequestQuota(id)]);
+  const fulfilled = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+  expect(fulfilled).toHaveLength(1);
+  expect(rejected).toHaveLength(1);
+  expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(BudgetError);
+  expect(((rejected[0] as PromiseRejectedResult).reason as BudgetError).message).toBe(
+    budgetViolationMessage('daily-requests'),
+  );
+  const [day] =
+    await sql`SELECT requests FROM usage_counters WHERE agent_id=${id} AND period='day'`;
+  expect(day.requests).toBe(1);
+});
+
+test('stale execution tokens cannot overwrite a reclaimed run', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const config = { ...preset.config, name: 'TokenFence' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'TokenFence',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
+  await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'secret-token')})`;
+  await sql`UPDATE controls SET paused=false`;
+
+  const queued = await enqueueSimulation({
+    actor: 'test@example.com',
+    agentId: id,
+    configurationId: version.id,
+    input: 'Token fence prompt',
+  });
+  expect('runId' in queued && queued.runId).toBeTruthy();
+  const runId = queued.runId!;
+
+  let firstGate!: { continue: () => void };
+  const firstHold = new Promise<void>((resolve) => {
+    firstGate = { continue: resolve };
+  });
+  let firstFinished = false;
+
+  const first = processSimulationJob({ runId, agentId: id }, () => async () => {
+    await firstHold;
+    firstFinished = true;
+    return {
+      decision: {
+        relevant: true,
+        priority: 0.5,
+        reason: 'stale',
+        actions: [{ type: 'reply', reason: 'stale', draft: 'stale draft' }],
+      },
+      inputTokens: 1,
+      outputTokens: 1,
+    };
+  });
+
+  // Wait until the first claim has marked the run running with a token.
+  for (let i = 0; i < 50; i++) {
+    const [row] = await sql`SELECT status, execution_token FROM simulation_runs WHERE id=${runId}`;
+    if (row.status === 'running' && row.execution_token) break;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  const [before] = await sql`SELECT execution_token FROM simulation_runs WHERE id=${runId}`;
+  expect(before.execution_token).toBeTruthy();
+
+  // Second claim rotates the execution token while the first is still in inference.
+  await processSimulationJob({ runId, agentId: id }, () => async () => ({
+    decision: {
+      relevant: true,
+      priority: 0.9,
+      reason: 'replacement',
+      actions: [{ type: 'reply', reason: 'ok', draft: 'replacement draft' }],
+    },
+    inputTokens: 2,
+    outputTokens: 2,
+  }));
+
+  const [afterSecond] =
+    await sql`SELECT status, result, execution_token FROM simulation_runs WHERE id=${runId}`;
+  expect(afterSecond.status).toBe('completed');
+  expect(afterSecond.result.actions[0].draft).toBe('replacement draft');
+  expect(afterSecond.execution_token).not.toBe(before.execution_token);
+
+  firstGate.continue();
+  await first;
+  expect(firstFinished).toBe(true);
+  const [final] = await sql`SELECT status, result FROM simulation_runs WHERE id=${runId}`;
+  expect(final.status).toBe('completed');
+  expect(final.result.actions[0].draft).toBe('replacement draft');
 });

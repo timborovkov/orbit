@@ -112,6 +112,8 @@ export const runs = pgTable('simulation_runs', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   jobId: uuid('job_id').references(() => jobs.id),
   deferReason: text('defer_reason'),
+  /** Rotated whenever a worker takes ownership of a running execution; fences stale writers. */
+  executionToken: uuid('execution_token'),
 });
 
 export const actionIntents = pgTable('action_intents', {

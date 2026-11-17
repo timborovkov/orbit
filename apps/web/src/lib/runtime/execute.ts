@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 
 import {
@@ -14,7 +14,7 @@ import {
 } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
-import { authorizeAction, loadPolicyContext, recordUsage } from '@/lib/policy/gateway';
+import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { enqueueJob } from '@/lib/queue/jobs';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
@@ -27,15 +27,21 @@ function idempotencyKey(parts: string[]) {
   return createHash('sha256').update(parts.join(':')).digest('hex');
 }
 
-/** Persist run mutations only while the row is still owned as running (never overwrite interrupted). */
-async function updateIfRunning(
+/**
+ * Persist run mutations only while this claim still owns the execution token.
+ * A later reclaim rotates the token so stale workers cannot overwrite progress.
+ */
+async function updateIfOwned(
   runId: string,
+  executionToken: string,
   values: Partial<typeof runs.$inferInsert> & { result?: SimulationResult },
 ) {
   return await db()
     .update(runs)
     .set(values)
-    .where(and(eq(runs.id, runId), eq(runs.status, 'running')))
+    .where(
+      and(eq(runs.id, runId), eq(runs.status, 'running'), eq(runs.executionToken, executionToken)),
+    )
     .returning({ id: runs.id });
 }
 
@@ -247,20 +253,22 @@ async function processSimulationRun(
         )
     ).at(0);
     if (!config) return null;
+    const executionToken = randomUUID();
     await tx
       .update(runs)
       .set({
         status: 'running',
+        executionToken,
         expiresAt: new Date(Date.now() + budgets.runDeadlineSeconds * 1000),
       })
       .where(eq(runs.id, run.id));
-    return { skip: false as const, run, agent, config, budgets };
+    return { skip: false as const, run, agent, config, budgets, executionToken };
   });
 
   if (!claimed) return;
   if (claimed.skip) return;
 
-  const { run, config, budgets } = claimed;
+  const { run, config, budgets, executionToken } = claimed;
   const startedAt = new Date();
   const deadlineMs = budgets.runDeadlineSeconds * 1000;
   const deadlineSignal = AbortSignal.timeout(deadlineMs);
@@ -288,30 +296,8 @@ async function processSimulationRun(
         } catch {
           throw new BudgetError('cancelled');
         }
-        const ctx = await loadPolicyContext(run.agentId, run.actor, run.id);
-        if (!ctx) throw new Error('Agent unavailable');
-        // Counters already include persisted usage from prior calls in this run.
-        const snapshot: BudgetSnapshot = {
-          budgets: ctx.budgets,
-          day: {
-            spendMicros: ctx.usage.spendMicros,
-            requests: ctx.usage.requests,
-            outboundActions: ctx.usage.outboundActions,
-          },
-          month: {
-            spendMicros: ctx.usage.month.spendMicros,
-            requests: ctx.usage.month.requests,
-            outboundActions: ctx.usage.month.outboundActions,
-          },
-          activeRuns: ctx.usage.activeRuns,
-        };
-        const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
-        if (violation) throw new BudgetError(violation);
-        // Reserve quota before dispatch so provider failures/timeouts still count.
-        await recordUsage(run.agentId, {
-          requests: 1,
-          spendMicros: BigInt(0), // Token spend tracked; monetary pricing unavailable → documented as 0.
-        });
+        // Check + reserve under an agent row lock so concurrent workers cannot both pass.
+        await reserveRequestQuota(run.agentId);
         const response = await call(request);
         if (checkRunDeadline(startedAt, new Date(), budgets)) {
           throw new BudgetError('run-deadline');
@@ -324,7 +310,7 @@ async function processSimulationRun(
         return response;
       },
       async (partial) => {
-        await updateIfRunning(run.id, { result: partial });
+        await updateIfOwned(run.id, executionToken, { result: partial });
       },
       {
         maxSteps: budgets.maxToolStepsPerRun,
@@ -371,7 +357,7 @@ async function processSimulationRun(
     );
 
     const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
-    await updateIfRunning(run.id, {
+    await updateIfOwned(run.id, executionToken, {
       status: terminalStatus,
       finishedAt: new Date(),
       result,
@@ -397,7 +383,13 @@ async function processSimulationRun(
         deferReason: isBudget ? inspectable : null,
         result: sql`jsonb_set(${runs.result}, '{error}', to_jsonb(${inspectable}::text))`,
       })
-      .where(and(eq(runs.id, run.id), eq(runs.status, 'running')));
+      .where(
+        and(
+          eq(runs.id, run.id),
+          eq(runs.status, 'running'),
+          eq(runs.executionToken, executionToken),
+        ),
+      );
   }
 }
 

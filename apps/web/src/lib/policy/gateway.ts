@@ -1,6 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 
 import {
+  BudgetError,
   budgetViolationMessage,
   checkOutboundBudgets,
   checkRequestBudgets,
@@ -263,7 +264,7 @@ export async function authorizeAction(
   });
 }
 
-export async function recordUsage(
+async function recordUsage(
   agentId: string,
   delta: { spendMicros?: bigint; requests?: number; outboundActions?: number },
   store: Store = db(),
@@ -297,6 +298,52 @@ export async function recordUsage(
         });
     }),
   );
+}
+
+/**
+ * Atomically check request quotas and reserve one request under an agent row lock.
+ * Prevents two overlapping workers from both passing a stale remaining-allowance check.
+ */
+export async function reserveRequestQuota(agentId: string): Promise<void> {
+  await db().transaction(async (tx) => {
+    const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
+      0,
+    );
+    if (!agent) throw new Error('Agent unavailable');
+    const budgets = parseBudgets(agent.budgets);
+    const today = new Date().toISOString().slice(0, 10);
+    const monthStart = `${today.slice(0, 7)}-01`;
+    const counters = await tx
+      .select()
+      .from(usageCounters)
+      .where(eq(usageCounters.agentId, agentId));
+    const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
+    const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
+    const snapshot: BudgetSnapshot = {
+      budgets,
+      day: {
+        spendMicros: day?.spendMicros ?? BigInt(0),
+        requests: day?.requests ?? 0,
+        outboundActions: day?.outboundActions ?? 0,
+      },
+      month: {
+        spendMicros: month?.spendMicros ?? BigInt(0),
+        requests: month?.requests ?? 0,
+        outboundActions: month?.outboundActions ?? 0,
+      },
+      activeRuns: 0,
+    };
+    const violation = checkRequestBudgets(snapshot);
+    if (violation) throw new BudgetError(violation);
+    await recordUsage(
+      agentId,
+      {
+        requests: 1,
+        spendMicros: BigInt(0),
+      },
+      tx,
+    );
+  });
 }
 
 /** Pure evaluation helper for unit tests without persistence. */
