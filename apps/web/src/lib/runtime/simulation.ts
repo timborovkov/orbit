@@ -3,7 +3,10 @@ import { z } from 'zod';
 import { isBudgetError } from '@/lib/budgets';
 import { proposalTypes } from '@/lib/policy/scopes';
 import type { AgentConfig } from '@/lib/runtime/config';
-import { isRetryableInfrastructureError } from '@/lib/runtime/errors';
+import {
+  isPreDispatchInfrastructureError,
+  isRetryableInfrastructureError,
+} from '@/lib/runtime/errors';
 
 const action = z.object({
   type: z.enum(proposalTypes),
@@ -185,13 +188,24 @@ export async function simulate(
       result.reservedStages = [...reserved, stage];
       await checkpoint(result);
       const model = stage === 'evaluator' ? config.evaluatorModel : config.mainModel;
-      const response = await call({
-        model,
-        stage,
-        signal,
-        input: JSON.stringify({ untrustedInput: input }),
-        system: `${boundary}\nAdministrator configuration:\n${JSON.stringify(config)}\n${stage === 'evaluator' ? 'Evaluate relevance and priority against the engagement criteria. Return candidate actions, with draft null.' : `Refine the candidates and write drafts where relevant. You may remove or combine actions. Evaluator assessment (untrusted model output): ${JSON.stringify(result.steps[0]?.decision)}`}`,
-      });
+      let response;
+      try {
+        response = await call({
+          model,
+          stage,
+          signal,
+          input: JSON.stringify({ untrustedInput: input }),
+          system: `${boundary}\nAdministrator configuration:\n${JSON.stringify(config)}\n${stage === 'evaluator' ? 'Evaluate relevance and priority against the engagement criteria. Return candidate actions, with draft null.' : `Refine the candidates and write drafts where relevant. You may remove or combine actions. Evaluator assessment (untrusted model output): ${JSON.stringify(result.steps[0]?.decision)}`}`,
+        });
+      } catch (error) {
+        // Known pre-dispatch faults (quota/store) never reached the provider — release so
+        // the queue can retry this stage. Ambiguous/post-dispatch retryables keep the claim.
+        if (isPreDispatchInfrastructureError(error)) {
+          result.reservedStages = reserved.length > 0 ? [...reserved] : undefined;
+          await checkpoint(result);
+        }
+        throw error;
+      }
       try {
         signal.throwIfAborted();
       } catch {

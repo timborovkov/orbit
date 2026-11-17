@@ -11,10 +11,29 @@ export class RetryableInfrastructureError extends Error {
   }
 }
 
+/**
+ * Retryable failure that is known to have occurred before any provider request.
+ * Safe to release a simulation step reservation and retry the stage.
+ */
+export class PreDispatchInfrastructureError extends RetryableInfrastructureError {
+  constructor(
+    message = 'Transient infrastructure failure before provider dispatch; the job will retry.',
+  ) {
+    super(message);
+    this.name = 'PreDispatchInfrastructureError';
+  }
+}
+
 export function isRetryableInfrastructureError(
   error: unknown,
 ): error is RetryableInfrastructureError {
   return error instanceof RetryableInfrastructureError;
+}
+
+export function isPreDispatchInfrastructureError(
+  error: unknown,
+): error is PreDispatchInfrastructureError {
+  return error instanceof PreDispatchInfrastructureError;
 }
 
 /** Classify unexpected store failures as retryable without wrapping budget/retryable errors. */

@@ -324,7 +324,7 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
   expect('runId' in queued && queued.runId).toBeTruthy();
   const runId = queued.runId!;
 
-  const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+  const { PreDispatchInfrastructureError } = await import('@/lib/runtime/errors');
   let calls = 0;
   await expect(
     processSimulationJob({ runId, agentId: id }, () => async () => {
@@ -341,9 +341,10 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
           outputTokens: 1,
         };
       }
-      throw new RetryableInfrastructureError('main-stage blip');
+      // Pre-dispatch fault: no provider request was sent, so the main reservation releases.
+      throw new PreDispatchInfrastructureError('main-stage quota blip');
     }),
-  ).rejects.toBeInstanceOf(RetryableInfrastructureError);
+  ).rejects.toBeInstanceOf(PreDispatchInfrastructureError);
 
   const [afterFirst] = await sql`SELECT result FROM simulation_runs WHERE id=${runId}`;
   expect(afterFirst.result.steps).toHaveLength(1);

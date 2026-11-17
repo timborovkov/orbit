@@ -17,7 +17,11 @@ import { db } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { enqueueJob } from '@/lib/queue/jobs';
-import { isRetryableInfrastructureError, retryableStore } from '@/lib/runtime/errors';
+import {
+  isRetryableInfrastructureError,
+  PreDispatchInfrastructureError,
+  retryableStore,
+} from '@/lib/runtime/errors';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import {
@@ -380,24 +384,36 @@ async function processSimulationRun(
       config.config,
       run.input,
       async (request) => {
-        if (checkRunDeadline(startedAt, new Date(), budgets)) {
-          throw new BudgetError('run-deadline');
-        }
+        let settle!: (billedMicros: number) => Promise<void>;
+        let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
         try {
-          signal.throwIfAborted();
-        } catch {
-          throw new BudgetError('cancelled');
+          if (checkRunDeadline(startedAt, new Date(), budgets)) {
+            throw new BudgetError('run-deadline');
+          }
+          try {
+            signal.throwIfAborted();
+          } catch {
+            throw new BudgetError('cancelled');
+          }
+          quote = hasSpendCap(budgets)
+            ? await call.quote?.(request.model, request.signal)
+            : undefined;
+          settle = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
+            runId: run.id,
+            token: executionToken,
+            signal: request.signal,
+          });
+          await assertOwned(run.id, executionToken);
+          if (request.signal.aborted) throw new BudgetError('cancelled');
+        } catch (error) {
+          // Quota/store faults here never reached the provider — mark so simulate can
+          // release the step reservation and let the queue retry the stage.
+          if (isBudgetError(error)) throw error;
+          if (isRetryableInfrastructureError(error)) {
+            throw new PreDispatchInfrastructureError(error.message);
+          }
+          throw error;
         }
-        const quote = hasSpendCap(budgets)
-          ? await call.quote?.(request.model, request.signal)
-          : undefined;
-        const settle = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
-          runId: run.id,
-          token: executionToken,
-          signal: request.signal,
-        });
-        await assertOwned(run.id, executionToken);
-        if (request.signal.aborted) throw new BudgetError('cancelled');
 
         const response = await telemetry.callModel(call, { ...request, quote });
         if (response.costMicros !== undefined) {

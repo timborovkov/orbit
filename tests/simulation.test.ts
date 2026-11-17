@@ -236,6 +236,62 @@ describe('bounded manual simulation', () => {
     expect(resumed.steps[0].stage).toBe('evaluator');
     expect(resumed.steps[1].stage).toBe('main');
   });
+  test('pre-dispatch infrastructure faults release the reservation for retry', async () => {
+    const { PreDispatchInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        throw new PreDispatchInfrastructureError('quota reservation db blip');
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(PreDispatchInfrastructureError);
+    expect(models).toEqual(['test/evaluator']);
+    expect(durable?.reservedStages).toBeUndefined();
+    expect(durable?.steps).toHaveLength(0);
+    if (!durable) throw new Error('expected release checkpoint');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2, initial: durable },
+    );
+    expect(models).toEqual(['test/evaluator', 'test/evaluator', 'test/main']);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.error).toBeNull();
+  });
+  test('ambiguous post-dispatch retryables keep the reservation', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    let durable: SimulationResult | undefined;
+    const first = await simulate(
+      config,
+      'question',
+      async () => {
+        throw new RetryableInfrastructureError('ambiguous mid-call blip');
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(RetryableInfrastructureError);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.steps).toHaveLength(0);
+  });
   test('failed post-inference checkpoint keeps the reserved step across retries', async () => {
     const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
     const models: string[] = [];
