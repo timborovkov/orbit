@@ -219,8 +219,12 @@ export async function failJob(
   jobId: string,
   workerId: string,
   error: string,
-  store: Store = db(),
+  store?: Store,
 ): Promise<JobRecord | null> {
+  // FOR UPDATE only holds across statements inside a transaction; wrap by default.
+  if (!store) {
+    return db().transaction((tx) => failJob(jobId, workerId, error, tx));
+  }
   const now = new Date();
   const current = (
     await store
@@ -246,7 +250,7 @@ export async function failJob(
         finishedAt: dead ? now : null,
         updatedAt: now,
       })
-      .where(eq(jobs.id, jobId))
+      .where(and(eq(jobs.id, jobId), eq(jobs.claimedBy, workerId), eq(jobs.status, 'claimed')))
       .returning()
   ).at(0);
   return updated ? mapJob(updated) : null;
@@ -277,11 +281,19 @@ export async function recoverExpiredLeases(store: Store = db()): Promise<number>
   return Array.isArray(result) ? result.length : 0;
 }
 
+/**
+ * Cancel queued jobs for an agent. Pause cancels pending only so in-flight claims can finish;
+ * stop also cancels claimed jobs so workers abort via heartbeat lease loss.
+ */
 export async function cancelPendingJobsForAgent(
   agentId: string,
   store: Store = db(),
+  options: { includeClaimed?: boolean } = {},
 ): Promise<number> {
   const now = new Date().toISOString();
+  const statusFilter = options.includeClaimed
+    ? sql`status IN ('pending', 'claimed')`
+    : sql`status = 'pending'`;
   const result = await store.execute(sql`
     UPDATE jobs
     SET
@@ -290,7 +302,7 @@ export async function cancelPendingJobsForAgent(
       claim_expires_at = NULL,
       claimed_by = NULL,
       updated_at = ${now}::timestamptz
-    WHERE status IN ('pending', 'claimed')
+    WHERE ${statusFilter}
       AND payload->>'agentId' = ${agentId}
     RETURNING id
   `);

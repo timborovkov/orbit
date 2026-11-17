@@ -33,7 +33,8 @@ export async function persistLifecycle(actor: string, agentId: string, next: Lif
     });
 
     if (shouldCancelPendingJobs(parsed.data)) {
-      const cancelled = await cancelPendingJobsForAgent(agentId, tx);
+      const includeClaimed = parsed.data === 'stopped';
+      const cancelled = await cancelPendingJobsForAgent(agentId, tx, { includeClaimed });
       if (parsed.data === 'stopped') {
         await tx
           .update(runs)
@@ -55,7 +56,9 @@ export async function persistLifecycle(actor: string, agentId: string, next: Lif
       }
       await tx.insert(audit).values({
         actor,
-        action: `Cancelled ${cancelled} pending job(s) for agent ${agentId} on ${parsed.data}`,
+        action: includeClaimed
+          ? `Cancelled ${cancelled} pending/claimed job(s) for agent ${agentId} on stopped`
+          : `Cancelled ${cancelled} pending job(s) for agent ${agentId} on paused`,
       });
     }
 

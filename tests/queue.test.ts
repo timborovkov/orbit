@@ -3,6 +3,7 @@ import { afterAll, expect, test } from 'bun:test';
 
 import { closeDb, db, sqlClient } from '@/lib/db';
 import {
+  cancelPendingJobsForAgent,
   claimJobs,
   completeJob,
   enqueueJob,
@@ -123,6 +124,57 @@ test('idempotency keys reuse the same job row', async () => {
   });
   expect(second.id).toBe(first.id);
   expect(second.payload).toEqual({ a: 1 });
+});
+
+test('failJob does not overwrite a cancelled or reclaimed claim', async () => {
+  const agentId = `${prefix}-agent-fail`;
+  const job = await enqueueJob(db(), {
+    type: `${prefix}.stale-fail`,
+    payload: { agentId },
+    idempotencyKey: `${prefix}:stale-fail`,
+    maxAttempts: 3,
+  });
+  const [claimed] = await claimJobs({
+    workerId: `${prefix}-stale`,
+    types: [`${prefix}.stale-fail`],
+  });
+  expect(claimed.id).toBe(job.id);
+  expect(await cancelPendingJobsForAgent(agentId, db(), { includeClaimed: true })).toBe(1);
+  const failed = await failJob(claimed.id, `${prefix}-stale`, 'worker still failing');
+  expect(failed).toBeNull();
+  const [row] = await sqlClient()`SELECT status FROM jobs WHERE id = ${job.id}`;
+  expect(row.status).toBe('cancelled');
+});
+
+test('pause cancels pending jobs only; stop also cancels claimed jobs', async () => {
+  const agentId = `${prefix}-agent-pause`;
+  const pending = await enqueueJob(db(), {
+    type: `${prefix}.pause-pending`,
+    payload: { agentId },
+    idempotencyKey: `${prefix}:pause-pending`,
+  });
+  const claimedJob = await enqueueJob(db(), {
+    type: `${prefix}.pause-claimed`,
+    payload: { agentId },
+    idempotencyKey: `${prefix}:pause-claimed`,
+  });
+  const [claimed] = await claimJobs({
+    workerId: `${prefix}-pause`,
+    types: [`${prefix}.pause-claimed`],
+  });
+  expect(claimed.id).toBe(claimedJob.id);
+
+  expect(await cancelPendingJobsForAgent(agentId, db())).toBe(1);
+  const [pendingRow] = await sqlClient()`SELECT status FROM jobs WHERE id = ${pending.id}`;
+  const [claimedRow] =
+    await sqlClient()`SELECT status, claimed_by FROM jobs WHERE id = ${claimedJob.id}`;
+  expect(pendingRow.status).toBe('cancelled');
+  expect(claimedRow.status).toBe('claimed');
+  expect(claimedRow.claimed_by).toBe(`${prefix}-pause`);
+
+  expect(await cancelPendingJobsForAgent(agentId, db(), { includeClaimed: true })).toBe(1);
+  const [stoppedRow] = await sqlClient()`SELECT status FROM jobs WHERE id = ${claimedJob.id}`;
+  expect(stoppedRow.status).toBe('cancelled');
 });
 
 test('worker drains in-flight work on shutdown', async () => {
