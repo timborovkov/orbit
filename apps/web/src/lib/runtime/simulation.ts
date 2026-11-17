@@ -49,6 +49,11 @@ type SimulationStep = ModelResult & { stage: 'evaluator' | 'main'; model: string
 type ActionPolicy = 'allow' | 'deny' | 'needs-approval' | 'suppressed' | 'denied';
 export interface SimulationResult {
   traceId?: string;
+  /**
+   * Stages whose model allowance was claimed before dispatch. Survives a failed
+   * post-call checkpoint so retries cannot redo paid inference under maxSteps.
+   */
+  reservedStages?: Array<'evaluator' | 'main'>;
   steps: SimulationStep[];
   actions: (Decision['actions'][number] & {
     intentId?: string;
@@ -76,6 +81,8 @@ export interface SimulateOptions {
 
 function cloneSimulationResult(result: SimulationResult): SimulationResult {
   return {
+    traceId: result.traceId,
+    reservedStages: result.reservedStages ? [...result.reservedStages] : undefined,
     steps: result.steps.map((step) => ({
       ...step,
       decision: {
@@ -86,6 +93,12 @@ function cloneSimulationResult(result: SimulationResult): SimulationResult {
     actions: result.actions.map((action) => ({ ...action })),
     error: result.error,
   };
+}
+
+function dispatchedStageCount(result: SimulationResult): number {
+  const stages = new Set<'evaluator' | 'main'>(result.reservedStages ?? []);
+  for (const step of result.steps) stages.add(step.stage);
+  return stages.size;
 }
 
 // This module has no channel clients, write tools or framework dependencies.
@@ -150,10 +163,22 @@ export async function simulate(
         result.error = 'Run deadline reached or the worker cancelled this simulation.';
         break;
       }
-      if (options.maxSteps !== undefined && result.steps.length >= options.maxSteps) {
+      const reserved = result.reservedStages ?? [];
+      if (reserved.includes(stage)) {
+        // Allowance was claimed on a prior attempt but the response never landed.
+        // Do not re-dispatch: that would exceed the paid-step budget.
+        result.error =
+          'A previous attempt already used this model step but could not save the result. Start a new run.';
+        break;
+      }
+      if (options.maxSteps !== undefined && dispatchedStageCount(result) >= options.maxSteps) {
         result.error = 'Maximum tool steps for this run reached.';
         break;
       }
+      // Claim the step slot before inference so a failed post-call checkpoint cannot
+      // free the allowance for a redo on queue retry.
+      result.reservedStages = [...reserved, stage];
+      await checkpoint(result);
       const model = stage === 'evaluator' ? config.evaluatorModel : config.mainModel;
       const response = await call({
         model,

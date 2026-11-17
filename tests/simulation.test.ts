@@ -107,7 +107,10 @@ describe('bounded manual simulation', () => {
     expect(requests[0].input).toContain('untrustedInput');
     expect(result.actions).toHaveLength(2);
     expect(result.actions.every((a) => a.policy === 'suppressed')).toBe(true);
-    expect(checkpoints[0].steps).toHaveLength(1);
+    // First durable write reserves the evaluator slot before the model returns.
+    expect(checkpoints[0].reservedStages).toEqual(['evaluator']);
+    expect(checkpoints[0].steps).toHaveLength(0);
+    expect(checkpoints.some((partial) => partial.steps.length === 1)).toBe(true);
     expect(result.steps.reduce((sum, s) => sum + s.inputTokens + s.outputTokens, 0)).toBe(60);
   });
   test('irrelevant input skips main inference even if evaluator proposes actions', async () => {
@@ -202,9 +205,58 @@ describe('bounded manual simulation', () => {
     expect(resumed.steps[0].stage).toBe('evaluator');
     expect(resumed.steps[1].stage).toBe('main');
   });
+  test('failed post-inference checkpoint keeps the reserved step across retries', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    let failStepCheckpoint = false;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        failStepCheckpoint = true;
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        // Mimic a durable store: only commit on success. The post-call step write fails
+        // after reservation already landed, so retry sees reservedStages without steps.
+        if (failStepCheckpoint && partial.steps.some((step) => step.stage === 'evaluator')) {
+          failStepCheckpoint = false;
+          throw new RetryableInfrastructureError('post-call checkpoint blip');
+        }
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(RetryableInfrastructureError);
+    expect(models).toEqual(['test/evaluator']);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.steps).toHaveLength(0);
+    if (!durable) throw new Error('expected reservation checkpoint');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2, initial: durable },
+    );
+    // Must not re-dispatch evaluator or continue to main — reservation already burned the slot.
+    expect(models).toEqual(['test/evaluator']);
+    expect(resumed.steps).toHaveLength(0);
+    expect(resumed.reservedStages).toEqual(['evaluator']);
+    expect(resumed.error).toContain('already used this model step');
+  });
   test('ownership loss at checkpoint stops before the next model stage', async () => {
     const { BudgetError } = await import('@/lib/budgets');
     let calls = 0;
+    let checkpoints = 0;
     const result = await simulate(
       config,
       'question',
@@ -213,7 +265,9 @@ describe('bounded manual simulation', () => {
         return { decision, inputTokens: 1, outputTokens: 1 };
       },
       async () => {
-        throw new BudgetError('cancelled');
+        checkpoints += 1;
+        // Allow the pre-dispatch reservation; revoke once the paid step is written.
+        if (checkpoints >= 2) throw new BudgetError('cancelled');
       },
     );
     expect(calls).toBe(1);
