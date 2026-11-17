@@ -24,11 +24,11 @@ export function LifecycleControls({
           suppressed.
         </p>
       </div>
-      <div className="lifecycle-grid" role="list">
+      <ul className="lifecycle-grid">
         {lifecycleStates.map((state) => {
           const selected = lifecycle === state;
           return (
-            <div key={state} className={`lifecycle-option${selected ? ' selected' : ''}`} role="listitem">
+            <li key={state} className={`lifecycle-option${selected ? ' selected' : ''}`}>
               <div>
                 <h3>{lifecycleLabels[state]}</h3>
                 <p className="muted">{lifecycleDescriptions[state]}</p>
@@ -41,10 +41,10 @@ export function LifecycleControls({
                   <input type="hidden" name="lifecycle" value={state} />
                 </WorkspaceForm>
               )}
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ul>
     </section>
   );
 }

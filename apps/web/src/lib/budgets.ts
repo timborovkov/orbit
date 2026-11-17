@@ -73,11 +73,11 @@ export const budgetFields = [
     label: 'Run deadline (seconds)',
     hint: 'Abort a run that exceeds this wall-clock deadline.',
   },
-] as const satisfies ReadonlyArray<{
+] as const satisfies readonly {
   key: keyof AgentBudgets;
   label: string;
   hint: string;
-}>;
+}[];
 
 export function parseBudgets(value: unknown): AgentBudgets {
   return budgetsSchema.parse({ ...budgetDefaults, ...(value as object) });
@@ -89,16 +89,16 @@ export function parseBudgets(value: unknown): AgentBudgets {
  * applying request, concurrency, step and deadline caps. Documented in architecture.md.
  */
 export function estimateSpendMicros(inputTokens: number, outputTokens: number, microsPerToken = 0) {
-  if (microsPerToken <= 0) return 0;
+  if (microsPerToken <= 0) return BigInt(0);
   return BigInt(Math.max(0, inputTokens) + Math.max(0, outputTokens)) * BigInt(microsPerToken);
 }
 
-export type BudgetSnapshot = {
+export interface BudgetSnapshot {
   budgets: AgentBudgets;
   day: { spendMicros: bigint; requests: number; outboundActions: number };
   month: { spendMicros: bigint; requests: number; outboundActions: number };
   activeRuns: number;
-};
+}
 
 export type BudgetViolation =
   | 'daily-spend'
@@ -116,8 +116,9 @@ export function checkRequestBudgets(snapshot: BudgetSnapshot): BudgetViolation |
   if (activeRuns >= budgets.maxConcurrentRuns) return 'concurrency';
   if (day.requests >= budgets.dailyRequests) return 'daily-requests';
   if (month.requests >= budgets.monthlyRequests) return 'monthly-requests';
-  if (day.spendMicros >= BigInt(budgets.dailySpendCents) * 10_000n) return 'daily-spend';
-  if (month.spendMicros >= BigInt(budgets.monthlySpendCents) * 10_000n) return 'monthly-spend';
+  if (day.spendMicros >= BigInt(budgets.dailySpendCents) * BigInt(10_000)) return 'daily-spend';
+  if (month.spendMicros >= BigInt(budgets.monthlySpendCents) * BigInt(10_000))
+    return 'monthly-spend';
   return null;
 }
 

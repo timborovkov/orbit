@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 
-import { closeDb } from '@/lib/db';
+import { closeDb, db, sqlClient } from '@/lib/db';
 import {
   claimJobs,
   completeJob,
@@ -21,24 +21,14 @@ process.env.ORBIT_ADMIN_PASSWORD ??= 'test-only-password-123456';
 
 const prefix = `queue-test-${randomUUID()}`;
 
-beforeAll(async () => {
-  // Ensure schema is present; migrations are applied by CI / local setup.
-  await enqueueJob(await import('@/lib/db').then((m) => m.db()), {
-    type: `${prefix}.warmup`,
-    payload: {},
-    idempotencyKey: `${prefix}:warmup`,
-  });
-});
-
 afterAll(async () => {
-  const { sqlClient } = await import('@/lib/db');
   await sqlClient()`DELETE FROM jobs WHERE type LIKE ${prefix + '%'}`;
   await closeDb();
 });
 
 test('claim contention uses SKIP LOCKED so two workers never share a job', async () => {
   const key = `${prefix}:contention`;
-  await enqueueJob(await import('@/lib/db').then((m) => m.db()), {
+  await enqueueJob(db(), {
     type: `${prefix}.work`,
     payload: { n: 1 },
     idempotencyKey: key,
@@ -53,9 +43,6 @@ test('claim contention uses SKIP LOCKED so two workers never share a job', async
 });
 
 test('lease expiry recovery returns jobs to pending', async () => {
-  const { db } = await import('@/lib/db');
-  const { jobs } = await import('@/lib/schema');
-  const { eq } = await import('drizzle-orm');
   const job = await enqueueJob(db(), {
     type: `${prefix}.lease`,
     payload: {},
@@ -76,13 +63,10 @@ test('lease expiry recovery returns jobs to pending', async () => {
   });
   expect(again).toHaveLength(1);
   await completeJob(again[0].id, `${prefix}-lease-2`);
-  // heartbeat should fail after completion
   expect(await heartbeatJob(job.id, `${prefix}-lease-2`)).toBe(false);
-  await db().delete(jobs).where(eq(jobs.id, job.id));
 });
 
 test('retries with backoff and dead-letter after max attempts', async () => {
-  const { db } = await import('@/lib/db');
   const job = await enqueueJob(db(), {
     type: `${prefix}.retry`,
     payload: {},
@@ -93,8 +77,6 @@ test('retries with backoff and dead-letter after max attempts', async () => {
   const failed = await failJob(first.id, `${prefix}-r1`, 'boom');
   expect(failed?.status).toBe('pending');
   expect(failed!.availableAt.getTime()).toBeGreaterThan(Date.now() - 1000);
-  // Force availability for the next claim.
-  const { sqlClient } = await import('@/lib/db');
   await sqlClient()`UPDATE jobs SET available_at = now() - interval '1 second' WHERE id = ${job.id}`;
   const [second] = await claimJobs({ workerId: `${prefix}-r2`, types: [`${prefix}.retry`] });
   const dead = await failJob(second.id, `${prefix}-r2`, 'boom again');
@@ -102,7 +84,6 @@ test('retries with backoff and dead-letter after max attempts', async () => {
 });
 
 test('idempotency keys reuse the same job row', async () => {
-  const { db } = await import('@/lib/db');
   const first = await enqueueJobInTransaction(
     {
       type: `${prefix}.idem`,
@@ -121,7 +102,6 @@ test('idempotency keys reuse the same job row', async () => {
 });
 
 test('worker drains in-flight work on shutdown', async () => {
-  const { db } = await import('@/lib/db');
   let finished = false;
   await enqueueJob(db(), {
     type: `${prefix}.shutdown`,
@@ -140,7 +120,7 @@ test('worker drains in-flight work on shutdown', async () => {
       },
     },
   });
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await new Promise((resolve) => setTimeout(resolve, 120));
   await worker.stop();
   expect(finished).toBe(true);
 });

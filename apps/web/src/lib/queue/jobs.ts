@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
 
 import { db, sqlClient, type Db, type Tx } from '@/lib/db';
 import {
@@ -33,23 +33,46 @@ function mapJob(row: typeof jobs.$inferSelect): JobRecord {
   };
 }
 
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return value.toString();
+  }
+  if (value instanceof Date) return value.toISOString();
+  if (value === null || value === undefined) return '';
+  throw new Error('Unexpected job column type');
+}
+
+function asOptionalText(value: unknown): string | null {
+  return value === null || value === undefined ? null : asText(value);
+}
+
 function mapRawJob(row: Record<string, unknown>): JobRecord {
   return mapJob({
-    id: String(row.id),
-    type: String(row.type),
+    id: asText(row.id),
+    type: asText(row.type),
     payload: (row.payload ?? {}) as Record<string, unknown>,
-    status: String(row.status),
+    status: asText(row.status),
     attempts: Number(row.attempts),
     maxAttempts: Number(row.max_attempts),
-    availableAt: new Date(String(row.available_at)),
-    claimedAt: row.claimed_at ? new Date(String(row.claimed_at)) : null,
-    claimExpiresAt: row.claim_expires_at ? new Date(String(row.claim_expires_at)) : null,
-    claimedBy: row.claimed_by ? String(row.claimed_by) : null,
-    finishedAt: row.finished_at ? new Date(String(row.finished_at)) : null,
-    lastError: row.last_error ? String(row.last_error) : null,
-    idempotencyKey: row.idempotency_key ? String(row.idempotency_key) : null,
-    createdAt: new Date(String(row.created_at)),
-    updatedAt: new Date(String(row.updated_at)),
+    availableAt: new Date(asText(row.available_at)),
+    claimedAt:
+      row.claimed_at === null || row.claimed_at === undefined
+        ? null
+        : new Date(asText(row.claimed_at)),
+    claimExpiresAt:
+      row.claim_expires_at === null || row.claim_expires_at === undefined
+        ? null
+        : new Date(asText(row.claim_expires_at)),
+    claimedBy: asOptionalText(row.claimed_by),
+    finishedAt:
+      row.finished_at === null || row.finished_at === undefined
+        ? null
+        : new Date(asText(row.finished_at)),
+    lastError: asOptionalText(row.last_error),
+    idempotencyKey: asOptionalText(row.idempotency_key),
+    createdAt: new Date(asText(row.created_at)),
+    updatedAt: new Date(asText(row.updated_at)),
   });
 }
 
@@ -64,11 +87,7 @@ export async function enqueueJob(store: Store, input: EnqueueInput): Promise<Job
   };
   if (values.idempotencyKey) {
     const existing = (
-      await store
-        .select()
-        .from(jobs)
-        .where(eq(jobs.idempotencyKey, values.idempotencyKey))
-        .limit(1)
+      await store.select().from(jobs).where(eq(jobs.idempotencyKey, values.idempotencyKey)).limit(1)
     ).at(0);
     if (existing) return mapJob(existing);
   }
@@ -95,8 +114,8 @@ export async function enqueueJobInTransaction(
 export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
   const limit = options.limit ?? 1;
-  const now = new Date();
-  const expiry = new Date(now.getTime() + leaseMs);
+  const now = new Date().toISOString();
+  const expiry = new Date(Date.now() + leaseMs).toISOString();
   const client = sqlClient();
 
   const rows = options.types?.length
@@ -104,8 +123,8 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
         WITH candidate AS (
           SELECT id FROM jobs
           WHERE (
-            (status = 'pending' AND available_at <= ${now})
-            OR (status = 'claimed' AND claim_expires_at IS NOT NULL AND claim_expires_at < ${now})
+            (status = 'pending' AND available_at <= ${now}::timestamptz)
+            OR (status = 'claimed' AND claim_expires_at IS NOT NULL AND claim_expires_at < ${now}::timestamptz)
           )
           AND type = ANY(${options.types})
           ORDER BY available_at ASC, created_at ASC
@@ -116,10 +135,10 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
         SET
           status = 'claimed',
           attempts = j.attempts + 1,
-          claimed_at = ${now},
-          claim_expires_at = ${expiry},
+          claimed_at = ${now}::timestamptz,
+          claim_expires_at = ${expiry}::timestamptz,
           claimed_by = ${options.workerId},
-          updated_at = ${now}
+          updated_at = ${now}::timestamptz
         FROM candidate
         WHERE j.id = candidate.id
         RETURNING j.*
@@ -128,8 +147,8 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
         WITH candidate AS (
           SELECT id FROM jobs
           WHERE (
-            (status = 'pending' AND available_at <= ${now})
-            OR (status = 'claimed' AND claim_expires_at IS NOT NULL AND claim_expires_at < ${now})
+            (status = 'pending' AND available_at <= ${now}::timestamptz)
+            OR (status = 'claimed' AND claim_expires_at IS NOT NULL AND claim_expires_at < ${now}::timestamptz)
           )
           ORDER BY available_at ASC, created_at ASC
           FOR UPDATE SKIP LOCKED
@@ -139,10 +158,10 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
         SET
           status = 'claimed',
           attempts = j.attempts + 1,
-          claimed_at = ${now},
-          claim_expires_at = ${expiry},
+          claimed_at = ${now}::timestamptz,
+          claim_expires_at = ${expiry}::timestamptz,
           claimed_by = ${options.workerId},
-          updated_at = ${now}
+          updated_at = ${now}::timestamptz
         FROM candidate
         WHERE j.id = candidate.id
         RETURNING j.*
@@ -242,46 +261,22 @@ export async function recoverExpiredLeases(store: Store = db()): Promise<number>
   return recovered.length;
 }
 
-export async function cancelJobsByIds(ids: string[], store: Store = db()): Promise<number> {
-  if (!ids.length) return 0;
-  const now = new Date();
-  const cancelled = await store
-    .update(jobs)
-    .set({
-      status: 'cancelled',
-      finishedAt: now,
-      claimExpiresAt: null,
-      claimedBy: null,
-      updatedAt: now,
-    })
-    .where(
-      and(inArray(jobs.id, ids), or(eq(jobs.status, 'pending'), eq(jobs.status, 'claimed'))),
-    )
-    .returning({ id: jobs.id });
-  return cancelled.length;
-}
-
 export async function cancelPendingJobsForAgent(
   agentId: string,
   store: Store = db(),
 ): Promise<number> {
-  const now = new Date();
+  const now = new Date().toISOString();
   const result = await store.execute(sql`
     UPDATE jobs
     SET
       status = 'cancelled',
-      finished_at = ${now},
+      finished_at = ${now}::timestamptz,
       claim_expires_at = NULL,
       claimed_by = NULL,
-      updated_at = ${now}
+      updated_at = ${now}::timestamptz
     WHERE status IN ('pending', 'claimed')
       AND payload->>'agentId' = ${agentId}
     RETURNING id
   `);
   return Array.isArray(result) ? result.length : 0;
-}
-
-export async function getJob(id: string, store: Store = db()): Promise<JobRecord | null> {
-  const row = (await store.select().from(jobs).where(eq(jobs.id, id))).at(0);
-  return row ? mapJob(row) : null;
 }

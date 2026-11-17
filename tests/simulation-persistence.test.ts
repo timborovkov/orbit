@@ -17,7 +17,11 @@ const sql = postgres(databaseUrl);
 const ids: string[] = [];
 afterAll(async () => {
   for (const id of ids) {
+    await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
+    await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
+    await sql`DELETE FROM usage_counters WHERE agent_id=${id}`;
     await sql`DELETE FROM simulation_runs WHERE agent_id=${id}`;
+    await sql`DELETE FROM jobs WHERE payload->>'agentId'=${id}`;
     await sql`DELETE FROM agent_credentials WHERE agent_id=${id}`;
     await sql`DELETE FROM agent_configurations WHERE agent_id=${id}`;
     await sql`DELETE FROM agents WHERE id=${id}`;
@@ -81,7 +85,7 @@ test('John and Sarah persist independent snapshots and distinct results across n
       actor: 'test',
       input,
     });
-    expect(mismatch.error).toBeDefined();
+    expect('error' in mismatch).toBe(true);
   } finally {
     await freshConnection.end();
   }
@@ -122,7 +126,8 @@ test('missing keys, interruption recovery and concurrent claims are durable', as
   });
   await started;
   try {
-    expect((await executeSimulation(params)).error).toContain('concurrency limit');
+    const blocked = await executeSimulation(params);
+    expect('error' in blocked && blocked.error).toContain('concurrency limit');
   } finally {
     release();
     await first;
@@ -151,7 +156,7 @@ test('environment OpenRouter default works without encryption or an agent creden
         };
       },
     );
-    expect(result.error).toBeUndefined();
+    expect('error' in result).toBe(false);
     const [run] = await sql`SELECT status, result FROM simulation_runs WHERE agent_id=${id}`;
     expect(run.status).toBe('completed');
     expect(JSON.stringify(run)).not.toContain('env-default-simulation-secret');

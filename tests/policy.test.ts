@@ -21,8 +21,10 @@ test('policy gateway denies global pause', () => {
 
 test('policy gateway denies stopped and paused agents', () => {
   expect(
-    evaluateActionForTest({ ...base, lifecycle: 'stopped' }, { type: 'reply', idempotencyKey: 'k2' })
-      .decision,
+    evaluateActionForTest(
+      { ...base, lifecycle: 'stopped' },
+      { type: 'reply', idempotencyKey: 'k2' },
+    ).decision,
   ).toBe('deny');
   expect(
     evaluateActionForTest({ ...base, lifecycle: 'paused' }, { type: 'reply', idempotencyKey: 'k3' })
@@ -52,9 +54,9 @@ test('policy gateway denies outbound budget exhaustion', () => {
 });
 
 test('shadow and live suppress writes when adapters are absent', () => {
-  expect(
-    evaluateActionForTest(base, { type: 'reply', idempotencyKey: 'k6' }).decision,
-  ).toBe('suppressed');
+  expect(evaluateActionForTest(base, { type: 'reply', idempotencyKey: 'k6' }).decision).toBe(
+    'suppressed',
+  );
   expect(
     evaluateActionForTest({ ...base, lifecycle: 'live' }, { type: 'reply', idempotencyKey: 'k7' })
       .decision,

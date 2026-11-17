@@ -1,14 +1,6 @@
-export const jobStatuses = [
-  'pending',
-  'claimed',
-  'completed',
-  'failed',
-  'dead',
-  'cancelled',
-] as const;
-export type JobStatus = (typeof jobStatuses)[number];
+type JobStatus = 'pending' | 'claimed' | 'completed' | 'failed' | 'dead' | 'cancelled';
 
-export type JobRecord = {
+export interface JobRecord {
   id: string;
   type: string;
   payload: Record<string, unknown>;
@@ -24,22 +16,22 @@ export type JobRecord = {
   idempotencyKey: string | null;
   createdAt: Date;
   updatedAt: Date;
-};
+}
 
-export type EnqueueInput = {
+export interface EnqueueInput {
   type: string;
   payload: Record<string, unknown>;
   idempotencyKey?: string | null;
   availableAt?: Date;
   maxAttempts?: number;
-};
+}
 
-export type ClaimOptions = {
+export interface ClaimOptions {
   workerId: string;
   types?: string[];
   leaseMs?: number;
   limit?: number;
-};
+}
 
 export const DEFAULT_LEASE_MS = 30_000;
 export const DEFAULT_MAX_ATTEMPTS = 5;

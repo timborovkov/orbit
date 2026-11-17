@@ -66,7 +66,7 @@ export default async function Home() {
             <h1>Overview</h1>
             <p className="muted">Manage your agents and workspace activity.</p>
           </div>
-            <span className="runtime-status">
+          <span className="runtime-status">
             <span className="status-dot" />
             Worker queue available
           </span>

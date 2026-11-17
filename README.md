@@ -4,7 +4,7 @@
 
 A privately deployed control centre for persistent AI representatives, built with Next.js, Bun and PostgreSQL.
 
-The console supports administrator login, template-based agents, versioned configurations, private profile pictures, and persisted manual simulations through OpenRouter. Schedules, channel integrations and live actions are deferred.
+The console supports administrator login, template-based agents, versioned configurations, private profile pictures, durable worker-backed simulations through OpenRouter, agent lifecycle controls, hard budgets and a policy gateway. Schedules, channel integrations and live external actions are deferred.
 
 ## Start locally
 
@@ -54,31 +54,29 @@ or diagnostic logs. The environment default does not require encryption because 
 not stored in PostgreSQL. The application still starts without a master key; only
 per-agent credential save/decrypt operations need it.
 
-Simulations make real, potentially billable OpenRouter inference calls: one evaluator
-call and, only for relevant candidates, one main-model call. They have a two-minute
-inference deadline, at most 3,000 output tokens per call, no automatic provider
-retries, and one active run per agent. There are no external action adapters or
-write tools in this path. Every proposal is persisted as suppressed, regardless of
-global pause or future live settings. Missing credentials (neither agent key nor
-environment default) and inference failures produce inspectable failed runs; provider
-error bodies are deliberately discarded. Token usage is shown when returned; monetary
-cost is not estimated.
+Simulations enqueue a durable PostgreSQL job that the Bun worker executes. They make
+real, potentially billable OpenRouter inference calls: one evaluator call and, only
+for relevant candidates, one main-model call. Hard budgets default to architecture
+§17 (including ten tool steps and a five-minute run deadline). There are no external
+action adapters yet; every candidate action passes the policy gateway, which records
+an intent and allow/deny/needs-approval/suppressed decision. Global pause, lifecycle,
+tool enablement and budgets are enforced there. Missing credentials fall back to
+optional `OPENROUTER_API_KEY` (web and worker), then produce an inspectable failure.
+Provider error bodies are deliberately discarded. Token usage is shown when returned;
+monetary cost is treated as zero for spend caps when pricing is unavailable.
 
-Runs save the input and immutable configuration version before inference, then
-checkpoint each completed stage. Expired in-flight runs display as interrupted;
-a new attempt records a new run, preserving earlier results. There is no background
-resume or schedule in this milestone. The most recent 50 runs are displayed.
-Framework-independent execution, schemas, encryption and OpenRouter inference live
-in `apps/web/src/lib/runtime`; the persistence service has no Next.js dependency and
-can be invoked by the Bun worker with an authenticated job context later. Nothing
-starts autonomous work yet.
+Agent lifecycle is `shadow` (default), `paused`, `live` or `stopped` — administrator
+only, audited. Live exists but stays gated until write adapters ship. Stop cancels
+pending jobs where feasible. Runs move through queued → running → completed/failed/
+interrupted. The most recent 50 runs are displayed with job status. Shared queue,
+policy, budgets and runtime modules live under `apps/web/src/lib` and are imported by
+`apps/worker`.
 
-Validation: `bun run test:unit`, `bun run test:simulation` (requires migrated
-`orbit_test` PostgreSQL), and `bun run test:e2e` after a production build. Runtime
-and persistence tests inject deterministic inference; they do not spend API credit.
-Browser tests exercise real admin actions, template/configuration edits, encryption,
-Access key-source states and persisted failure details. Real provider quality requires
-a configured OpenRouter key (environment default or per-agent) and a live manual test.
+Validation: `bun run test:unit`, `bun run test:queue`, `bun run test:simulation`,
+`bun run test:integration` (migrated `orbit_test` PostgreSQL) and `bun run test:e2e`
+after a production build. Runtime tests inject deterministic inference and do not
+spend API credit. Browser tests exercise admin actions, lifecycle/budget controls,
+Access key-source states and persisted failure details.
 
 ### Agent profile pictures
 

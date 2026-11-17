@@ -2,7 +2,12 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['foundation.spec.ts', 'workspace.spec.ts', 'pictures.spec.ts'],
+  testMatch: [
+    'foundation.spec.ts',
+    'workspace.spec.ts',
+    'pictures.spec.ts',
+    'runtime-safety.spec.ts',
+  ],
   workers: 1,
   use: {
     baseURL: 'http://localhost:3000',

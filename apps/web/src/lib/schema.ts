@@ -150,7 +150,7 @@ export const usageCounters = pgTable(
       .references(() => agents.id),
     period: text('period').notNull(),
     periodStart: date('period_start').notNull(),
-    spendMicros: bigint('spend_micros', { mode: 'bigint' }).notNull().default(0n),
+    spendMicros: bigint('spend_micros', { mode: 'bigint' }).notNull().default(BigInt(0)),
     requests: integer('requests').notNull().default(0),
     outboundActions: integer('outbound_actions').notNull().default(0),
   },

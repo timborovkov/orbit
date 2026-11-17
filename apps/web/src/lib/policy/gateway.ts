@@ -18,15 +18,15 @@ import { actionIntents, agents, controls, policyDecisions, usageCounters } from 
 
 export type PolicyDecision = 'allow' | 'deny' | 'needs-approval' | 'suppressed';
 
-export type CandidateAction = {
+export interface CandidateAction {
   type: string;
   payload?: Record<string, unknown>;
   idempotencyKey: string;
   /** When true, this is a read-only tool invocation rather than an external write. */
   readOnly?: boolean;
-};
+}
 
-export type PolicyContext = {
+export interface PolicyContext {
   actor: string;
   agentId: string;
   runId?: string | null;
@@ -35,20 +35,20 @@ export type PolicyContext = {
   budgets: ReturnType<typeof parseBudgets>;
   globalPaused: boolean;
   usage: BudgetSnapshot['day'] & { month: BudgetSnapshot['month']; activeRuns: number };
-};
+}
 
-export type PolicyResult = {
+export interface PolicyResult {
   decision: PolicyDecision;
   reasons: string[];
   intentId: string;
   violation?: BudgetViolation;
-};
+}
 
 type Store = Db | Tx;
 
 function emptyUsage() {
   return {
-    spendMicros: 0n,
+    spendMicros: BigInt(0),
     requests: 0,
     outboundActions: 0,
   };
@@ -69,22 +69,21 @@ export async function loadPolicyContext(
     .select()
     .from(usageCounters)
     .where(eq(usageCounters.agentId, agentId));
-  const day = counters.find((row) => row.period === 'day' && String(row.periodStart) === today);
-  const month = counters.find(
-    (row) => row.period === 'month' && String(row.periodStart) === monthStart,
-  );
+  const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
+  const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
   const active = await store.execute(sql`
     SELECT count(*)::int AS count FROM simulation_runs
     WHERE agent_id = ${agentId} AND status IN ('queued','running')
   `);
   const activeRows = Array.isArray(active) ? active : [];
-  const activeRuns = Number((activeRows[0] as { count?: number } | undefined)?.count ?? 0);
+  const first = activeRows[0] as { count?: number } | undefined;
+  const activeRuns = first?.count ?? 0;
 
   return {
     actor,
     agentId,
     runId: runId ?? null,
-    lifecycle: agent.lifecycle as LifecycleState,
+    lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
     budgets: parseBudgets(agent.budgets),
     globalPaused: global?.paused ?? true,
@@ -242,18 +241,6 @@ export async function authorizeAction(
   };
 }
 
-export async function authorizeActions(
-  ctx: PolicyContext,
-  actions: CandidateAction[],
-  store: Store = db(),
-): Promise<PolicyResult[]> {
-  const results: PolicyResult[] = [];
-  for (const action of actions) {
-    results.push(await authorizeAction(ctx, action, store));
-  }
-  return results;
-}
-
 export async function recordUsage(
   agentId: string,
   delta: { spendMicros?: bigint; requests?: number; outboundActions?: number },
@@ -261,29 +248,33 @@ export async function recordUsage(
 ) {
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
-  for (const [period, start] of [
-    ['day', today],
-    ['month', monthStart],
-  ] as const) {
-    await store
-      .insert(usageCounters)
-      .values({
-        agentId,
-        period,
-        periodStart: start,
-        spendMicros: delta.spendMicros ?? 0n,
-        requests: delta.requests ?? 0,
-        outboundActions: delta.outboundActions ?? 0,
-      })
-      .onConflictDoUpdate({
-        target: [usageCounters.agentId, usageCounters.period, usageCounters.periodStart],
-        set: {
-          spendMicros: sql`${usageCounters.spendMicros} + ${delta.spendMicros ?? 0n}`,
-          requests: sql`${usageCounters.requests} + ${delta.requests ?? 0}`,
-          outboundActions: sql`${usageCounters.outboundActions} + ${delta.outboundActions ?? 0}`,
-        },
-      });
-  }
+  await Promise.all(
+    (
+      [
+        ['day', today],
+        ['month', monthStart],
+      ] as const
+    ).map(async ([period, start]) => {
+      await store
+        .insert(usageCounters)
+        .values({
+          agentId,
+          period,
+          periodStart: start,
+          spendMicros: delta.spendMicros ?? BigInt(0),
+          requests: delta.requests ?? 0,
+          outboundActions: delta.outboundActions ?? 0,
+        })
+        .onConflictDoUpdate({
+          target: [usageCounters.agentId, usageCounters.period, usageCounters.periodStart],
+          set: {
+            spendMicros: sql`${usageCounters.spendMicros} + ${delta.spendMicros ?? BigInt(0)}`,
+            requests: sql`${usageCounters.requests} + ${delta.requests ?? 0}`,
+            outboundActions: sql`${usageCounters.outboundActions} + ${delta.outboundActions ?? 0}`,
+          },
+        });
+    }),
+  );
 }
 
 /** Pure evaluation helper for unit tests without persistence. */

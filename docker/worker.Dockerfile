@@ -9,7 +9,8 @@ RUN --mount=type=secret,id=npm_ca \
     bun install --frozen-lockfile --production
 COPY --chown=bun:bun apps/worker/src apps/worker/src
 COPY --chown=bun:bun apps/worker/tsconfig.json apps/worker/tsconfig.json
-# Shared queue, policy, runtime and schema modules resolve via worker @/* → web/src.
+# Shared modules: worker entry resolves @/* via worker tsconfig; web lib files use web tsconfig.
 COPY --chown=bun:bun apps/web/src/lib apps/web/src/lib
+COPY --chown=bun:bun apps/web/tsconfig.json apps/web/tsconfig.json
 USER bun
 CMD ["bun", "--no-env-file", "apps/worker/src/index.ts"]

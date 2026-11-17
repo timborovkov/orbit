@@ -25,10 +25,12 @@ No password or session is used in this mode. The dashboard displays the local id
 bun run validate
 bun run build
 bun run test:unit
+bun run test:queue
+bun run test:integration
 bunx playwright install chromium
 ```
 
-Validation includes formatting/import order, types, strict lint, unused code and React Doctor 100. Application imports use `@/*`; Prettier sorts imports automatically.
+Validation includes formatting/import order, types, strict lint, unused code and React Doctor 100. Application imports use `@/*`; Prettier sorts imports automatically. Queue and integration suites need a migrated `orbit_test` database. Start the worker locally with `bun run --filter @orbit/worker dev` after migrations; it shares `apps/web/src/lib` modules through `@/*`.
 
 Browser tests use a **disposable `orbit_test` database and truncate its foundation tables**. They do not use the development `orbit` database:
 

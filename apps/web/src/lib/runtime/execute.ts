@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 
 import {
@@ -11,7 +10,7 @@ import {
   type BudgetSnapshot,
 } from '@/lib/budgets';
 import { db } from '@/lib/db';
-import { canEnqueueSimulation, type LifecycleState } from '@/lib/lifecycle';
+import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, recordUsage } from '@/lib/policy/gateway';
 import { enqueueJob } from '@/lib/queue/jobs';
 import { openRouterInference } from '@/lib/runtime/openrouter';
@@ -71,11 +70,11 @@ export async function enqueueSimulation({
   input: string;
 }) {
   const result = await db().transaction(async (tx) => {
-    const agent = (
-      await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
-    ).at(0);
+    const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
+      0,
+    );
     if (!agent) return { error: 'Agent not found.' as const };
-    if (!canEnqueueSimulation(agent.lifecycle as LifecycleState)) {
+    if (!canEnqueueSimulation(agent.lifecycle)) {
       return {
         error: 'This agent is stopped. Change its lifecycle before starting a simulation.' as const,
       };
@@ -92,7 +91,7 @@ export async function enqueueSimulation({
     ).length;
     if (active >= budgets.maxConcurrentRuns) {
       return {
-        error: budgetViolationMessage('concurrency') as string,
+        error: budgetViolationMessage('concurrency'),
       };
     }
 
@@ -102,19 +101,17 @@ export async function enqueueSimulation({
       .select()
       .from(usageCounters)
       .where(eq(usageCounters.agentId, agentId));
-    const day = counters.find((row) => row.period === 'day' && String(row.periodStart) === today);
-    const month = counters.find(
-      (row) => row.period === 'month' && String(row.periodStart) === monthStart,
-    );
+    const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
+    const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
     const snapshot: BudgetSnapshot = {
       budgets,
       day: {
-        spendMicros: day?.spendMicros ?? 0n,
+        spendMicros: day?.spendMicros ?? BigInt(0),
         requests: day?.requests ?? 0,
         outboundActions: day?.outboundActions ?? 0,
       },
       month: {
-        spendMicros: month?.spendMicros ?? 0n,
+        spendMicros: month?.spendMicros ?? BigInt(0),
         requests: month?.requests ?? 0,
         outboundActions: month?.outboundActions ?? 0,
       },
@@ -194,7 +191,7 @@ export async function executeSimulation(
   };
 }
 
-export async function processSimulationRun(
+async function processSimulationRun(
   runId: string,
   inference: (key: string) => ModelCall = openRouterInference,
 ) {
@@ -279,7 +276,7 @@ export async function processSimulationRun(
         requestCount += 1;
         await recordUsage(run.agentId, {
           requests: 1,
-          spendMicros: 0n, // Token spend tracked; monetary pricing unavailable → documented as 0.
+          spendMicros: BigInt(0), // Token spend tracked; monetary pricing unavailable → documented as 0.
         });
         return response;
       },
@@ -305,20 +302,20 @@ export async function processSimulationRun(
               effect: 'Agent unavailable for policy checks.',
             }));
           }
-          const gated = [];
-          for (const [index, action] of actions.entries()) {
-            const decision = await authorizeAction(ctx, {
-              type: action.type,
-              payload: { draft: action.draft, reason: action.reason },
-              idempotencyKey: idempotencyKey([run.id, action.type, String(index), action.reason]),
-            });
-            gated.push({
-              ...action,
-              policy: decision.decision,
-              effect: decision.reasons.join(' '),
-            });
-          }
-          return gated;
+          return await Promise.all(
+            actions.map(async (action, index) => {
+              const decision = await authorizeAction(ctx, {
+                type: action.type,
+                payload: { draft: action.draft, reason: action.reason },
+                idempotencyKey: idempotencyKey([run.id, action.type, String(index), action.reason]),
+              });
+              return {
+                ...action,
+                policy: decision.decision,
+                effect: decision.reasons.join(' '),
+              };
+            }),
+          );
         },
       },
     );

@@ -13,18 +13,14 @@ import {
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
 import { agents, audit, runs } from '@/lib/schema';
 
-export async function persistLifecycle(
-  actor: string,
-  agentId: string,
-  next: LifecycleState,
-) {
+export async function persistLifecycle(actor: string, agentId: string, next: LifecycleState) {
   const parsed = lifecycleSchema.safeParse(next);
   if (!parsed.success) return { error: 'Choose a valid lifecycle state.' as const };
 
   return await db().transaction(async (tx) => {
-    const agent = (
-      await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
-    ).at(0);
+    const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
+      0,
+    );
     if (!agent) return { error: 'Agent not found.' as const };
     if (agent.lifecycle === parsed.data) {
       return { message: `Lifecycle already ${lifecycleLabels[parsed.data].toLowerCase()}.` };

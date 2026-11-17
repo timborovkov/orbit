@@ -63,6 +63,6 @@ test('tool step and deadline limits', () => {
 });
 
 test('spend estimation documents zero when pricing unavailable', () => {
-  expect(estimateSpendMicros(100, 50)).toBe(0);
-  expect(estimateSpendMicros(100, 50, 12)).toBe(1800n);
+  expect(estimateSpendMicros(100, 50)).toBe(BigInt(0));
+  expect(estimateSpendMicros(100, 50, 12)).toBe(BigInt(1800));
 });

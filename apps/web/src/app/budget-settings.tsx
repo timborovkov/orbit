@@ -8,9 +8,9 @@ export function BudgetSettings({ agentId, budgets }: { agentId: string; budgets:
       <div className="editor-section-heading">
         <h2>Budgets</h2>
         <p className="muted">
-          Hard caps from architecture defaults. When a limit is reached, work is rejected or deferred
-          and shown in run history. OpenRouter monetary cost is recorded when pricing is available;
-          otherwise token usage is tracked and spend is treated as zero for enforcement.
+          Hard caps from architecture defaults. When a limit is reached, work is rejected or
+          deferred and shown in run history. OpenRouter monetary cost is recorded when pricing is
+          available; otherwise token usage is tracked and spend is treated as zero for enforcement.
         </p>
       </div>
       <WorkspaceForm action={saveAgentBudgets} label="Save budgets" saveState>
@@ -24,7 +24,9 @@ export function BudgetSettings({ agentId, budgets }: { agentId: string; budgets:
                 name={field.key}
                 type="number"
                 inputMode="numeric"
-                min={field.key === 'maxConcurrentRuns' || field.key === 'maxToolStepsPerRun' ? 1 : 0}
+                min={
+                  field.key === 'maxConcurrentRuns' || field.key === 'maxToolStepsPerRun' ? 1 : 0
+                }
                 defaultValue={budgets[field.key]}
                 required
               />

@@ -16,7 +16,7 @@ import { WorkspaceHeader } from '@/app/workspace-header';
 import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
-import { lifecycleLabels, type LifecycleState } from '@/lib/lifecycle';
+import { lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
@@ -29,7 +29,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   const workspace = await getAgentWorkspace(id);
   if (!workspace) notFound();
   const { agent, versions, hasAgentCredential, keySource, history, current } = workspace;
-  const lifecycle = agent.lifecycle as LifecycleState;
+  const lifecycle = agent.lifecycle;
   const viewedHistory = history;
   const latest = history.at(0);
   const versionFor = (configurationId: string) =>

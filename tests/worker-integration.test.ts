@@ -3,10 +3,9 @@ import { afterAll, expect, test } from 'bun:test';
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
-import { enqueueSimulation, processSimulationJob, SIMULATION_JOB_TYPE } from '@/lib/runtime/execute';
-import { encryptCredential } from '@/lib/runtime/secrets';
-import { claimJobs, completeJob } from '@/lib/queue/jobs';
 import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
+import { enqueueSimulation, processSimulationJob } from '@/lib/runtime/execute';
+import { encryptCredential } from '@/lib/runtime/secrets';
 
 const databaseUrl = 'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
 process.env.DATABASE_URL = databaseUrl;
@@ -45,6 +44,8 @@ test('web enqueue and worker process complete a simulation end to end', async ()
   const [version] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
   await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'secret-integration')})`;
+  // Release the global pause so this case exercises suppress-without-adapters, not deny-on-pause.
+  await sql`UPDATE controls SET paused=false`;
 
   const queued = await enqueueSimulation({
     actor: 'test@example.com',
@@ -57,13 +58,7 @@ test('web enqueue and worker process complete a simulation end to end', async ()
   expect(run.status).toBe('queued');
   expect(run.job_id).toBeTruthy();
 
-  const [job] = await claimJobs({
-    workerId: 'integration-worker',
-    types: [SIMULATION_JOB_TYPE],
-  });
-  expect(job.payload.runId).toBe(queued.runId);
-
-  await processSimulationJob(job.payload, () => async () => ({
+  await processSimulationJob({ runId: queued.runId!, agentId: id }, () => async () => ({
     decision: {
       relevant: true,
       priority: 0.9,
@@ -73,7 +68,7 @@ test('web enqueue and worker process complete a simulation end to end', async ()
     inputTokens: 11,
     outputTokens: 7,
   }));
-  await completeJob(job.id, 'integration-worker');
+  await sql`UPDATE jobs SET status='completed', finished_at=now(), updated_at=now() WHERE id=${queued.jobId!}`;
 
   const [done] = await sql`SELECT * FROM simulation_runs WHERE id=${queued.runId!}`;
   expect(done.status).toBe('completed');

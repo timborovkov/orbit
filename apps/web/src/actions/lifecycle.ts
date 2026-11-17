@@ -26,9 +26,7 @@ export async function saveAgentBudgets(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
   const agentId = uuid.parse(form.get('agentId'));
-  const raw = Object.fromEntries(
-    Object.keys(budgetDefaults).map((key) => [key, form.get(key)]),
-  );
+  const raw = Object.fromEntries(Object.keys(budgetDefaults).map((key) => [key, form.get(key)]));
   const parsed = budgetsSchema.safeParse({
     dailySpendCents: Number(raw.dailySpendCents),
     monthlySpendCents: Number(raw.monthlySpendCents),

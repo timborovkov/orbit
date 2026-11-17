@@ -3,8 +3,7 @@ import { hostname } from 'node:os';
 import { closeDb } from '@/lib/db';
 import { startJobWorker } from '@/lib/queue/worker';
 import { processSimulationJob, SIMULATION_JOB_TYPE } from '@/lib/runtime/execute';
-
-import { workerEnvConfig } from './env';
+import { workerEnvConfig } from '@/lib/worker-env';
 
 const config = workerEnvConfig();
 process.env.DATABASE_URL = config.DATABASE_URL;
@@ -42,8 +41,14 @@ const shutdown = async (signal: string) => {
 
 await new Promise<void>((resolve) => {
   const onSignal = (signal: string) => {
-    void shutdown(signal).finally(() => resolve());
+    void shutdown(signal).finally(() => {
+      resolve();
+    });
   };
-  process.once('SIGINT', () => onSignal('SIGINT'));
-  process.once('SIGTERM', () => onSignal('SIGTERM'));
+  process.once('SIGINT', () => {
+    onSignal('SIGINT');
+  });
+  process.once('SIGTERM', () => {
+    onSignal('SIGTERM');
+  });
 });

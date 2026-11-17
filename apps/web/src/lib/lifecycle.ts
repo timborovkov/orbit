@@ -13,11 +13,11 @@ export const lifecycleLabels: Record<LifecycleState, string> = {
 };
 
 export const lifecycleDescriptions: Record<LifecycleState, string> = {
-  shadow:
-    'Agent may process work. External writes are suppressed and logged. This is the default.',
+  shadow: 'Agent may process work. External writes are suppressed and logged. This is the default.',
   paused: 'Agent does not accept new worker jobs. Existing runs finish or expire.',
   live: 'Live activation is reserved for permitted external writes. No write adapters exist yet, so proposals remain suppressed.',
-  stopped: 'Pending jobs are cancelled where feasible. External writes are blocked until an administrator changes state.',
+  stopped:
+    'Pending jobs are cancelled where feasible. External writes are blocked until an administrator changes state.',
 };
 
 /** Playground simulations are always mocked/suppressed; only stopped blocks enqueue. */

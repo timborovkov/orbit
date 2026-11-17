@@ -12,9 +12,9 @@ import {
   type JobRecord,
 } from '@/lib/queue/types';
 
-export type JobHandler = (job: JobRecord, signal: AbortSignal) => Promise<void>;
+type JobHandler = (job: JobRecord, signal: AbortSignal) => Promise<void>;
 
-export type WorkerOptions = {
+export interface WorkerOptions {
   workerId: string;
   handlers: Record<string, JobHandler>;
   pollMs?: number;
@@ -22,7 +22,7 @@ export type WorkerOptions = {
   leaseMs?: number;
   concurrency?: number;
   onError?: (error: unknown) => void;
-};
+}
 
 /**
  * Polling worker with lease heartbeats, expired-lease recovery and SIGTERM drain.
@@ -71,20 +71,19 @@ export function startJobWorker(options: WorkerOptions) {
 
   const runClaimed = async (job: JobRecord) => {
     const handler = options.handlers[job.type];
-    if (!handler) {
-      await failJob(job.id, options.workerId, `No handler for job type ${job.type}`);
-      return;
-    }
-    const heartbeat = setInterval(() => {
-      void heartbeatJob(job.id, options.workerId, leaseMs).then((ok) => {
-        if (!ok) abort.abort();
-      });
-    }, Math.max(1_000, Math.floor(leaseMs / 3)));
+    const heartbeat = setInterval(
+      () => {
+        void heartbeatJob(job.id, options.workerId, leaseMs).then((ok) => {
+          if (!ok) abort.abort();
+        });
+      },
+      Math.max(1_000, Math.floor(leaseMs / 3)),
+    );
     try {
       await handler(job, abort.signal);
       if (!stopped) await completeJob(job.id, options.workerId);
       else await failJob(job.id, options.workerId, 'Worker shutting down');
-    } catch (error) {
+    } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Job failed';
       await failJob(job.id, options.workerId, message);
       options.onError?.(error);
@@ -94,7 +93,9 @@ export function startJobWorker(options: WorkerOptions) {
   };
 
   recoveryTimer = setInterval(() => {
-    void recoverExpiredLeases().catch((error) => options.onError?.(error));
+    void recoverExpiredLeases().catch((error: unknown) => {
+      options.onError?.(error);
+    });
   }, recoveryMs);
 
   schedulePoll(0);
@@ -104,7 +105,7 @@ export function startJobWorker(options: WorkerOptions) {
     stopped = true;
     abort.abort();
     if (pollTimer) clearTimeout(pollTimer);
-    if (recoveryTimer) clearInterval(recoveryTimer);
+    clearInterval(recoveryTimer);
     await Promise.allSettled([...inFlight]);
   };
 

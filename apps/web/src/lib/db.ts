@@ -5,7 +5,7 @@ import postgres from 'postgres';
  * Database URL only — shared by web and worker. Full admin auth env stays in env.ts
  * so the worker can start with DATABASE_URL (+ encryption key) alone.
  */
-export function databaseUrl() {
+function databaseUrl() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is required');
   try {
