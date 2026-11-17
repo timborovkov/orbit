@@ -31,7 +31,10 @@ const worker = startJobWorker({
   handlers: {
     [SIMULATION_JOB_TYPE]: async (job, signal) => {
       try {
-        await processSimulationJob(job.payload, undefined, signal);
+        await processSimulationJob(job.payload, undefined, signal, {
+          jobId: job.id,
+          workerId,
+        });
       } catch (error) {
         const runId = typeof job.payload.runId === 'string' ? job.payload.runId : undefined;
         void reportFailure('worker.queue', { runId });

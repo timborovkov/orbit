@@ -237,10 +237,16 @@ export async function executeSimulation(
   };
 }
 
+export interface SimulationJobClaim {
+  jobId: string;
+  workerId: string;
+}
+
 async function processSimulationRun(
   runId: string,
   inference: (key: string) => ModelCall = openRouterInference,
   externalSignal?: AbortSignal,
+  claim?: SimulationJobClaim,
 ) {
   const claimed = await db().transaction(async (tx) => {
     // Peek without locking so we can take the agent lock before the run lock
@@ -255,6 +261,28 @@ async function processSimulationRun(
       await tx.select().from(agents).where(eq(agents.id, peek.agentId)).for('update')
     ).at(0);
     if (!agent) return null;
+
+    // When invoked from the queue worker, prove this claim still owns the job before
+    // rotating the execution token. Lock order: agent → job → run (matches pause/stop).
+    if (claim) {
+      if (peek.jobId && peek.jobId !== claim.jobId) {
+        return { skip: true as const, run: peek };
+      }
+      const jobRow = (
+        await tx
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(
+            and(
+              eq(jobs.id, claim.jobId),
+              eq(jobs.claimedBy, claim.workerId),
+              eq(jobs.status, 'claimed'),
+            ),
+          )
+          .for('update')
+      ).at(0);
+      if (!jobRow) return { skip: true as const, run: peek };
+    }
 
     const run = (await tx.select().from(runs).where(eq(runs.id, runId)).for('update')).at(0);
     if (!run) return null;
@@ -493,10 +521,11 @@ export async function processSimulationJob(
   payload: Record<string, unknown>,
   inference: (key: string) => ModelCall = openRouterInference,
   signal?: AbortSignal,
+  claim?: SimulationJobClaim,
 ) {
   const runId = typeof payload.runId === 'string' ? payload.runId : null;
   if (!runId) throw new Error('simulation.run payload missing runId');
-  await processSimulationRun(runId, inference, signal);
+  await processSimulationRun(runId, inference, signal, claim);
 }
 
 function exhaustedJobMessage(reason: string) {

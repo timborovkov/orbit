@@ -214,6 +214,90 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
   expect(final.result.actions[0].draft).toBe('replacement draft');
 });
 
+test('stale workers cannot rotate the execution token after losing their job claim', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const config = { ...preset.config, name: 'ClaimFence' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'ClaimFence',${config.mission},'shadow',${sql.json(budgetDefaults)},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
+  await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'secret-claim')})`;
+  await sql`UPDATE controls SET paused=false`;
+
+  const queued = await enqueueSimulation({
+    actor: 'test@example.com',
+    agentId: id,
+    configurationId: version.id,
+    input: 'Claim fence prompt',
+  });
+  const runId = queued.runId!;
+  const jobId = queued.jobId!;
+
+  await sql`
+    UPDATE jobs
+    SET status='claimed', claimed_by='stale-worker', claimed_at=now(),
+        claim_expires_at=now() + interval '1 hour', attempts=1
+    WHERE id=${jobId}
+  `;
+
+  // Lease is reassigned to a replacement worker before the stale claim finishes setup.
+  await sql`
+    UPDATE jobs
+    SET status='claimed', claimed_by='fresh-worker', claimed_at=now(),
+        claim_expires_at=now() + interval '1 hour', attempts=2
+    WHERE id=${jobId}
+  `;
+
+  await processSimulationJob(
+    { runId, agentId: id },
+    () => async () => ({
+      decision: {
+        relevant: true,
+        priority: 0.9,
+        reason: 'fresh',
+        actions: [{ type: 'reply', reason: 'ok', draft: 'fresh draft' }],
+      },
+      inputTokens: 1,
+      outputTokens: 1,
+    }),
+    undefined,
+    { jobId, workerId: 'fresh-worker' },
+  );
+
+  const [afterFresh] =
+    await sql`SELECT status, result, execution_token FROM simulation_runs WHERE id=${runId}`;
+  expect(afterFresh.status).toBe('completed');
+  expect(afterFresh.result.actions[0].draft).toBe('fresh draft');
+  const freshToken = afterFresh.execution_token;
+
+  // Stale worker still thinks it owns the claim — must not rotate the token or overwrite.
+  await processSimulationJob(
+    { runId, agentId: id },
+    () => async () => ({
+      decision: {
+        relevant: true,
+        priority: 0.1,
+        reason: 'stale',
+        actions: [{ type: 'reply', reason: 'stale', draft: 'stale draft' }],
+      },
+      inputTokens: 1,
+      outputTokens: 1,
+    }),
+    undefined,
+    { jobId, workerId: 'stale-worker' },
+  );
+
+  const [final] =
+    await sql`SELECT status, result, execution_token FROM simulation_runs WHERE id=${runId}`;
+  expect(final.status).toBe('completed');
+  expect(final.execution_token).toBe(freshToken);
+  expect(final.result.actions[0].draft).toBe('fresh draft');
+});
+
 test('queue retries resume checkpointed steps under the hard cap', async () => {
   const id = randomUUID();
   ids.push(id);
