@@ -159,6 +159,7 @@ describe('bounded manual simulation', () => {
   test('retries resume checkpointed stages without reusing the step allowance', async () => {
     const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
     const models: string[] = [];
+    let checkpointed: SimulationResult | undefined;
     const first = await simulate(
       config,
       'question',
@@ -166,32 +167,21 @@ describe('bounded manual simulation', () => {
         models.push(request.model);
         return { decision, inputTokens: 1, outputTokens: 1 };
       },
-      async () => {
-        throw new RetryableInfrastructureError('checkpoint blip');
+      async (partial) => {
+        checkpointed = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      {
+        maxSteps: 2,
+        onActions: async () => {
+          throw new RetryableInfrastructureError('policy persistence blip');
+        },
+      },
     ).catch((error: unknown) => error);
     expect(first).toBeInstanceOf(RetryableInfrastructureError);
     expect(models).toEqual(['test/evaluator']);
+    expect(checkpointed?.steps).toHaveLength(1);
+    if (!checkpointed) throw new Error('expected evaluator checkpoint');
 
-    // Pretend the evaluator stage was checkpointed before the failure.
-    const checkpointed: SimulationResult = {
-      steps: [
-        {
-          stage: 'evaluator',
-          model: 'test/evaluator',
-          decision,
-          inputTokens: 1,
-          outputTokens: 1,
-        },
-      ],
-      actions: decision.actions.map((action) => ({
-        ...action,
-        policy: 'suppressed' as const,
-        effect: 'Simulation only. No external action performed.',
-      })),
-      error: null,
-    };
     const resumed = await simulate(
       config,
       'question',
@@ -206,6 +196,7 @@ describe('bounded manual simulation', () => {
       async () => {},
       { maxSteps: 2, initial: checkpointed },
     );
+    // Evaluator once, then main — policy failure must not redo the paid evaluator call.
     expect(models).toEqual(['test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
     expect(resumed.steps[0].stage).toBe('evaluator');
