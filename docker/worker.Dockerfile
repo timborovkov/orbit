@@ -8,8 +8,8 @@ RUN --mount=type=secret,id=npm_ca \
     if [ -f /run/secrets/npm_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/npm_ca; fi; \
     bun install --frozen-lockfile --production
 COPY --chown=bun:bun apps/worker/src apps/worker/src
-# Shared execution modules resolve their own web-workspace dependencies and aliases.
+COPY --chown=bun:bun apps/worker/tsconfig.json apps/worker/tsconfig.json
+# Shared queue, policy, runtime and schema modules resolve via worker @/* → web/src.
 COPY --chown=bun:bun apps/web/src/lib apps/web/src/lib
-COPY --chown=bun:bun apps/web/tsconfig.json apps/web/tsconfig.json
 USER bun
 CMD ["bun", "--no-env-file", "apps/worker/src/index.ts"]

@@ -60,8 +60,9 @@ export function CreateAgent({
           </Button>
         </div>
         <p id="create-description" className="muted">
-          Define an identity and a mission. New agents start paused in shadow mode and can use the
-          server OpenRouter key until you add an agent-specific override under Access.
+          Define an identity and a mission. New agents start in shadow mode with external writes
+          suppressed, and can use the server OpenRouter key until you add an agent-specific override
+          under Access.
         </p>
         <form
           action={(data) => {
@@ -164,7 +165,7 @@ export function CreateAgent({
               Cancel
             </Button>
             <Button type="submit" disabled={pending}>
-              {pending ? 'Creating…' : 'Create paused agent'}
+              {pending ? 'Creating…' : 'Create shadow agent'}
             </Button>
           </div>
         </form>

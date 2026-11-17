@@ -68,7 +68,14 @@ export function RunContent({
                 {action.type}
               </h3>
               <span className="suppressed-label">
-                <Check size={13} aria-hidden="true" /> Not sent
+                <Check size={13} aria-hidden="true" />{' '}
+                {action.policy === 'allow'
+                  ? 'Allowed'
+                  : action.policy === 'needs-approval'
+                    ? 'Needs approval'
+                    : action.policy === 'deny' || action.policy === 'denied'
+                      ? 'Denied'
+                      : 'Not sent'}
               </span>
             </div>
             <p>{action.reason}</p>

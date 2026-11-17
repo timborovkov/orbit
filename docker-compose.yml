@@ -62,6 +62,14 @@ services:
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
+    environment:
+      DATABASE_URL: postgres://orbit:orbit_dev@postgres:5432/orbit
+      ORBIT_ENCRYPTION_KEY: ${ORBIT_ENCRYPTION_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ORBIT_WORKER_ID: ${ORBIT_WORKER_ID:-compose-worker}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   rustfs_data:

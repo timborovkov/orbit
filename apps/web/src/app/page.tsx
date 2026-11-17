@@ -66,9 +66,9 @@ export default async function Home() {
             <h1>Overview</h1>
             <p className="muted">Manage your agents and workspace activity.</p>
           </div>
-          <span className="runtime-status">
+            <span className="runtime-status">
             <span className="status-dot" />
-            Manual simulation available
+            Worker queue available
           </span>
         </div>
         <dl className="metrics" aria-label="Agent summary">
@@ -80,17 +80,17 @@ export default async function Home() {
             </dd>
           </div>
           <div>
-            <dt>Paused</dt>
+            <dt>Shadow</dt>
             <dd>
-              {team.filter((a) => a.status === 'paused').length}
-              <span>awaiting activation</span>
+              {team.filter((a) => a.lifecycle === 'shadow').length}
+              <span>writes suppressed</span>
             </dd>
           </div>
           <div>
-            <dt>Live mode</dt>
+            <dt>Live</dt>
             <dd>
-              {team.filter((a) => a.mode === 'live').length}
-              <span>agents enabled</span>
+              {team.filter((a) => a.lifecycle === 'live').length}
+              <span>adapters still gated</span>
             </dd>
           </div>
         </dl>
@@ -117,8 +117,7 @@ export default async function Home() {
                     <thead>
                       <tr>
                         <th scope="col">Agent</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Mode</th>
+                        <th scope="col">Lifecycle</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -140,11 +139,8 @@ export default async function Home() {
                           <td>
                             <span className="status-label">
                               <span className="status-dot" />
-                              {a.status}
+                              {a.lifecycle}
                             </span>
-                          </td>
-                          <td>
-                            <span className="mode-label">{a.mode}</span>
                           </td>
                         </tr>
                       ))}
@@ -160,15 +156,16 @@ export default async function Home() {
                   <p>
                     Create an agent to define its identity and mission.
                     <br />
-                    New agents start paused, with external writes disabled.
+                    New agents start in shadow mode, with external writes suppressed.
                   </p>
                 </div>
               )}
               <div className="section-footnote">
                 <LockKeyhole size={13} />
                 <span>
-                  Open an agent to configure it and run a simulation. An optional server OpenRouter
-                  key covers agents without their own credential. External actions remain disabled.
+                  Open an agent to configure lifecycle, budgets and simulations. An optional server
+                  OpenRouter key covers agents without their own credential. External actions remain
+                  suppressed until adapters ship.
                 </span>
               </div>
             </section>
@@ -196,7 +193,7 @@ export default async function Home() {
                 </form>
               </div>
               <p className="control-note">
-                This setting applies when agent execution becomes available.
+                The policy gateway enforces this pause before any external write would dispatch.
               </p>
             </section>
           </div>

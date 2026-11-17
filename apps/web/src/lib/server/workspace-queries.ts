@@ -1,8 +1,9 @@
 import 'server-only';
 
-import { asc, desc, eq } from 'drizzle-orm';
+import { asc, desc, eq, inArray } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
+import { parseBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import { openRouterKeySource } from '@/lib/runtime/openrouter-key';
 import {
@@ -11,6 +12,7 @@ import {
   configurations,
   controls,
   credentials,
+  jobs,
   runs,
   templates,
 } from '@/lib/schema';
@@ -55,13 +57,24 @@ export async function getAgentWorkspace(id: string) {
   ]);
   const current = versions.at(0);
   if (!current) return null;
-  const viewedHistory = history.map((run) => ({
-    ...run,
-    interrupted: run.status === 'running' && run.expiresAt < new Date(),
-  }));
+  const jobIds = history.map((run) => run.jobId).filter((jobId): jobId is string => !!jobId);
+  const linkedJobs = jobIds.length
+    ? await db().select().from(jobs).where(inArray(jobs.id, jobIds))
+    : [];
+  const jobsById = new Map(linkedJobs.map((job) => [job.id, job]));
+  const viewedHistory = history.map((run) => {
+    const expired =
+      (run.status === 'running' || run.status === 'queued') && run.expiresAt < new Date();
+    return {
+      ...run,
+      interrupted: expired || run.status === 'interrupted',
+      displayStatus: expired ? ('interrupted' as const) : run.status,
+      job: run.jobId ? (jobsById.get(run.jobId) ?? null) : null,
+    };
+  });
   const hasAgentCredential = keys.length > 0;
   return {
-    agent,
+    agent: { ...agent, budgets: parseBudgets(agent.budgets) },
     versions,
     hasAgentCredential,
     keySource: openRouterKeySource(hasAgentCredential),

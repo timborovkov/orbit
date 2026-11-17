@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
 import { configSchema } from '@/lib/runtime/config';
-import { executeSimulation } from '@/lib/runtime/execute';
+import { enqueueSimulation } from '@/lib/runtime/execute';
 import {
   persistConfiguration,
   persistCredential,
@@ -63,7 +63,7 @@ export async function runSimulation(form: FormData) {
   const configurationId = uuid.parse(form.get('configurationId'));
   const input = z.string().trim().min(1).max(16000).safeParse(form.get('input'));
   if (!input.success) return { error: 'Paste a post or question with 1–16,000 characters.' };
-  const result = await executeSimulation({ actor, agentId, configurationId, input: input.data });
+  const result = await enqueueSimulation({ actor, agentId, configurationId, input: input.data });
   revalidatePath(`/agents/${agentId}`);
   return result;
 }

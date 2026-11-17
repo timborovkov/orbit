@@ -18,7 +18,7 @@ async function create(page: Page, name: string, mission: string) {
   await page.getByRole('button', { name: 'Create agent', exact: true }).click();
   await page.getByLabel(/^Name/).fill(name);
   await page.getByLabel(/^Mission/).fill(mission);
-  await page.getByRole('button', { name: 'Create paused agent' }).click();
+  await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
 }
@@ -35,7 +35,7 @@ async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 test.beforeEach(async () => {
-  await sql`TRUNCATE simulation_runs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 test.afterAll(async () => {
@@ -97,9 +97,8 @@ test('private login, persisted workspace, keyboard dialog, themes and screenshot
     'Alex',
     'Identify useful connections and seek consent before making an introduction.',
   );
-  expect((await sql`SELECT status,mode FROM agents WHERE name='Sarah'`)[0]).toMatchObject({
-    status: 'paused',
-    mode: 'shadow',
+  expect((await sql`SELECT lifecycle FROM agents WHERE name='Sarah'`)[0]).toMatchObject({
+    lifecycle: 'shadow',
   });
   const releaseRequest = page.waitForRequest(
     (request) => request.method() === 'POST' && Boolean(request.headers()['next-action']),
@@ -174,7 +173,7 @@ test('validation, failed requests and pending feedback preserve entries', async 
   await page.getByRole('button', { name: 'Create agent', exact: true }).click();
   await page.getByLabel(/^Name/).fill('   ');
   await page.getByLabel(/^Mission/).fill('Help customers.');
-  await page.getByRole('button', { name: 'Create paused agent' }).click();
+  await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.locator('#name-error')).toBeVisible();
   await expect(page.getByLabel(/^Name/)).toHaveAttribute('aria-invalid', 'true');
   await expect(page.getByLabel(/^Name/)).toBeFocused();
@@ -190,7 +189,7 @@ test('validation, failed requests and pending feedback preserve entries', async 
       await route.fulfill({ status: 503, body: 'Service unavailable' });
     } else await route.continue();
   });
-  await page.getByRole('button', { name: 'Create paused agent' }).click();
+  await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('button', { name: 'Creating…' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
   await page.keyboard.press('Escape');
@@ -200,7 +199,7 @@ test('validation, failed requests and pending feedback preserve entries', async 
   await expect(page.getByLabel(/^Name/)).toHaveValue('Sarah');
   await expect(page.getByLabel(/^Mission/)).toHaveValue('Help customers.');
   await page.unrouteAll();
-  await page.getByRole('button', { name: 'Create paused agent' }).click();
+  await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   expect((await sql`SELECT count(*)::int AS count FROM agents`)[0].count).toBe(1);
 });
@@ -237,7 +236,7 @@ test('worst-case content, full missions, text zoom, RTL and touch controls', asy
   await page.getByRole('button', { name: 'Create agent', exact: true }).click();
   await expect(page.getByLabel(/^Name/)).toHaveCSS('font-size', '16px');
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await expect(page.getByRole('button', { name: 'Create paused agent' })).toHaveCSS(
+  await expect(page.getByRole('button', { name: 'Create shadow agent' })).toHaveCSS(
     'transition-duration',
     '0s',
   );

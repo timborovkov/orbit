@@ -3,7 +3,7 @@ import postgres from 'postgres';
 
 const sql = postgres('postgres://orbit:orbit_dev@127.0.0.1:5432/orbit_test');
 test.beforeAll(async () => {
-  await sql`TRUNCATE simulation_runs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 test.afterAll(async () => {
@@ -24,7 +24,7 @@ test('local bypass skips login and sessions while preserving admin actions and a
   await page.getByRole('button', { name: 'Create agent', exact: true }).click();
   await page.getByLabel(/^Name/).fill('Local agent');
   await page.getByLabel(/^Mission/).fill('Exercise local development against PostgreSQL.');
-  await page.getByRole('button', { name: 'Create paused agent' }).click();
+  await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await expect(page.getByRole('heading', { name: 'Local agent', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Release global pause' }).click();

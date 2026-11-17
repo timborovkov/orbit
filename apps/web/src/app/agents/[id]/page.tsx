@@ -5,7 +5,9 @@ import { z } from 'zod';
 import { runSimulation, saveConfiguration } from '@/actions/workspace';
 import { AccessPanel } from '@/app/access-panel';
 import { AgentAvatar } from '@/app/agent-avatar';
+import { BudgetSettings } from '@/app/budget-settings';
 import { ConfigFields } from '@/app/config-fields';
+import { LifecycleControls } from '@/app/lifecycle-controls';
 import { ProfilePictureEditor } from '@/app/profile-picture-editor';
 import { RunContent } from '@/app/run-content';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
@@ -14,6 +16,7 @@ import { WorkspaceHeader } from '@/app/workspace-header';
 import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
+import { lifecycleLabels, type LifecycleState } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
@@ -26,6 +29,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   const workspace = await getAgentWorkspace(id);
   if (!workspace) notFound();
   const { agent, versions, hasAgentCredential, keySource, history, current } = workspace;
+  const lifecycle = agent.lifecycle as LifecycleState;
   const viewedHistory = history;
   const latest = history.at(0);
   const versionFor = (configurationId: string) =>
@@ -56,12 +60,16 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     </section>
   );
   const access = (
-    <AccessPanel
-      agentId={id}
-      agentName={agent.name}
-      hasAgentCredential={hasAgentCredential}
-      keySource={keySource}
-    />
+    <div className="access-stack">
+      <LifecycleControls agentId={id} lifecycle={lifecycle} />
+      <BudgetSettings agentId={id} budgets={agent.budgets} />
+      <AccessPanel
+        agentId={id}
+        agentName={agent.name}
+        hasAgentCredential={hasAgentCredential}
+        keySource={keySource}
+      />
+    </div>
   );
   const playground = (
     <div className="playground-grid">
@@ -70,7 +78,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
           <h2>Test a conversation</h2>
           <p className="muted">See how {agent.name} would respond to a post or question.</p>
         </div>
-        <WorkspaceForm action={runSimulation} label="Run simulation">
+        <WorkspaceForm action={runSimulation} label="Queue simulation">
           <input type="hidden" name="agentId" value={id} />
           <WorkspaceSelect
             key={current.id}
@@ -96,7 +104,8 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
         <p className="simulation-note">
           <ShieldCheck size={15} aria-hidden="true" />
           <span>
-            Paid model inference. Nothing is posted or sent. Save your configuration before testing.
+            Paid model inference runs on the Bun worker. Nothing is posted or sent. Save your
+            configuration before testing.
           </span>
         </p>
       </section>
@@ -105,8 +114,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
           <h2 id="latest-result-title">Latest result</h2>
           {latest && (
             <span className="state-label">
-              v{versionFor(latest.configurationId)} ·{' '}
-              {latest.interrupted ? 'interrupted' : latest.status}
+              v{versionFor(latest.configurationId)} · {latest.displayStatus}
             </span>
           )}
         </div>
@@ -117,8 +125,8 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
             <FlaskConical size={30} strokeWidth={1.25} aria-hidden="true" />
             <h3>A safe place to try things</h3>
             <p>
-              Paste an input and run a simulation. Evaluation, proposed actions and drafts will
-              appear here.
+              Paste an input and queue a simulation. Evaluation, proposed actions and drafts will
+              appear here once the worker finishes.
             </p>
           </div>
         )}
@@ -131,7 +139,8 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
         <div className="editor-section-heading">
           <h2>Run history</h2>
           <p className="muted">
-            Your latest 50 simulations, with the exact configuration each one used.
+            Your latest 50 simulations, with queue status, policy outcomes and the configuration
+            each one used.
           </p>
         </div>
         {!history.length && (
@@ -148,9 +157,11 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
                 <time dateTime={run.createdAt.toISOString()}>
                   {run.createdAt.toISOString().slice(0, 16).replace('T', ' ')} UTC · Version{' '}
                   {versionFor(run.configurationId)}
+                  {run.job ? ` · job ${run.job.status}` : ''}
+                  {run.deferReason ? ` · ${run.deferReason}` : ''}
                 </time>
               </div>
-              <span className="state-label">{run.interrupted ? 'interrupted' : run.status}</span>
+              <span className="state-label">{run.displayStatus}</span>
               <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
             </summary>
             <RunContent run={run} interrupted={run.interrupted} />
@@ -202,7 +213,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
                 <h1>{agent.name}</h1>
                 <span className="state-label">
                   <span className="status-dot" />
-                  Paused
+                  {lifecycleLabels[lifecycle]}
                 </span>
               </div>
               <p className="muted">{current.config.role || 'Custom agent'}</p>

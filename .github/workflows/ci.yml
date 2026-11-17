@@ -49,7 +49,10 @@ jobs:
         run: docker build -f docker/worker.Dockerfile -t orbit-worker:ci .
       - name: Smoke test worker container
         run: |
-          docker run -d --name orbit-worker-ci orbit-worker:ci
+          docker run -d --name orbit-worker-ci \
+            -e DATABASE_URL=postgres://orbit:orbit@127.0.0.1:5432/orbit \
+            -e ORBIT_WORKER_ID=ci-smoke \
+            orbit-worker:ci
           trap 'docker rm -f orbit-worker-ci' EXIT
           sleep 2
           docker stop --time 5 orbit-worker-ci
@@ -115,8 +118,21 @@ jobs:
         run: bun run build
       - name: Test auth configuration and production startup guards
         run: bun run test:unit
+      - name: Test durable job queue
+        run: bun run test:queue
+        env:
+          DATABASE_URL: postgres://orbit:orbit_dev@localhost:5432/orbit_test
       - name: Test simulation persistence and isolation
         run: bun run test:simulation
+      - name: Test worker and web integration
+        run: bun run test:integration
+        env:
+          DATABASE_URL: postgres://orbit:orbit_dev@localhost:5432/orbit_test
+          APP_URL: http://localhost:3000
+          AUTH_DISABLED: 'false'
+          ORBIT_ADMIN_EMAIL: admin@example.com
+          ORBIT_ADMIN_PASSWORD: test-only-password-123456
+          ORBIT_ENCRYPTION_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       - name: Install browser
         run: bunx playwright install --with-deps chromium
       - name: Test persistence, accessibility and interface states

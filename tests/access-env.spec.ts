@@ -10,7 +10,7 @@ test('Access tab shows environment default and agent override without revealing 
   page,
 }) => {
   test.setTimeout(90000);
-  await sql`TRUNCATE simulation_runs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
   await page.goto('/login');
   await page.getByLabel(/^Email/).fill('admin@example.com');
   await page.getByLabel(/^Password/).fill('test-only-password-123456');
@@ -19,7 +19,7 @@ test('Access tab shows environment default and agent override without revealing 
   await page.getByLabel('Template', { exact: true }).selectOption({ label: 'Blank' });
   await page.getByLabel(/^Name/).fill('Env Default Agent');
   await page.getByLabel(/^Mission/).fill('Use the server OpenRouter key by default.');
-  await page.getByRole('button', { name: 'Create paused agent' }).click();
+  await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.getByRole('link', { name: 'Env Default Agent', exact: true }).click();
   await page.getByRole('tab', { name: 'Access', exact: true }).click();

@@ -122,7 +122,7 @@ test('missing keys, interruption recovery and concurrent claims are durable', as
   });
   await started;
   try {
-    expect((await executeSimulation(params)).error).toContain('already in progress');
+    expect((await executeSimulation(params)).error).toContain('concurrency limit');
   } finally {
     release();
     await first;
