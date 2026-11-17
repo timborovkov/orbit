@@ -53,7 +53,7 @@ export interface SimulationResult {
    * Stages whose model allowance was claimed before dispatch. Survives a failed
    * post-call checkpoint so retries cannot redo paid inference under maxSteps.
    */
-  reservedStages?: Array<'evaluator' | 'main'>;
+  reservedStages?: ('evaluator' | 'main')[];
   steps: SimulationStep[];
   actions: (Decision['actions'][number] & {
     intentId?: string;
