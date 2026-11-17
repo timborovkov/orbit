@@ -158,16 +158,19 @@ export function startJobWorker(options: WorkerOptions) {
   };
 
   recoveryTimer = setInterval(() => {
-    void (async () => {
-      const recovered = await recover();
-      if (!options.onDeadLetter) return;
-      for (const job of recovered) {
-        if (job.status !== 'dead') continue;
-        await options.onDeadLetter(job, job.lastError ?? 'Lease expired after max attempts');
-      }
-    })().catch((error: unknown) => {
-      options.onError?.(error);
-    });
+    void recover()
+      .then((recovered) => {
+        const notify = options.onDeadLetter;
+        if (!notify) return;
+        return Promise.all(
+          recovered
+            .filter((job) => job.status === 'dead')
+            .map((job) => notify(job, job.lastError ?? 'Lease expired after max attempts')),
+        );
+      })
+      .catch((error: unknown) => {
+        options.onError?.(error);
+      });
   }, recoveryMs);
 
   schedulePoll(0);
