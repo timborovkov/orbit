@@ -115,10 +115,8 @@ test('template copies, independent versions, encrypted keys and durable manual r
   );
   await page.getByRole('tab', { name: /^History/ }).click();
   await expect
-    .poll(async () => {
-      await page.reload();
-      await page.getByRole('tab', { name: /^History/ }).click();
-      return page.locator('#history .state-label').first().textContent();
+    .poll(async () => page.locator('#history .state-label').first().textContent(), {
+      timeout: 30000,
     })
     .toMatch(/failed|completed|interrupted/);
   await page.locator('.run-detail > summary').click();

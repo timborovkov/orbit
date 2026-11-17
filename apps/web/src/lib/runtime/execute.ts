@@ -208,6 +208,19 @@ async function processSimulationRun(
   externalSignal?: AbortSignal,
 ) {
   const claimed = await db().transaction(async (tx) => {
+    // Peek without locking so we can take the agent lock before the run lock
+    // (same order as enqueueSimulation and persistLifecycle) and avoid deadlocks.
+    const peek = (await tx.select().from(runs).where(eq(runs.id, runId))).at(0);
+    if (!peek) return null;
+    if (peek.status === 'completed' || peek.status === 'failed' || peek.status === 'interrupted') {
+      return { skip: true as const, run: peek };
+    }
+
+    const agent = (
+      await tx.select().from(agents).where(eq(agents.id, peek.agentId)).for('update')
+    ).at(0);
+    if (!agent) return null;
+
     const run = (await tx.select().from(runs).where(eq(runs.id, runId)).for('update')).at(0);
     if (!run) return null;
     if (run.status === 'completed' || run.status === 'failed' || run.status === 'interrupted') {
@@ -220,10 +233,7 @@ async function processSimulationRun(
         .where(eq(runs.id, run.id));
       return { skip: true as const, run: { ...run, status: 'interrupted' as const } };
     }
-    const agent = (
-      await tx.select().from(agents).where(eq(agents.id, run.agentId)).for('update')
-    ).at(0);
-    if (!agent) return null;
+
     const budgets = parseBudgets(agent.budgets);
     const config = (
       await tx
@@ -294,6 +304,11 @@ async function processSimulationRun(
         };
         const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
         if (violation) throw new Error(budgetViolationMessage(violation));
+        // Reserve quota before dispatch so provider failures/timeouts still count.
+        await recordUsage(run.agentId, {
+          requests: 1,
+          spendMicros: BigInt(0), // Token spend tracked; monetary pricing unavailable → documented as 0.
+        });
         const response = await call(request);
         if (checkRunDeadline(startedAt, new Date(), budgets)) {
           throw new Error(budgetViolationMessage('run-deadline'));
@@ -303,10 +318,6 @@ async function processSimulationRun(
         } catch {
           throw new Error(budgetViolationMessage('run-deadline'));
         }
-        await recordUsage(run.agentId, {
-          requests: 1,
-          spendMicros: BigInt(0), // Token spend tracked; monetary pricing unavailable → documented as 0.
-        });
         return response;
       },
       async (partial) => {

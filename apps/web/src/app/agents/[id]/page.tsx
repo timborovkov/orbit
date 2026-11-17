@@ -8,6 +8,7 @@ import { AgentAvatar } from '@/app/agent-avatar';
 import { BudgetSettings } from '@/app/budget-settings';
 import { ConfigFields } from '@/app/config-fields';
 import { LifecycleControls } from '@/app/lifecycle-controls';
+import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { ProfilePictureEditor } from '@/app/profile-picture-editor';
 import { RunContent } from '@/app/run-content';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
@@ -32,6 +33,9 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   const lifecycle = agent.lifecycle;
   const viewedHistory = history;
   const latest = history.at(0);
+  const hasPendingRuns = history.some(
+    (run) => run.displayStatus === 'queued' || run.displayStatus === 'running',
+  );
   const versionFor = (configurationId: string) =>
     versions.find((version) => version.id === configurationId)?.version;
   const configuration = (
@@ -224,6 +228,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
             <span className="muted">{openRouterConnectionLabel(keySource)}</span>
           </div>
         </div>
+        <PendingRunRefresh active={hasPendingRuns} />
         <WorkspaceTabs
           items={[
             { id: 'configure', label: 'Configuration', content: configuration },

@@ -210,7 +210,9 @@ default or none—by label only, never by value or prefix. It accepts a password
 for an agent override, clears it after submission and never reads the secret back.
 Removing an agent key falls back to the environment default when configured; otherwise
 it retains a visible missing-key state. History shows queued/running/completed/failed/
-interrupted run states and linked job status. No loading skeletons on Access.
+interrupted run states and linked job status. While any run is queued or running, the
+workspace soft-refreshes every two seconds so Playground and History pick up worker
+results without a manual reload. No loading skeletons on Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents
