@@ -23,6 +23,7 @@ export function ReviewSettings({
   agentId: string;
   approvalTools: string[];
 }) {
+  const requiredTools = new Set(approvalTools);
   return (
     <section className="access-workbench">
       <div className="editor-section-heading">
@@ -40,7 +41,7 @@ export function ReviewSettings({
                   type="checkbox"
                   name="tool"
                   value={tool}
-                  defaultChecked={approvalTools.includes(tool)}
+                  defaultChecked={requiredTools.has(tool)}
                 />
                 {actionLabels[tool]}
               </label>

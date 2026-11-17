@@ -425,21 +425,19 @@ async function recordRequestUsage(
   spendMicros: bigint,
   requests: number,
 ) {
-  for (const [period, periodStart] of [
-    ['day', today],
-    ['month', `${today.slice(0, 7)}-01`],
-  ]) {
-    await store
-      .insert(usageCounters)
-      .values({ agentId, period, periodStart, spendMicros, requests })
-      .onConflictDoUpdate({
-        target: [usageCounters.agentId, usageCounters.period, usageCounters.periodStart],
-        set: {
-          spendMicros: sql`${usageCounters.spendMicros} + ${spendMicros}`,
-          requests: sql`${usageCounters.requests} + ${requests}`,
-        },
-      });
-  }
+  await store
+    .insert(usageCounters)
+    .values([
+      { agentId, period: 'day', periodStart: today, spendMicros, requests },
+      { agentId, period: 'month', periodStart: `${today.slice(0, 7)}-01`, spendMicros, requests },
+    ])
+    .onConflictDoUpdate({
+      target: [usageCounters.agentId, usageCounters.period, usageCounters.periodStart],
+      set: {
+        spendMicros: sql`${usageCounters.spendMicros} + ${spendMicros}`,
+        requests: sql`${usageCounters.requests} + ${requests}`,
+      },
+    });
 }
 
 /** Check the current budgets and reserve before dispatch, under the same agent lock as Stop. */

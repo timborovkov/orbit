@@ -42,11 +42,8 @@ async function quoteOpenRouter(
       const result = endpoint.safeParse(entry);
       if (!result.success) return [];
       const { tag, context_length, pricing, supported_parameters } = result.data;
-      if (
-        !['structured_outputs', 'max_tokens'].every((parameter) =>
-          supported_parameters.includes(parameter),
-        )
-      ) {
+      const supported = new Set(supported_parameters);
+      if (!supported.has('structured_outputs') || !supported.has('max_tokens')) {
         return [];
       }
       // The context window bounds billed input without trusting a local tokenizer.
