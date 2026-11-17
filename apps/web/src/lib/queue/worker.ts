@@ -65,12 +65,22 @@ export function startJobWorker(options: WorkerOptions) {
           if (hasStopped()) {
             // Release claims taken after stop began so another worker can retry.
             await Promise.all(
-              claimed.map((job) => failJob(job.id, options.workerId, 'Worker shutting down')),
+              claimed.map((job) =>
+                failJob(job.id, options.workerId, 'Worker shutting down').catch(
+                  (error: unknown) => {
+                    options.onError?.(error);
+                  },
+                ),
+              ),
             );
             return;
           }
           for (const job of claimed) {
-            const work = runClaimed(job).finally(() => inFlight.delete(work));
+            const work = runClaimed(job)
+              .catch((error: unknown) => {
+                options.onError?.(error);
+              })
+              .finally(() => inFlight.delete(work));
             inFlight.add(work);
           }
         }
@@ -106,10 +116,23 @@ export function startJobWorker(options: WorkerOptions) {
     );
     try {
       await handler(job, jobCancel.signal);
-      await completeJob(job.id, options.workerId);
+      try {
+        await completeJob(job.id, options.workerId);
+      } catch (error: unknown) {
+        options.onError?.(error);
+        try {
+          await failJob(job.id, options.workerId, 'Failed to mark job completed');
+        } catch (failError: unknown) {
+          options.onError?.(failError);
+        }
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Job failed';
-      await failJob(job.id, options.workerId, message);
+      try {
+        await failJob(job.id, options.workerId, message);
+      } catch (failError: unknown) {
+        options.onError?.(failError);
+      }
       options.onError?.(error);
     } finally {
       clearInterval(heartbeat);
