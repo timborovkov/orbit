@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { isBudgetError } from '@/lib/budgets';
 import type { AgentConfig } from '@/lib/runtime/config';
+import { isRetryableInfrastructureError } from '@/lib/runtime/errors';
 
 const action = z.object({
   type: z.enum(['reply', 'like', 'repost', 'follow', 'bookmark', 'introduce', 'escalate']),
@@ -106,6 +107,8 @@ export async function simulate(
       if (!decision.relevant || !decision.actions.length) break;
     }
   } catch (error) {
+    // Infrastructure failures must propagate so the queue can retry; do not persist as inference errors.
+    if (isRetryableInfrastructureError(error)) throw error;
     // Provider exceptions can contain request headers, keys and raw response bodies.
     // Only BudgetError instances are trusted; never inspect provider text for budget keywords.
     const cancelled =

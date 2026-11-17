@@ -156,6 +156,19 @@ describe('bounded manual simulation', () => {
     expect(result.error).not.toBeNull();
     expect(result.actions).toEqual([]);
   });
+  test('retryable infrastructure errors propagate for queue retry', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    await expect(
+      simulate(
+        config,
+        'question',
+        async () => {
+          throw new RetryableInfrastructureError('quota reservation db blip');
+        },
+        async () => {},
+      ),
+    ).rejects.toBeInstanceOf(RetryableInfrastructureError);
+  });
 });
 
 test('OpenRouter adapter sends credentials only as authorization and parses structured usage', async () => {

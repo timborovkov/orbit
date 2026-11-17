@@ -16,6 +16,7 @@ import { db } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { enqueueJob } from '@/lib/queue/jobs';
+import { isRetryableInfrastructureError } from '@/lib/runtime/errors';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { simulate, type ModelCall, type SimulationResult } from '@/lib/runtime/simulation';
@@ -364,6 +365,8 @@ async function processSimulationRun(
       deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
     });
   } catch (error) {
+    // Leave the run non-terminal so a reclaimed job can resume after failJob retries.
+    if (isRetryableInfrastructureError(error)) throw error;
     const fallback =
       'Unable to complete inference. Check the agent credential or OPENROUTER_API_KEY, server encryption key and provider availability, then try again.';
     let inspectable = fallback;

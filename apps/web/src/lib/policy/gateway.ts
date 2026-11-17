@@ -5,6 +5,7 @@ import {
   budgetViolationMessage,
   checkOutboundBudgets,
   checkRequestBudgets,
+  isBudgetError,
   parseBudgets,
   type BudgetSnapshot,
   type BudgetViolation,
@@ -15,6 +16,7 @@ import {
   externalWritesPermitted,
   type LifecycleState,
 } from '@/lib/lifecycle';
+import { RetryableInfrastructureError } from '@/lib/runtime/errors';
 import { actionIntents, agents, controls, policyDecisions, usageCounters } from '@/lib/schema';
 
 export type PolicyDecision = 'allow' | 'deny' | 'needs-approval' | 'suppressed';
@@ -305,45 +307,56 @@ async function recordUsage(
  * Prevents two overlapping workers from both passing a stale remaining-allowance check.
  */
 export async function reserveRequestQuota(agentId: string): Promise<void> {
-  await db().transaction(async (tx) => {
-    const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
-      0,
+  try {
+    await db().transaction(async (tx) => {
+      const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
+        0,
+      );
+      if (!agent) throw new Error('Agent unavailable');
+      const budgets = parseBudgets(agent.budgets);
+      const today = new Date().toISOString().slice(0, 10);
+      const monthStart = `${today.slice(0, 7)}-01`;
+      const counters = await tx
+        .select()
+        .from(usageCounters)
+        .where(eq(usageCounters.agentId, agentId));
+      const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
+      const month = counters.find(
+        (row) => row.period === 'month' && row.periodStart === monthStart,
+      );
+      const snapshot: BudgetSnapshot = {
+        budgets,
+        day: {
+          spendMicros: day?.spendMicros ?? BigInt(0),
+          requests: day?.requests ?? 0,
+          outboundActions: day?.outboundActions ?? 0,
+        },
+        month: {
+          spendMicros: month?.spendMicros ?? BigInt(0),
+          requests: month?.requests ?? 0,
+          outboundActions: month?.outboundActions ?? 0,
+        },
+        activeRuns: 0,
+      };
+      const violation = checkRequestBudgets(snapshot);
+      if (violation) throw new BudgetError(violation);
+      await recordUsage(
+        agentId,
+        {
+          requests: 1,
+          spendMicros: BigInt(0),
+        },
+        tx,
+      );
+    });
+  } catch (error) {
+    // Budget exhaustion and missing agents are terminal; store/network blips must retry.
+    if (isBudgetError(error)) throw error;
+    if (error instanceof Error && error.message === 'Agent unavailable') throw error;
+    throw new RetryableInfrastructureError(
+      error instanceof Error ? error.message : 'Quota reservation failed',
     );
-    if (!agent) throw new Error('Agent unavailable');
-    const budgets = parseBudgets(agent.budgets);
-    const today = new Date().toISOString().slice(0, 10);
-    const monthStart = `${today.slice(0, 7)}-01`;
-    const counters = await tx
-      .select()
-      .from(usageCounters)
-      .where(eq(usageCounters.agentId, agentId));
-    const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
-    const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
-    const snapshot: BudgetSnapshot = {
-      budgets,
-      day: {
-        spendMicros: day?.spendMicros ?? BigInt(0),
-        requests: day?.requests ?? 0,
-        outboundActions: day?.outboundActions ?? 0,
-      },
-      month: {
-        spendMicros: month?.spendMicros ?? BigInt(0),
-        requests: month?.requests ?? 0,
-        outboundActions: month?.outboundActions ?? 0,
-      },
-      activeRuns: 0,
-    };
-    const violation = checkRequestBudgets(snapshot);
-    if (violation) throw new BudgetError(violation);
-    await recordUsage(
-      agentId,
-      {
-        requests: 1,
-        spendMicros: BigInt(0),
-      },
-      tx,
-    );
-  });
+  }
 }
 
 /** Pure evaluation helper for unit tests without persistence. */
