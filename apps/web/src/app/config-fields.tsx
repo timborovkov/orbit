@@ -121,8 +121,9 @@ export function ConfigFields({
             </div>
             {group.id === 'models' && (
               <p className="field-hint">
-                Use an OpenRouter model ID. Both steps can use the same model. Credentials are
-                managed under Access.
+                Use an OpenRouter model ID. Both steps can use the same model. Keys are managed
+                under Access; an optional server OPENROUTER_API_KEY covers agents without their own
+                key.
               </p>
             )}
           </section>

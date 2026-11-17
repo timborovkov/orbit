@@ -4,6 +4,7 @@ import { asc, desc, eq } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { openRouterKeySource } from '@/lib/runtime/openrouter-key';
 import {
   agents,
   audit,
@@ -58,5 +59,13 @@ export async function getAgentWorkspace(id: string) {
     ...run,
     interrupted: run.status === 'running' && run.expiresAt < new Date(),
   }));
-  return { agent, versions, hasCredential: keys.length > 0, history: viewedHistory, current };
+  const hasAgentCredential = keys.length > 0;
+  return {
+    agent,
+    versions,
+    hasAgentCredential,
+    keySource: openRouterKeySource(hasAgentCredential),
+    history: viewedHistory,
+    current,
+  };
 }

@@ -13,6 +13,17 @@ const base = z.object({
       .regex(/^[a-fA-F0-9]{64}$/)
       .optional(),
   ),
+  // Server-only default OpenRouter key. Never send to the browser, prompts or diagnostics.
+  OPENROUTER_API_KEY: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z
+      .string()
+      .trim()
+      .min(1)
+      .max(512)
+      .refine((value) => !/\s/.test(value), 'OPENROUTER_API_KEY must not contain spaces')
+      .optional(),
+  ),
 });
 const passwordAuth = base
   .extend({

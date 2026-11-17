@@ -38,23 +38,31 @@ Configuration is grouped into Identity, Behaviour and Models; **History** retain
 and configuration versions. Switching views preserves unsaved form text. Select a
 saved version to replay an older configuration. Unsaved edits are not used by runs.
 
+Optionally set `OPENROUTER_API_KEY` on the web service as a default OpenRouter key.
+Inference uses an agent’s own encrypted key when present; otherwise it uses the
+environment default. Rotating the env var takes effect for every agent without an
+override. The Access tab shows whether the agent key, the environment default or
+neither is in use, without revealing key values or prefixes.
+
 Set `ORBIT_ENCRYPTION_KEY` to a random 32-byte hex value (`openssl rand -hex 32`) in
-the web service environment before saving credentials. Keep it outside PostgreSQL
-and retain a secure backup across deployments; changing it makes existing encrypted
-credentials unreadable. Replace or remove individual OpenRouter keys in the agent
-workspace. Keys are AES-256-GCM encrypted with agent-bound authenticated data, never
-returned to the browser, and never included in model prompts or diagnostic logs.
-The application still starts without a master key, but credential operations cannot
-succeed until it is configured.
+the web service environment before saving per-agent credentials. Keep it outside
+PostgreSQL and retain a secure backup across deployments; changing it makes existing
+encrypted credentials unreadable. Replace or remove individual OpenRouter keys in the
+agent workspace. Per-agent keys are AES-256-GCM encrypted with agent-bound
+authenticated data, never returned to the browser, and never included in model prompts
+or diagnostic logs. The environment default does not require encryption because it is
+not stored in PostgreSQL. The application still starts without a master key; only
+per-agent credential save/decrypt operations need it.
 
 Simulations make real, potentially billable OpenRouter inference calls: one evaluator
 call and, only for relevant candidates, one main-model call. They have a two-minute
 inference deadline, at most 3,000 output tokens per call, no automatic provider
 retries, and one active run per agent. There are no external action adapters or
 write tools in this path. Every proposal is persisted as suppressed, regardless of
-global pause or future live settings. Missing credentials and inference failures
-produce inspectable failed runs; provider error bodies are deliberately discarded.
-Token usage is shown when returned; monetary cost is not estimated.
+global pause or future live settings. Missing credentials (neither agent key nor
+environment default) and inference failures produce inspectable failed runs; provider
+error bodies are deliberately discarded. Token usage is shown when returned; monetary
+cost is not estimated.
 
 Runs save the input and immutable configuration version before inference, then
 checkpoint each completed stage. Expired in-flight runs display as interrupted;
@@ -69,8 +77,8 @@ Validation: `bun run test:unit`, `bun run test:simulation` (requires migrated
 `orbit_test` PostgreSQL), and `bun run test:e2e` after a production build. Runtime
 and persistence tests inject deterministic inference; they do not spend API credit.
 Browser tests exercise real admin actions, template/configuration edits, encryption,
-and persisted failure details. Real provider quality requires an administrator's
-OpenRouter key and a live manual test.
+Access key-source states and persisted failure details. Real provider quality requires
+a configured OpenRouter key (environment default or per-agent) and a live manual test.
 
 ### Agent profile pictures
 

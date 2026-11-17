@@ -93,6 +93,7 @@ test('missing keys, interruption recovery and concurrent claims are durable', as
   const [v] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
   const params = { agentId: id, configurationId: v.id, actor: 'test', input: 'Question' };
+  delete process.env.OPENROUTER_API_KEY;
   await executeSimulation(params);
   const [failure] = await sql`SELECT * FROM simulation_runs WHERE agent_id=${id}`;
   expect(failure.status).toBe('failed');
@@ -125,6 +126,40 @@ test('missing keys, interruption recovery and concurrent claims are durable', as
   } finally {
     release();
     await first;
+  }
+});
+
+test('environment OpenRouter default works without encryption or an agent credential', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  await sql`INSERT INTO agents(id,name,mission) VALUES (${id},'EnvDefault','Use env key')`;
+  const [v] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) SELECT ${id},1,config,'test' FROM templates WHERE id='blank' RETURNING id`;
+  const previousEncryption = process.env.ORBIT_ENCRYPTION_KEY;
+  const previousOpenRouter = process.env.OPENROUTER_API_KEY;
+  delete process.env.ORBIT_ENCRYPTION_KEY;
+  process.env.OPENROUTER_API_KEY = 'env-default-simulation-secret';
+  try {
+    const result = await executeSimulation(
+      { agentId: id, configurationId: v.id, actor: 'test', input: 'Hello from env default' },
+      (secret) => async () => {
+        if (secret !== 'env-default-simulation-secret') throw new Error('Expected env key');
+        return {
+          decision: { relevant: false, priority: 0, reason: 'skip', actions: [] },
+          inputTokens: 1,
+          outputTokens: 1,
+        };
+      },
+    );
+    expect(result.error).toBeUndefined();
+    const [run] = await sql`SELECT status, result FROM simulation_runs WHERE agent_id=${id}`;
+    expect(run.status).toBe('completed');
+    expect(JSON.stringify(run)).not.toContain('env-default-simulation-secret');
+  } finally {
+    if (previousEncryption) process.env.ORBIT_ENCRYPTION_KEY = previousEncryption;
+    else delete process.env.ORBIT_ENCRYPTION_KEY;
+    if (previousOpenRouter) process.env.OPENROUTER_API_KEY = previousOpenRouter;
+    else delete process.env.OPENROUTER_API_KEY;
   }
 });
 

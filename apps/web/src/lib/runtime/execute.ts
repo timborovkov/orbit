@@ -2,7 +2,7 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
 import { openRouterInference } from '@/lib/runtime/openrouter';
-import { decryptCredential } from '@/lib/runtime/secrets';
+import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { simulate, type ModelCall } from '@/lib/runtime/simulation';
 import { agents, configurations, credentials, runs } from '@/lib/schema';
 
@@ -70,8 +70,8 @@ export async function executeSimulation(
     const credential = (
       await db().select().from(credentials).where(eq(credentials.agentId, agentId))
     ).at(0);
-    if (!credential) throw new Error('Missing credential');
-    const call = inference(decryptCredential(agentId, credential.encryptedKey));
+    const { apiKey } = resolveOpenRouterApiKey(agentId, credential?.encryptedKey);
+    const call = inference(apiKey);
     const result = await simulate(config.config, input, call, async (result) => {
       await db().update(runs).set({ result }).where(eq(runs.id, run.id));
     });
@@ -85,7 +85,7 @@ export async function executeSimulation(
       .set({
         status: 'failed',
         finishedAt: new Date(),
-        result: sql`jsonb_set(${runs.result}, '{error}', to_jsonb(${'Unable to complete inference. Check the saved credential, server encryption key and provider availability, then try again.'}::text))`,
+        result: sql`jsonb_set(${runs.result}, '{error}', to_jsonb(${'Unable to complete inference. Check the agent credential or OPENROUTER_API_KEY, server encryption key and provider availability, then try again.'}::text))`,
       })
       .where(eq(runs.id, run.id));
   }

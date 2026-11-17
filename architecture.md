@@ -25,7 +25,7 @@ Orbit is not a multi-tenant SaaS in its first incarnation, nor a single-purpose 
 | UI | Next.js App Router, TypeScript, Bun, Tailwind, shadcn/ui |
 | Data | PostgreSQL, pgvector, Drizzle ORM |
 | Object storage | RustFS using its S3-compatible API; persistent volume and private buckets |
-| Agents | Vercel AI SDK with OpenRouter; model and API key per agent |
+| Agents | Vercel AI SDK with OpenRouter; optional env default key, per-agent override |
 | Workers | Separate Bun worker process sharing application modules |
 | Scheduling | Durable PostgreSQL-backed jobs; LISTEN/NOTIFY only as a wake-up signal |
 | Observability | Langfuse via OpenTelemetry for agent traces and evaluations; Sentry for application errors and performance; Orbit retains operational truth |
@@ -44,7 +44,7 @@ Deployment target: one web service, one worker service, PostgreSQL and RustFS on
 | Personality | Natural-language voice, style, manner and interaction preferences |
 | Mission | Outcome sought; goals and optional time-bounded campaigns |
 | Instructions | Engagement preferences, escalation guidance and tool-use guidance |
-| Model settings | OpenRouter key, main model, cheaper evaluator model, parameters and budgets |
+| Model settings | OpenRouter key (env default or per-agent override), main model, cheaper evaluator model, parameters and budgets |
 | Tools | Native API capabilities and individually allowlisted MCP operations |
 | Triggers | Scheduled discovery, mentions, incoming email, webhooks and manual invocations |
 | Knowledge | Agent-scoped documents and retrieved source passages |
@@ -118,7 +118,7 @@ Use natural-language guidance to describe when a tool is appropriate, but enforc
 | SMS / voice | Future opt-in messaging and phone-call tools; asynchronous status handling. |
 | Browserbase / Daytona | Optional isolated browser or code execution only when the capability genuinely requires it. |
 
-Credentials are encrypted centrally and assigned per agent: separate OpenRouter, X and Telegram credentials by default. The runtime retrieves secrets for authorised connectors; LLM prompts and tool responses never receive raw keys. Support rotation, revocation and degraded-connection status.
+Credentials are encrypted centrally and assigned per agent: separate OpenRouter, X and Telegram credentials by default. OpenRouter may also use an optional deployment-wide `OPENROUTER_API_KEY` environment default; a per-agent encrypted key overrides it at inference time without copying the env value into storage. The runtime retrieves secrets for authorised connectors; LLM prompts and tool responses never receive raw keys. Support rotation, revocation and degraded-connection status.
 
 ## 11. Scheduling and execution modes
 
@@ -158,7 +158,7 @@ Orbit's **full platform design is the implementation backbone**. Delivery is inc
 
 | Phase | Outcome |
 | --- | --- |
-| 1. Foundation | Private environment-configured administrator login and guarded local development AUTH_DISABLED bypass; OAuth and magic-link login and allowlist later, agents/templates, versioned configuration, encrypted per-agent credentials, Drizzle/Postgres, Zod environment validation, Docker/Compose/Railway configuration. |
+| 1. Foundation | Private environment-configured administrator login and guarded local development AUTH_DISABLED bypass; OAuth and magic-link login and allowlist later, agents/templates, versioned configuration, optional OpenRouter env default plus encrypted per-agent credential overrides, Drizzle/Postgres, Zod environment validation, Docker/Compose/Railway configuration. |
 | 2. Runtime and safety | Bun worker, durable jobs and recovery, OpenRouter/AI SDK, model configuration, policy gateway, approval queue, hard budgets, consent, agent lifecycle, Langfuse traces, Sentry monitoring and audit trails. |
 | 3. Evaluation and UI | Full agent workspace, playground for single inputs and multi-step scenarios, simulation and shadow mode, detailed timelines, production-derived regression datasets and side-by-side comparisons. |
 | 4. Channels and research | Approved X discovery, mentions, posting and other permitted actions; Resend virtual inboxes; web search and read; authenticated remote MCP tools. |
@@ -200,7 +200,7 @@ Event coordination and research may be added as further templates without new ru
 - Budgets: every agent has configurable daily and monthly OpenRouter spending caps, provider request quotas, outbound-action caps, concurrency limits, a maximum of 10 tool steps per run and a five-minute run deadline as initial defaults. Reject or defer work when limits are reached; do not treat limits as activity targets.
 - Cross-agent data: default to isolated agent memories, conversations, credentials and knowledge. Administrators may explicitly attach shared knowledge libraries; private relationship memories do not automatically cross agent boundaries. No automatic cross-agent relationship visibility. Identity links within an agent are evidence-backed, autonomous and reversible; shared libraries require explicit grants.
 - Email: use Resend for outbound sending and inbound routing to agent-specific addresses on a dedicated subdomain, with PostgreSQL-backed virtual inboxes. Validate provider account features, domain verification, webhooks and deliverability during integration; use supported APIs only. If an account lacks inbound access, keep email receiving disabled until enabled rather than changing the architecture.
-- Operational security: allowlisted administrator login, encrypted credentials, audit logs, webhook signature verification, prompt-injection boundaries, opt-out enforcement and a global outbound kill switch are required for live mode.
+- Operational security: allowlisted administrator login, encrypted per-agent credentials (with optional env-only provider defaults that are never logged or prompted), audit logs, webhook signature verification, prompt-injection boundaries, opt-out enforcement and a global outbound kill switch are required for live mode.
 
 ## 18. Detailed behavioural requirements
 
@@ -240,7 +240,7 @@ Event coordination and research may be added as further templates without new ru
 
 ### 18.6 Knowledge and model configuration
 - Store personality, mission, operating instructions, engagement criteria, tool-use guidance and schedules separately as versioned text/configuration. Templates are editable defaults, not separate implementations.
-- Allow per-agent OpenRouter keys and independently configurable main and evaluator models, with budgets and fallback/error behaviour. Never expose raw provider keys to model prompts.
+- Allow an optional deployment-wide OpenRouter environment default, per-agent encrypted key overrides, and independently configurable main and evaluator models, with budgets and fallback/error behaviour. Never expose raw provider keys to model prompts.
 - Agent-scoped document uploads include PDF, TXT and Markdown initially; support FAQs, product documentation and brand guidance as content. Originals live in object storage; extracted chunks, metadata and embeddings live in PostgreSQL/pgvector.
 - Retrieve relevant passages rather than placing entire documents in the system prompt. Show citations/sources and retrieved chunks in the dashboard. Use native/MCP tools for live operational facts rather than treating static RAG as authoritative for changing data.
 
@@ -279,7 +279,7 @@ Event coordination and research may be added as further templates without new ru
 - The native playground supports quick inputs and multi-step scenarios using the production runtime with mocked or suppressed writes. Evaluation datasets are manually authored or promoted from production traces.
 - Evaluations combine deterministic assertions, model judges and human feedback. Administrators can rate, correct and save regression cases, and compare model/prompt versions side by side.
 - Orbit shows detailed execution timelines, operational metrics and goal outcomes; Langfuse stores diagnostic traces, not the authoritative job/action ledger.
-- Authentication initially supports environment-configured administrator credentials, with OAuth and magic links with allowlisted emails planned; local-only `AUTH_DISABLED` bypass is explicitly guarded. Secrets are encrypted in PostgreSQL with an external master key. Zod validates environment configuration.
+- Authentication initially supports environment-configured administrator credentials, with OAuth and magic links with allowlisted emails planned; local-only `AUTH_DISABLED` bypass is explicitly guarded. Per-agent secrets are encrypted in PostgreSQL with an external master key; optional provider defaults such as `OPENROUTER_API_KEY` may live only in the process environment. Zod validates environment configuration.
 - Web + worker + PostgreSQL deploy on Railway with Docker, Compose and per-service Railway config. RustFS provides S3-compatible object storage for files on a persistent volume; back up object data alongside PostgreSQL references. Jobs recover with reconciliation, integration failures degrade only affected capabilities, hard per-agent budgets apply, and automated backups are periodically restore-tested.
 - Evaluation and safety checks must pass before live activation, but **only an administrator** can enable live mode, pause, resume or stop an agent. The first complete release must support permitted real external actions, not merely a shadow demo.
 
