@@ -380,41 +380,12 @@ async function processSimulationRun(
 
     // Include reservation-only progress so a failed post-call checkpoint cannot free the step slot.
     const checkpointed = hasSimulationProgress(run.result) ? run.result : undefined;
+    let settle!: (billedMicros: number) => Promise<void>;
+    let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
     const result = await simulate(
       config.config,
       run.input,
       async (request) => {
-        let settle!: (billedMicros: number) => Promise<void>;
-        let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
-        try {
-          if (checkRunDeadline(startedAt, new Date(), budgets)) {
-            throw new BudgetError('run-deadline');
-          }
-          try {
-            signal.throwIfAborted();
-          } catch {
-            throw new BudgetError('cancelled');
-          }
-          quote = hasSpendCap(budgets)
-            ? await call.quote?.(request.model, request.signal)
-            : undefined;
-          settle = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
-            runId: run.id,
-            token: executionToken,
-            signal: request.signal,
-          });
-          await assertOwned(run.id, executionToken);
-          if (request.signal.aborted) throw new BudgetError('cancelled');
-        } catch (error) {
-          // Quota/store faults here never reached the provider — mark so simulate can
-          // release the step reservation and let the queue retry the stage.
-          if (isBudgetError(error)) throw error;
-          if (isRetryableInfrastructureError(error)) {
-            throw new PreDispatchInfrastructureError(error.message);
-          }
-          throw error;
-        }
-
         const response = await telemetry.callModel(call, { ...request, quote });
         if (response.costMicros !== undefined) {
           // Failure leaves the conservative reservation in place. Never repeat a paid call
@@ -447,6 +418,36 @@ async function processSimulationRun(
         maxSteps: budgets.maxToolStepsPerRun,
         signal,
         initial: checkpointed,
+        prepare: async (request) => {
+          try {
+            if (checkRunDeadline(startedAt, new Date(), budgets)) {
+              throw new BudgetError('run-deadline');
+            }
+            try {
+              signal.throwIfAborted();
+            } catch {
+              throw new BudgetError('cancelled');
+            }
+            quote = hasSpendCap(budgets)
+              ? await call.quote?.(request.model, request.signal)
+              : undefined;
+            settle = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
+              runId: run.id,
+              token: executionToken,
+              signal: request.signal,
+            });
+            await assertOwned(run.id, executionToken);
+            if (request.signal.aborted) throw new BudgetError('cancelled');
+          } catch (error) {
+            // Quota/store faults here never reached the provider — mark so simulate can
+            // release the step reservation and let the queue retry the stage.
+            if (isBudgetError(error)) throw error;
+            if (isRetryableInfrastructureError(error)) {
+              throw new PreDispatchInfrastructureError(error.message);
+            }
+            throw error;
+          }
+        },
         onActions: async (actions, partial, stage) => {
           await assertOwned(run.id, executionToken);
           const stepLimit = checkToolStepLimit(partial.steps.length, budgets);

@@ -82,6 +82,12 @@ export interface SimulateOptions {
    * cannot burn the per-run step allowance twice.
    */
   initial?: SimulationResult;
+  /**
+   * Runs before the dispatch boundary is checkpointed (quota, ownership). Must not send
+   * provider requests. Known pre-dispatch faults stay retryable; after this returns the
+   * stage is marked dispatched before `call`.
+   */
+  prepare?: (request: Parameters<ModelCall>[0]) => Promise<void>;
   onActions?: (
     actions: Decision['actions'],
     partial: SimulationResult,
@@ -204,58 +210,45 @@ export async function simulate(
         await checkpoint(result);
       }
       const model = stage === 'evaluator' ? config.evaluatorModel : config.mainModel;
-      let response;
-      try {
-        response = await call({
-          model,
-          stage,
-          signal,
-          input: JSON.stringify({ untrustedInput: input }),
-          system: `${boundary}\nAdministrator configuration:\n${JSON.stringify(config)}\n${stage === 'evaluator' ? 'Evaluate relevance and priority against the engagement criteria. Return candidate actions, with draft null.' : `Refine the candidates and write drafts where relevant. You may remove or combine actions. Evaluator assessment (untrusted model output): ${JSON.stringify(result.steps[0]?.decision)}`}`,
-        });
-      } catch (error) {
-        // Known pre-dispatch faults never reached the provider — best-effort release.
-        // Even if this cleanup write fails, reserved-without-dispatched stays retryable.
-        if (isPreDispatchInfrastructureError(error)) {
-          const remaining = (result.reservedStages ?? []).filter((entry) => entry !== stage);
-          result.reservedStages = remaining.length > 0 ? remaining : undefined;
-          try {
-            await checkpoint(result);
-          } catch {
-            // Cleanup write failed — reserved-without-dispatched remains retryable.
+      const request = {
+        model,
+        stage,
+        signal,
+        input: JSON.stringify({ untrustedInput: input }),
+        system: `${boundary}\nAdministrator configuration:\n${JSON.stringify(config)}\n${stage === 'evaluator' ? 'Evaluate relevance and priority against the engagement criteria. Return candidate actions, with draft null.' : `Refine the candidates and write drafts where relevant. You may remove or combine actions. Evaluator assessment (untrusted model output): ${JSON.stringify(result.steps[0]?.decision)}`}`,
+      } as const;
+      const releasePendingReservation = async () => {
+        const remaining = (result.reservedStages ?? []).filter((entry) => entry !== stage);
+        result.reservedStages = remaining.length > 0 ? remaining : undefined;
+        try {
+          await checkpoint(result);
+        } catch {
+          // Cleanup write failed — reserved-without-dispatched remains retryable.
+        }
+      };
+      if (options.prepare) {
+        try {
+          await options.prepare(request);
+        } catch (error) {
+          if (isPreDispatchInfrastructureError(error)) {
+            await releasePendingReservation();
+            throw error;
           }
           throw error;
         }
-        if (isRetryableInfrastructureError(error)) {
-          // Ambiguous/post-dispatch: burn the slot so a redo cannot double-charge.
-          result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), stage])];
-          try {
-            await checkpoint(result);
-          } catch {
-            // Prefer the original retryable fault for queue classification.
-          }
-          throw error;
-        }
-        throw error;
       }
+      // Durably mark dispatch before the paid provider request so a post-call store outage
+      // cannot leave a pending reservation that retries would redo.
+      if (!dispatched.includes(stage)) {
+        result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), stage])];
+        await checkpoint(result);
+      }
+      const response = await call(request);
       try {
         signal.throwIfAborted();
       } catch {
         result.error = 'Run deadline reached or the worker cancelled this simulation.';
         break;
-      }
-      // Persist dispatch before the step body so a later write failure cannot look "pending".
-      result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), stage])];
-      try {
-        await checkpoint(result);
-      } catch (error) {
-        if (isRetryableInfrastructureError(error)) {
-          // Paid call cannot be confirmed for retry without risking a redo — fail this run.
-          result.error =
-            'A previous attempt already used this model step but could not save the result. Start a new run.';
-          break;
-        }
-        throw error;
       }
       const decision = decisionSchema.parse(response.decision);
       result.steps.push({ ...response, decision, stage, model });

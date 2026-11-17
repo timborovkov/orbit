@@ -319,7 +319,7 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
   expect('runId' in queued && queued.runId).toBeTruthy();
   const runId = queued.runId!;
 
-  const { PreDispatchInfrastructureError } = await import('@/lib/runtime/errors');
+  const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
   let calls = 0;
   await expect(
     processSimulationJob({ runId, agentId: id }, () => async () => {
@@ -336,14 +336,15 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
           outputTokens: 1,
         };
       }
-      // Pre-dispatch fault: no provider request was sent, so the main reservation releases.
-      throw new PreDispatchInfrastructureError('main-stage quota blip');
+      // Post-boundary fault: dispatch was already checkpointed, so main cannot be redone.
+      throw new RetryableInfrastructureError('main-stage provider blip');
     }),
-  ).rejects.toBeInstanceOf(PreDispatchInfrastructureError);
+  ).rejects.toBeInstanceOf(RetryableInfrastructureError);
 
   const [afterFirst] = await sql`SELECT result FROM simulation_runs WHERE id=${runId}`;
   expect(afterFirst.result.steps).toHaveLength(1);
   expect(afterFirst.result.steps[0].stage).toBe('evaluator');
+  expect(afterFirst.result.dispatchedStages).toEqual(['evaluator', 'main']);
 
   await processSimulationJob({ runId, agentId: id }, () => async () => {
     calls += 1;
@@ -359,15 +360,12 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
     };
   });
 
-  // Evaluator once, failed main once, resumed main once — never a second evaluator.
-  expect(calls).toBe(3);
+  // Evaluator once, failed main once — retry must not re-dispatch either stage.
+  expect(calls).toBe(2);
   const [done] = await sql`SELECT status, result FROM simulation_runs WHERE id=${runId}`;
-  expect(done.status).toBe('completed');
-  expect(done.result.steps).toHaveLength(2);
-  expect(done.result.steps.map((step: { stage: string }) => step.stage)).toEqual([
-    'evaluator',
-    'main',
-  ]);
+  expect(done.status).toBe('failed');
+  expect(done.result.steps).toHaveLength(1);
+  expect(done.result.error).toContain('already used this model step');
 });
 
 test('queue retries keep reservation-only progress under the hard cap', async () => {

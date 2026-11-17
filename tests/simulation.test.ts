@@ -253,16 +253,22 @@ describe('bounded manual simulation', () => {
       'question',
       async (request) => {
         models.push(request.model);
-        throw new PreDispatchInfrastructureError('quota reservation db blip');
+        return { decision, inputTokens: 1, outputTokens: 1 };
       },
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      {
+        maxSteps: 2,
+        prepare: async () => {
+          throw new PreDispatchInfrastructureError('quota reservation db blip');
+        },
+      },
     ).catch((error: unknown) => error);
     expect(first).toBeInstanceOf(PreDispatchInfrastructureError);
-    expect(models).toEqual(['test/evaluator']);
+    expect(models).toEqual([]);
     expect(durable?.reservedStages).toBeUndefined();
+    expect(durable?.dispatchedStages).toBeUndefined();
     expect(durable?.steps).toHaveLength(0);
     if (!durable) throw new Error('expected release checkpoint');
 
@@ -278,18 +284,18 @@ describe('bounded manual simulation', () => {
       },
       { maxSteps: 2, initial: durable },
     );
-    expect(models).toEqual(['test/evaluator', 'test/evaluator', 'test/main']);
+    expect(models).toEqual(['test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
     expect(resumed.error).toBeNull();
   });
-  test('ambiguous post-dispatch retryables mark the stage dispatched', async () => {
+  test('provider faults after the dispatch boundary keep the stage burned', async () => {
     const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
     let durable: SimulationResult | undefined;
     const first = await simulate(
       config,
       'question',
       async () => {
-        throw new RetryableInfrastructureError('ambiguous mid-call blip');
+        throw new RetryableInfrastructureError('provider transport blip');
       },
       async (partial) => {
         durable = structuredClone(partial);
@@ -312,7 +318,7 @@ describe('bounded manual simulation', () => {
       'question',
       async (request) => {
         models.push(request.model);
-        throw new PreDispatchInfrastructureError('quota reservation db blip');
+        return { decision, inputTokens: 1, outputTokens: 1 };
       },
       async (partial) => {
         // First write reserves; cleanup tries to clear and fails — pending reservation remains.
@@ -325,10 +331,16 @@ describe('bounded manual simulation', () => {
         }
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      {
+        maxSteps: 2,
+        prepare: async () => {
+          throw new PreDispatchInfrastructureError('quota reservation db blip');
+        },
+      },
     ).catch((error: unknown) => error);
     expect(first).toBeInstanceOf(PreDispatchInfrastructureError);
     expect(releaseAttempts).toBe(1);
+    expect(models).toEqual([]);
     expect(durable?.reservedStages).toEqual(['evaluator']);
     expect(durable?.dispatchedStages).toBeUndefined();
     if (!durable) throw new Error('expected pending reservation');
@@ -345,7 +357,7 @@ describe('bounded manual simulation', () => {
       },
       { maxSteps: 2, initial: durable },
     );
-    expect(models).toEqual(['test/evaluator', 'test/evaluator', 'test/main']);
+    expect(models).toEqual(['test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
     expect(resumed.error).toBeNull();
   });
@@ -363,8 +375,8 @@ describe('bounded manual simulation', () => {
         return { decision, inputTokens: 1, outputTokens: 1 };
       },
       async (partial) => {
-        // Mimic a durable store: only commit on success. After dispatch is marked, the step
-        // body write fails — retry must see dispatchedStages and refuse a redo.
+        // Dispatch is marked before the provider call. The later step-body write fails —
+        // retry must still see dispatchedStages and refuse a redo.
         if (failStepCheckpoint && partial.steps.some((step) => step.stage === 'evaluator')) {
           failStepCheckpoint = false;
           throw new RetryableInfrastructureError('post-call checkpoint blip');
@@ -399,6 +411,51 @@ describe('bounded manual simulation', () => {
     expect(resumed.dispatchedStages).toEqual(['evaluator']);
     expect(resumed.error).toContain('already used this model step');
   });
+  test('dispatch checkpoint before the provider call survives a total post-call outage', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    let failAfterDispatch = false;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        failAfterDispatch = true;
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        if (failAfterDispatch && (partial.dispatchedStages?.includes('evaluator') ?? false)) {
+          // Reject every write after the dispatch boundary, including the step body and
+          // the final catch checkpoint — durable state stays at pre-call dispatch mark.
+          throw new RetryableInfrastructureError('total post-call store outage');
+        }
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(RetryableInfrastructureError);
+    expect(models).toEqual(['test/evaluator']);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.steps).toHaveLength(0);
+    if (!durable) throw new Error('expected pre-call dispatch checkpoint');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2, initial: durable },
+    );
+    expect(models).toEqual(['test/evaluator']);
+    expect(resumed.error).toContain('already used this model step');
+  });
   test('ownership loss at checkpoint stops before the next model stage', async () => {
     const { BudgetError } = await import('@/lib/budgets');
     let calls = 0;
@@ -412,8 +469,8 @@ describe('bounded manual simulation', () => {
       },
       async () => {
         checkpoints += 1;
-        // Allow the pre-dispatch reservation; revoke once the paid step is written.
-        if (checkpoints >= 2) throw new BudgetError('cancelled');
+        // Allow reservation + pre-call dispatch mark; revoke once the paid step is written.
+        if (checkpoints >= 3) throw new BudgetError('cancelled');
       },
     );
     expect(calls).toBe(1);
