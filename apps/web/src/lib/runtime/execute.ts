@@ -694,6 +694,8 @@ async function processSimulationRun(
           return;
         } catch {
           try {
+            // Burn markers must be durable before an ordinary queue retry, or the next
+            // attempt would redispatch the paid stage.
             await db()
               .update(runs)
               .set({ result: burned })
@@ -709,6 +711,9 @@ async function processSimulationRun(
               runId: run.id,
               traceId: telemetry.traceId,
             });
+            // Not durable — do not Retryable-requeue (that would redispatch). Fall through to
+            // the non-retryable failure path which best-effort marks the run failed.
+            throw new Error(PAID_STEP_BURN_MESSAGE);
           }
           throw new RetryableInfrastructureError(
             'Paid step burn finalization pending; will retry without redistributing the call.',
@@ -728,25 +733,31 @@ async function processSimulationRun(
     if (isBudgetError(error)) {
       inspectable = error.message;
       isBudget = true;
+    } else if (error instanceof Error && error.message === PAID_STEP_BURN_MESSAGE) {
+      inspectable = PAID_STEP_BURN_MESSAGE;
     } else if (error instanceof Error && error.message === 'Missing OpenRouter credential') {
       inspectable =
         'No OpenRouter credential available. Save an agent key under Access or set OPENROUTER_API_KEY on the server.';
     }
-    await db()
-      .update(runs)
-      .set({
-        status: 'failed',
-        finishedAt: new Date(),
-        deferReason: isBudget ? inspectable : null,
-        result: sql`jsonb_set(${runs.result}, '{error}', to_jsonb(${inspectable}::text))`,
-      })
-      .where(
-        and(
-          eq(runs.id, run.id),
-          eq(runs.status, 'running'),
-          eq(runs.executionToken, executionToken),
-        ),
-      );
+    try {
+      await db()
+        .update(runs)
+        .set({
+          status: 'failed',
+          finishedAt: new Date(),
+          deferReason: isBudget ? inspectable : null,
+          result: sql`jsonb_set(${runs.result}, '{error}', to_jsonb(${inspectable}::text))`,
+        })
+        .where(
+          and(
+            eq(runs.id, run.id),
+            eq(runs.status, 'running'),
+            eq(runs.executionToken, executionToken),
+          ),
+        );
+    } catch {
+      void reportFailure('worker.settlement', { runId: run.id, traceId: telemetry.traceId });
+    }
   } finally {
     telemetry.finish(!didComplete);
   }

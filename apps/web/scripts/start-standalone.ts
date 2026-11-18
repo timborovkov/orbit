@@ -26,17 +26,38 @@ if (existsSync(publicSrc)) {
   cpSync(publicSrc, publicDest, { recursive: true });
 }
 
+function portFromArgv(argv: string[]): string | undefined {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--port' || arg === '-p') return argv[i + 1];
+    if (arg.startsWith('--port=')) return arg.slice('--port='.length);
+  }
+  return undefined;
+}
+
+const port = portFromArgv(process.argv.slice(2)) ?? process.env.PORT ?? '3000';
+if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+  console.error('PORT must be 1–65535');
+  process.exit(1);
+}
+
 const child = spawn(process.execPath, ['--bun', 'apps/web/server.js'], {
   cwd: standaloneRoot,
   env: {
     ...process.env,
     HOSTNAME: process.env.HOSTNAME ?? '0.0.0.0',
-    PORT: process.env.PORT ?? '3000',
+    PORT: port,
   },
   stdio: 'inherit',
 });
 
-child.on('exit', (code, signal) => {
-  if (signal) process.kill(process.pid, signal);
-  process.exit(code ?? 1);
+process.once('SIGINT', () => child.kill('SIGINT'));
+process.once('SIGTERM', () => child.kill('SIGTERM'));
+
+process.exitCode = await new Promise<number>((resolve, reject) => {
+  child.once('exit', (code, signal) => {
+    if (signal) resolve(1);
+    else resolve(code ?? 1);
+  });
+  child.once('error', reject);
 });
