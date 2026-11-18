@@ -1,3 +1,5 @@
+import * as Sentry from '@sentry/nextjs';
+
 export async function register() {
   if (
     process.env.NEXT_RUNTIME === 'nodejs' &&
@@ -15,11 +17,16 @@ export async function register() {
       process.exit(1);
     }
   }
-}
 
-export async function onRequestError() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { reportFailure } = await import('@/lib/runtime/telemetry');
-    await reportFailure('web.request');
+    await import('@/sentry.server.config');
+    const { ensureTelemetryContext } = await import('@/lib/observability/telemetry');
+    ensureTelemetryContext();
+  }
+
+  if (process.env.NEXT_RUNTIME === 'edge') {
+    await import('@/sentry.edge.config');
   }
 }
+
+export const onRequestError = Sentry.captureRequestError;
