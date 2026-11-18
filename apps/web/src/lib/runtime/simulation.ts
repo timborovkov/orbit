@@ -1,3 +1,4 @@
+import type { TelemetryOptions } from 'ai';
 import { z } from 'zod';
 
 import { isBudgetError } from '@/lib/budgets';
@@ -47,6 +48,7 @@ export type ModelCall = ((request: {
   signal: AbortSignal;
   stage?: 'evaluator' | 'main';
   quote?: InferenceQuote;
+  telemetry?: TelemetryOptions;
 }) => Promise<ModelResult>) & {
   quote?: (model: string, signal: AbortSignal) => Promise<InferenceQuote | undefined>;
 };
