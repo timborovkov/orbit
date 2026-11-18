@@ -132,27 +132,33 @@ export async function persistMcpConnection(
           .set({ toolNames: [] })
           .where(eq(agentMcpConnections.connectionId, connectionId));
       } else {
-        const remainingReadOnly =
-          input.toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [];
+        const remainingReadOnly = new Set(
+          input.toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [],
+        );
         // Dropped or reclassified entries require a fresh grant if enabled again later.
         const attachments = await tx
           .select()
           .from(agentMcpConnections)
           .where(eq(agentMcpConnections.connectionId, connectionId));
-        for (const attachment of attachments) {
-          const toolNames = attachment.toolNames.filter((name) => remainingReadOnly.includes(name));
-          if (toolNames.length !== attachment.toolNames.length) {
-            await tx
+        const pruned = attachments.flatMap((attachment) => {
+          const toolNames = attachment.toolNames.filter((name) => remainingReadOnly.has(name));
+          return toolNames.length === attachment.toolNames.length
+            ? []
+            : [{ agentId: attachment.agentId, toolNames }];
+        });
+        await Promise.all(
+          pruned.map(({ agentId, toolNames }) =>
+            tx
               .update(agentMcpConnections)
               .set({ toolNames })
               .where(
                 and(
-                  eq(agentMcpConnections.agentId, attachment.agentId),
+                  eq(agentMcpConnections.agentId, agentId),
                   eq(agentMcpConnections.connectionId, connectionId),
                 ),
-              );
-          }
-        }
+              ),
+          ),
+        );
       }
       await tx.insert(audit).values({
         actor,

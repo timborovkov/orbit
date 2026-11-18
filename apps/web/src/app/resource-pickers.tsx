@@ -164,6 +164,7 @@ export function McpPicker({
                   {connections.map((connection) => {
                     const id = `mcp-${connection.id}`;
                     const grants = selected[connection.id];
+                    const grantSet = grants ? new Set(grants) : null;
                     return (
                       <div key={connection.id}>
                         <Field orientation="horizontal" className="approval-tool-row">
@@ -187,7 +188,7 @@ export function McpPicker({
                             aria-label={connection.name}
                           />
                         </Field>
-                        {grants && (
+                        {grants && grantSet && (
                           <FieldSet className="ms-4 gap-0 pb-3">
                             <FieldLegend className="sr-only">
                               {connection.name} read-only tools
@@ -204,7 +205,7 @@ export function McpPicker({
                                 <FieldLabel htmlFor={`${id}-tool-${index}`}>{name}</FieldLabel>
                                 <Checkbox
                                   id={`${id}-tool-${index}`}
-                                  checked={grants.includes(name)}
+                                  checked={grantSet.has(name)}
                                   onCheckedChange={(value) => {
                                     setSelected((previous) => {
                                       const current = previous[connection.id] ?? [];
