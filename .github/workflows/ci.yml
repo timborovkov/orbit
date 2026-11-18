@@ -155,3 +155,27 @@ jobs:
           ORBIT_ADMIN_EMAIL: admin@example.com
           ORBIT_ADMIN_PASSWORD: test-only-password-123456
           ORBIT_ENCRYPTION_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - name: Start RustFS for knowledge objects
+        run: |
+          docker compose up -d --wait rustfs
+          bun run storage:setup
+        env:
+          S3_ENDPOINT: http://localhost:9000
+          S3_BUCKET: orbit
+          S3_ACCESS_KEY_ID: orbit_local
+          S3_SECRET_ACCESS_KEY: orbit_local_storage_only
+      - name: Test knowledge RAG pipeline
+        run: bun run test:knowledge
+        env:
+          DATABASE_URL: postgres://orbit:orbit_dev@localhost:5432/orbit_test
+          APP_URL: http://localhost:3000
+          AUTH_DISABLED: 'false'
+          ORBIT_ADMIN_EMAIL: admin@example.com
+          ORBIT_ADMIN_PASSWORD: test-only-password-123456
+          ORBIT_ENCRYPTION_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          S3_ENDPOINT: http://localhost:9000
+          S3_REGION: us-east-1
+          S3_BUCKET: orbit
+          S3_ACCESS_KEY_ID: orbit_local
+          S3_SECRET_ACCESS_KEY: orbit_local_storage_only
+          KNOWLEDGE_EMBEDDING_STUB: 'true'

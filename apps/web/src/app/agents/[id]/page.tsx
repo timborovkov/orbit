@@ -7,6 +7,7 @@ import { AccessPanel } from '@/app/access-panel';
 import { AgentAvatar } from '@/app/agent-avatar';
 import { BudgetSettings } from '@/app/budget-settings';
 import { ConfigFields } from '@/app/config-fields';
+import { KnowledgePanel } from '@/app/knowledge-panel';
 import { LifecycleControls } from '@/app/lifecycle-controls';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { ConsentSettings, ProposalReview, ReviewSettings } from '@/app/policy-settings';
@@ -21,6 +22,7 @@ import { env } from '@/lib/env';
 import { formatUtcTimestamp } from '@/lib/format';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
+import { listKnowledgeDocuments } from '@/lib/server/knowledge-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
 
@@ -42,12 +44,16 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     consents,
     usage,
   } = workspace;
+  const knowledgeDocuments = await listKnowledgeDocuments(id);
   const lifecycle = agent.lifecycle;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const viewedHistory = history;
   const latest = history.at(0);
   const hasPendingRuns = history.some(
     (run) => run.displayStatus === 'queued' || run.displayStatus === 'running',
+  );
+  const hasPendingKnowledge = knowledgeDocuments.some(
+    (doc) => doc.status === 'pending' || doc.status === 'processing',
   );
   const versionFor = (configurationId: string) =>
     versions.find((version) => version.id === configurationId)?.version;
@@ -273,11 +279,23 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
             <span className="muted">{openRouterConnectionLabel(keySource)}</span>
           </div>
         </div>
-        <PendingRunRefresh active={hasPendingRuns} />
+        <PendingRunRefresh active={hasPendingRuns || hasPendingKnowledge} />
         <WorkspaceTabs
           items={[
             { id: 'configure', label: 'Configuration', content: configuration },
             { id: 'playground', label: 'Playground', content: playground },
+            {
+              id: 'knowledge',
+              label: 'Knowledge',
+              count: knowledgeDocuments.length,
+              content: (
+                <KnowledgePanel
+                  agentId={id}
+                  documents={knowledgeDocuments}
+                  storageReady={storageConfigured()}
+                />
+              ),
+            },
             { id: 'history', label: 'History', count: history.length, content: historyPanel },
             {
               id: 'approvals',

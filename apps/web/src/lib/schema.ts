@@ -10,13 +10,17 @@ import {
   timestamp,
   unique,
   uuid,
+  vector,
 } from 'drizzle-orm/pg-core';
 
 import type { AgentBudgets } from '@/lib/budgets';
+import type { KnowledgeContentKind, KnowledgeDocumentStatus } from '@/lib/knowledge/types';
 import type { LifecycleState } from '@/lib/lifecycle';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import type { AgentConfig } from '@/lib/runtime/config';
 import type { SimulationResult } from '@/lib/runtime/simulation';
+
+const KNOWLEDGE_EMBEDDING_DIMENSIONS = 1536;
 
 export const sessions = pgTable('sessions', {
   tokenHash: text('token_hash').primaryKey(),
@@ -181,4 +185,50 @@ export const recipientConsents = pgTable(
     actor: text('actor').notNull(),
   },
   (table) => [primaryKey({ columns: [table.agentId, table.recipient, table.scope] })],
+);
+
+export const knowledgeDocuments = pgTable('knowledge_documents', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  agentId: uuid('agent_id')
+    .notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  filename: text('filename').notNull(),
+  title: text('title').notNull(),
+  contentKind: text('content_kind').$type<KnowledgeContentKind>().notNull(),
+  mimeType: text('mime_type').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  objectKey: text('object_key').notNull(),
+  status: text('status').$type<KnowledgeDocumentStatus>().notNull().default('pending'),
+  error: text('error'),
+  chunkCount: integer('chunk_count').notNull().default(0),
+  embeddedCount: integer('embedded_count').notNull().default(0),
+  contentHash: text('content_hash'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+});
+
+export const knowledgeChunks = pgTable(
+  'knowledge_chunks',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => knowledgeDocuments.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    chunkIndex: integer('chunk_index').notNull(),
+    content: text('content').notNull(),
+    contentHash: text('content_hash').notNull(),
+    sourceFilename: text('source_filename').notNull(),
+    sourceTitle: text('source_title').notNull(),
+    page: integer('page'),
+    section: text('section'),
+    startOffset: integer('start_offset').notNull(),
+    endOffset: integer('end_offset').notNull(),
+    embedding: vector('embedding', { dimensions: KNOWLEDGE_EMBEDDING_DIMENSIONS }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique().on(table.documentId, table.chunkIndex)],
 );

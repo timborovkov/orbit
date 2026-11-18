@@ -193,12 +193,17 @@ status. Its save bar is separated by a top border and subtle fill. Identity,
 Behaviour and Models section buttons show one field group at a time; hidden fields
 remain mounted. Invalid required fields reveal their section before receiving focus.
 
-Task tabs are Configuration, Playground, History, Approvals and Access, with one keyboard tab
+Task tabs are Configuration, Playground, Knowledge, History, Approvals and Access, with one keyboard tab
 stop plus Left/Right/Home/End navigation. Hidden panels remain mounted, preserving
 unsaved configuration and pasted input when changing tasks. Configuration presents
 one editor and one save bar. Playground places a composer beside the latest persisted
 result and explicitly names paid inference and suppressed external actions. Empty
 results explain what will appear; failures and interrupted runs show actual state.
+Knowledge is list-first: the document library leads, with an upload control, per-row
+status labels (pending/processing/ready/failed), and reprocess/replace/delete actions
+using the shared Button variants. The retrieval inspector sits beside the list on wide
+screens and stacks below on narrow ones; empty library and empty inspector states use
+dashed subtle panels with a short explanation, matching Playground/History empties.
 History uses native details/summary for run content and exact configuration snapshots.
 History shows the provider’s recorded cost and labels missing cost explicitly.
 Access stacks lifecycle, budget, approval requirements, recipient consent and
@@ -213,9 +218,10 @@ default or none—by label only, never by value or prefix. It accepts a password
 for an agent override, clears it after submission and never reads the secret back.
 Removing an agent key falls back to the environment default when configured; otherwise
 it retains a visible missing-key state. History shows queued/running/completed/failed/
-interrupted run states and linked job status. While any run is queued or running, the
-workspace soft-refreshes every two seconds so Playground and History pick up worker
-results without a manual reload. No loading skeletons on Access.
+interrupted run states and linked job status. While any run is queued or running, or any
+knowledge document is pending/processing, the workspace soft-refreshes every two seconds
+so Playground, History and Knowledge pick up worker results without a manual reload.
+No loading skeletons on Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents
@@ -411,3 +417,11 @@ as the non-root runtime user. Captures are saved in
 `.impeccable/review/profile-picture-Light-1440.png` and
 `.impeccable/review/profile-picture-Dark-390.png`. No remote infrastructure was
 provisioned and no real OpenRouter call was made during this milestone.
+
+### Agent knowledge library — 18 November 2026
+
+The Knowledge tab is list-first: documents with explicit pending/processing/ready/failed
+status, then a retrieval inspector. Upload uses the shared outline Button; row actions
+use ghost/destructive Button sizes. Empty library and empty inspector states mirror
+Playground/History dashed panels. Wide layouts place the inspector beside the list;
+below 900px they stack. Soft refresh also covers in-flight knowledge jobs.
