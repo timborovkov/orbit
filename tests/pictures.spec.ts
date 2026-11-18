@@ -27,9 +27,13 @@ test('private agent pictures survive RustFS restart, preserve edits and support 
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   for (const name of ['John', 'Sarah']) {
     await page.getByRole('button', { name: 'Create agent', exact: true }).click();
+    await page.getByLabel('Template', { exact: true }).click();
     await page
-      .getByLabel('Template', { exact: true })
-      .selectOption({ label: name === 'John' ? 'Sales and GTM' : 'Customer Support' });
+      .getByRole('option', {
+        name: name === 'John' ? 'Sales and GTM' : 'Customer Support',
+        exact: true,
+      })
+      .click();
     await page.getByLabel(/^Name/).fill(name);
     await page.getByRole('button', { name: 'Create shadow agent' }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();

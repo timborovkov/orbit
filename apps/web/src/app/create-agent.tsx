@@ -5,10 +5,21 @@ import { Plus, X } from 'lucide-react';
 
 import { createAgent } from '@/actions/agents';
 import { Button } from '@/components/ui/button';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 
 const empty = {
   name: '',
   mission: '',
+  templateId: 'blank',
   error: '',
   errors: {} as { name?: string[]; mission?: string[] },
 };
@@ -25,6 +36,8 @@ export function CreateAgent({
   function close() {
     dialog.current?.close();
   }
+  const nameInvalid = Boolean(form.errors.name?.length);
+  const missionInvalid = Boolean(form.errors.mission?.length);
   return (
     <>
       <Button
@@ -89,71 +102,92 @@ export function CreateAgent({
           }}
         >
           <fieldset aria-disabled={pending}>
-            <label htmlFor="agent-template">Template</label>
-            <select
-              id="agent-template"
-              name="templateId"
-              defaultValue="blank"
-              disabled={pending}
-              onChange={(event) => {
-                const template = templates.find((item) => item.id === event.target.value);
-                setForm((previous) => ({ ...previous, mission: template?.mission ?? '' }));
-              }}
-            >
-              {templates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.title}
-                </option>
-              ))}
-            </select>
-            <label htmlFor="agent-name">
-              Name <span className="field-required">Required</span>
-            </label>
-            <input
-              ref={nameInput}
-              id="agent-name"
-              name="name"
-              value={form.name}
-              onChange={(e) => {
-                setForm((previous) => ({ ...previous, name: e.target.value }));
-              }}
-              readOnly={pending}
-              maxLength={80}
-              required
-              autoComplete="off"
-              aria-invalid={Boolean(form.errors.name?.length)}
-              aria-describedby={form.errors.name?.length ? 'name-error' : undefined}
-            />
-            {form.errors.name?.length ? (
-              <p id="name-error" className="field-error">
-                Enter a name with 1–80 characters.
-              </p>
-            ) : null}
-            <label htmlFor="agent-mission">
-              Mission <span className="field-required">Required</span>
-            </label>
-            <textarea
-              ref={missionInput}
-              id="agent-mission"
-              name="mission"
-              value={form.mission}
-              onChange={(e) => {
-                setForm((previous) => ({ ...previous, mission: e.target.value }));
-              }}
-              readOnly={pending}
-              maxLength={2000}
-              required
-              aria-invalid={Boolean(form.errors.mission?.length)}
-              aria-describedby={form.errors.mission?.length ? 'mission-error' : 'mission-hint'}
-            />
-            {form.errors.mission?.length ? (
-              <p id="mission-error" className="field-error">
-                Enter a mission with 1–2,000 characters.
-              </p>
-            ) : null}
-            <p id="mission-hint" className="field-hint">
-              Describe the outcome this agent should work towards.
-            </p>
+            <FieldGroup className="gap-5">
+              <Field>
+                <FieldLabel htmlFor="agent-template">Template</FieldLabel>
+                <input type="hidden" name="templateId" value={form.templateId} />
+                <Select
+                  value={form.templateId}
+                  disabled={pending}
+                  onValueChange={(value) => {
+                    const template = templates.find((item) => item.id === value);
+                    setForm((previous) => ({
+                      ...previous,
+                      templateId: value,
+                      mission: template?.mission ?? '',
+                    }));
+                  }}
+                >
+                  <SelectTrigger id="agent-template" className="w-full" aria-label="Template">
+                    <SelectValue placeholder="Choose a template" />
+                  </SelectTrigger>
+                  <SelectContent portalled={false} position="popper" className="z-[100]">
+                    {templates.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        {template.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  Choosing a template fills the mission. Existing agents are never changed.
+                </FieldDescription>
+              </Field>
+              <Field data-invalid={nameInvalid || undefined}>
+                <FieldLabel htmlFor="agent-name">
+                  Name <span className="field-required">Required</span>
+                </FieldLabel>
+                <Input
+                  ref={nameInput}
+                  id="agent-name"
+                  name="name"
+                  value={form.name}
+                  onChange={(e) => {
+                    setForm((previous) => ({ ...previous, name: e.target.value }));
+                  }}
+                  readOnly={pending}
+                  maxLength={80}
+                  required
+                  autoComplete="off"
+                  aria-invalid={nameInvalid || undefined}
+                  aria-describedby={nameInvalid ? 'name-error' : undefined}
+                  className="m-0"
+                />
+                {nameInvalid ? (
+                  <FieldError id="name-error">Enter a name with 1–80 characters.</FieldError>
+                ) : null}
+              </Field>
+              <Field data-invalid={missionInvalid || undefined}>
+                <FieldLabel htmlFor="agent-mission">
+                  Mission <span className="field-required">Required</span>
+                </FieldLabel>
+                <Textarea
+                  ref={missionInput}
+                  id="agent-mission"
+                  name="mission"
+                  value={form.mission}
+                  onChange={(e) => {
+                    setForm((previous) => ({ ...previous, mission: e.target.value }));
+                  }}
+                  readOnly={pending}
+                  maxLength={2000}
+                  required
+                  rows={5}
+                  aria-invalid={missionInvalid || undefined}
+                  aria-describedby={missionInvalid ? 'mission-error' : 'mission-hint'}
+                  className="m-0 min-h-28"
+                />
+                {missionInvalid ? (
+                  <FieldError id="mission-error">
+                    Enter a mission with 1–2,000 characters.
+                  </FieldError>
+                ) : (
+                  <FieldDescription id="mission-hint">
+                    Describe the outcome this agent should work towards.
+                  </FieldDescription>
+                )}
+              </Field>
+            </FieldGroup>
           </fieldset>
           {form.error ? (
             <p role="alert" className="form-error">

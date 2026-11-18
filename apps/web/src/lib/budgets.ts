@@ -27,6 +27,11 @@ export const budgetsSchema = z.object({
 
 export type AgentBudgets = z.infer<typeof budgetsSchema>;
 
+/** Period-specific accessible name for spend-cap switches (visible text stays "No cap"). */
+export function budgetNoCapAriaLabel(fieldKey: 'dailySpendCents' | 'monthlySpendCents'): string {
+  return fieldKey === 'dailySpendCents' ? 'No cap for daily spend' : 'No cap for monthly spend';
+}
+
 export const budgetFields = [
   {
     key: 'dailySpendCents',

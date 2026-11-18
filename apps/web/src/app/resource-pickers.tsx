@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { saveAgentMcpConnections } from '@/actions/mcp';
 import { saveAgentSkills } from '@/actions/skills';
 import { WorkspaceForm } from '@/app/workspace-form';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Field,
@@ -50,36 +51,48 @@ export function SkillPicker({
               <input key={`hidden-${skill.id}`} type="hidden" name="skillId" value={skill.id} />
             ) : null,
           )}
-          <FieldSet>
-            <FieldLegend variant="label">Library skills</FieldLegend>
-            <FieldDescription>Select the skills this agent may load during a run.</FieldDescription>
-            <FieldGroup className="resource-picker-list gap-0" data-slot="checkbox-group">
-              {skills.map((skill) => {
-                const id = `skill-${skill.id}`;
-                return (
-                  <Field key={skill.id} orientation="horizontal" className="resource-picker-row">
-                    <div className="resource-picker-copy">
-                      <FieldLabel htmlFor={id} className="font-medium">
-                        {skill.title}
-                      </FieldLabel>
-                      <FieldDescription>
-                        {skill.name} · v{skill.version}
-                      </FieldDescription>
-                      <FieldDescription>{skill.description}</FieldDescription>
-                    </div>
-                    <Checkbox
-                      id={id}
-                      checked={checked[skill.id]}
-                      onCheckedChange={(value) => {
-                        setChecked((previous) => ({ ...previous, [skill.id]: value === true }));
-                      }}
-                      aria-label={skill.title}
-                    />
-                  </Field>
-                );
-              })}
-            </FieldGroup>
-          </FieldSet>
+          <Card className="budget-card shadow-none">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Library skills</CardTitle>
+              <CardDescription>Select the skills this agent may load during a run.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FieldSet>
+                <FieldLegend className="sr-only">Library skills</FieldLegend>
+                <FieldGroup className="approval-tool-list gap-0" data-slot="checkbox-group">
+                  {skills.map((skill) => {
+                    const id = `skill-${skill.id}`;
+                    return (
+                      <Field key={skill.id} orientation="horizontal" className="approval-tool-row">
+                        <div className="approval-tool-copy">
+                          <FieldLabel htmlFor={id} className="font-medium">
+                            {skill.title}
+                          </FieldLabel>
+                          <FieldDescription>
+                            {skill.name} · v{skill.version}
+                          </FieldDescription>
+                          <FieldDescription className="text-pretty">
+                            {skill.description}
+                          </FieldDescription>
+                        </div>
+                        <Checkbox
+                          id={id}
+                          checked={checked[skill.id]}
+                          onCheckedChange={(value) => {
+                            setChecked((previous) => ({
+                              ...previous,
+                              [skill.id]: value === true,
+                            }));
+                          }}
+                          aria-label={skill.title}
+                        />
+                      </Field>
+                    );
+                  })}
+                </FieldGroup>
+              </FieldSet>
+            </CardContent>
+          </Card>
         </WorkspaceForm>
       )}
     </section>
@@ -128,44 +141,51 @@ export function McpPicker({
               />
             ) : null,
           )}
-          <FieldSet>
-            <FieldLegend variant="label">Library connections</FieldLegend>
-            <FieldDescription>
-              Select the MCP servers this agent may call during a run.
-            </FieldDescription>
-            <FieldGroup className="resource-picker-list gap-0" data-slot="checkbox-group">
-              {connections.map((connection) => {
-                const id = `mcp-${connection.id}`;
-                return (
-                  <Field
-                    key={connection.id}
-                    orientation="horizontal"
-                    className="resource-picker-row"
-                  >
-                    <div className="resource-picker-copy">
-                      <FieldLabel htmlFor={id} className="font-medium">
-                        {connection.name}
-                      </FieldLabel>
-                      <FieldDescription>
-                        {connection.transport.toUpperCase()} · {connection.url}
-                      </FieldDescription>
-                    </div>
-                    <Checkbox
-                      id={id}
-                      checked={checked[connection.id]}
-                      onCheckedChange={(value) => {
-                        setChecked((previous) => ({
-                          ...previous,
-                          [connection.id]: value === true,
-                        }));
-                      }}
-                      aria-label={connection.name}
-                    />
-                  </Field>
-                );
-              })}
-            </FieldGroup>
-          </FieldSet>
+          <Card className="budget-card shadow-none">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Library connections</CardTitle>
+              <CardDescription>
+                Select the MCP servers this agent may call during a run.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FieldSet>
+                <FieldLegend className="sr-only">Library connections</FieldLegend>
+                <FieldGroup className="approval-tool-list gap-0" data-slot="checkbox-group">
+                  {connections.map((connection) => {
+                    const id = `mcp-${connection.id}`;
+                    return (
+                      <Field
+                        key={connection.id}
+                        orientation="horizontal"
+                        className="approval-tool-row"
+                      >
+                        <div className="approval-tool-copy">
+                          <FieldLabel htmlFor={id} className="font-medium">
+                            {connection.name}
+                          </FieldLabel>
+                          <FieldDescription className="text-pretty">
+                            {connection.transport.toUpperCase()} · {connection.url}
+                          </FieldDescription>
+                        </div>
+                        <Checkbox
+                          id={id}
+                          checked={checked[connection.id]}
+                          onCheckedChange={(value) => {
+                            setChecked((previous) => ({
+                              ...previous,
+                              [connection.id]: value === true,
+                            }));
+                          }}
+                          aria-label={connection.name}
+                        />
+                      </Field>
+                    );
+                  })}
+                </FieldGroup>
+              </FieldSet>
+            </CardContent>
+          </Card>
         </WorkspaceForm>
       )}
     </section>

@@ -7,6 +7,13 @@ import { setGlobalPause } from '@/actions/controls';
 import { AgentAvatar } from '@/app/agent-avatar';
 import { CreateAgent } from '@/app/create-agent';
 import { ThemeSwitch } from '@/app/theme';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { env } from '@/lib/env';
 import { formatUtcTimestamp } from '@/lib/format';
@@ -151,17 +158,18 @@ export default async function Home() {
                   </table>
                 </div>
               ) : (
-                <div className="empty-state">
-                  <span className="empty-icon">
-                    <Users size={22} strokeWidth={1.5} />
-                  </span>
-                  <h3>No agents yet</h3>
-                  <p>
-                    Create an agent to define its identity and mission.
-                    <br />
-                    New agents start in shadow mode, with external writes suppressed.
-                  </p>
-                </div>
+                <Empty className="empty-state border-0 py-10 md:py-12">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <Users size={22} strokeWidth={1.5} aria-hidden="true" />
+                    </EmptyMedia>
+                    <EmptyTitle>No agents yet</EmptyTitle>
+                    <EmptyDescription>
+                      Create an agent to define its identity and mission. New agents start in shadow
+                      mode, with external writes suppressed.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               )}
               <div className="section-footnote">
                 <LockKeyhole size={13} />
@@ -219,7 +227,16 @@ export default async function Home() {
                 </li>
               ))}
             </ol>
-            {!events.length && <p className="activity-empty">No workspace activity yet.</p>}
+            {!events.length && (
+              <Empty className="activity-empty border-0 p-0 md:p-0">
+                <EmptyHeader>
+                  <EmptyTitle className="text-sm font-medium">No workspace activity yet</EmptyTitle>
+                  <EmptyDescription>
+                    Agent creation, lifecycle changes and reviews will show up here.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )}
           </section>
         </div>
         <footer className="app-footer">

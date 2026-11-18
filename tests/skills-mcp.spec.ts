@@ -107,7 +107,8 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
 
   await page.goto('/');
   await page.getByRole('button', { name: 'Create agent', exact: true }).click();
-  await page.getByLabel('Template', { exact: true }).selectOption({ label: 'Customer Support' });
+  await page.getByRole('combobox', { name: 'Template', exact: true }).click();
+  await page.getByRole('option', { name: 'Customer Support', exact: true }).click();
   await page.getByLabel(/^Name/).fill('Support desk');
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
@@ -155,14 +156,33 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
 
   for (const mode of ['light', 'dark'] as const) {
     await setTheme(page, mode);
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(agentUrl);
     await page.getByRole('tab', { name: 'Access', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: 'Access sections' })
+      .getByRole('button', { name: 'Skills' })
+      .click();
     await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'MCP connections', exact: true })).toBeVisible();
     await expect(page.getByText('Research brief').first()).toBeVisible();
+    await shot(page, `access-skills-desktop-${mode}`, { width: 1440, height: 900 });
+    await page
+      .getByRole('navigation', { name: 'Access sections' })
+      .getByRole('button', { name: 'MCP' })
+      .click();
+    await expect(page.getByRole('heading', { name: 'MCP connections', exact: true })).toBeVisible();
     await expect(page.getByText('docs-mcp').first()).toBeVisible();
-    await shot(page, `access-pickers-desktop-${mode}`, { width: 1440, height: 900 });
-    await shot(page, `access-pickers-mobile-${mode}`, { width: 390, height: 844 });
+    await shot(page, `access-mcp-desktop-${mode}`, { width: 1440, height: 900 });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByLabel('Access section').click();
+    await page.getByRole('option', { name: 'Skills', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible();
+    await shot(page, `access-skills-mobile-${mode}`, { width: 390, height: 844 });
+    await page.getByLabel('Access section').click();
+    await page.getByRole('option', { name: 'MCP', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'MCP connections', exact: true })).toBeVisible();
+    await shot(page, `access-mcp-mobile-${mode}`, { width: 390, height: 844 });
   }
 
   await setTheme(page, 'light');

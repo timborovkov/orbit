@@ -15,16 +15,17 @@ export async function checkOrigin() {
   const origin = (await headers()).get('origin');
   if (origin !== new URL(env().APP_URL).origin) throw new Error('Invalid request origin');
 }
-export async function requireAdmin() {
+
+/** Resolve the admin session without redirecting — for Route Handlers and APIs. */
+export async function getAdminEmail(): Promise<string | null> {
   const config = env();
   if (config.AUTH_DISABLED) {
     const host = (await headers()).get('host');
-    if (host !== new URL(config.APP_URL).host)
-      throw new Error('Local development request host does not match APP_URL');
+    if (host !== new URL(config.APP_URL).host) return null;
     return config.AUTH_LOCAL_ADMIN_EMAIL;
   }
   const token = (await cookies()).get('orbit-session')?.value;
-  if (!token) redirect('/login');
+  if (!token) return null;
   const found = await db()
     .select()
     .from(sessions)
@@ -36,9 +37,13 @@ export async function requireAdmin() {
         eq(sessions.credentialHash, hash(config.ORBIT_ADMIN_PASSWORD)),
       ),
     );
-  const session = found.at(0);
-  if (!session) redirect('/login');
-  return session.email;
+  return found.at(0)?.email ?? null;
+}
+
+export async function requireAdmin() {
+  const email = await getAdminEmail();
+  if (!email) redirect('/login');
+  return email;
 }
 async function createSession() {
   const token = randomBytes(32).toString('hex');
