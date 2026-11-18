@@ -1932,24 +1932,41 @@ fieldset[aria-disabled='true'] textarea {
 .knowledge-inspector-form {
   margin-top: 16px;
 }
-.knowledge-inspector-query {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
+/* Reset global form `input` margins/height so the InputGroup stays a single 40px row. */
+.knowledge-inspector-form .knowledge-inspector-query {
+  background: var(--surface);
+  height: 40px !important;
+  min-height: 40px !important;
+  overflow: hidden;
+  align-items: center;
 }
-.knowledge-inspector-query-input {
-  flex: 1;
-  min-width: 0;
-  height: 36px;
-  min-height: 36px;
+.knowledge-inspector-form .knowledge-inspector-query [data-slot='input-group-control'] {
+  display: flex !important;
+  width: auto !important;
+  flex: 1 1 auto;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px;
+  margin: 0 !important;
+  padding-block: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
 }
-.knowledge-inspector-query-button {
-  height: 36px;
-  min-height: 36px;
-  flex-shrink: 0;
+.knowledge-inspector-form .knowledge-inspector-query [data-slot='input-group-addon'] {
+  height: 100%;
+  padding-block: 0;
+  padding-inline-end: 4px;
+  align-items: center;
 }
-.knowledge-inspector-query-button:disabled,
-.knowledge-inspector-query-button[aria-disabled='true'] {
+.knowledge-inspector-form .knowledge-inspector-query [data-slot='button'] {
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px;
+  padding-block: 0;
+}
+.knowledge-inspector-form .knowledge-inspector-query [data-slot='button']:disabled,
+.knowledge-inspector-form .knowledge-inspector-query [data-slot='button'][aria-disabled='true'] {
   opacity: 0.45;
   color: var(--button-ink);
   background: var(--button);
