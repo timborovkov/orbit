@@ -735,10 +735,12 @@ export const PromptInput = ({
       <input
         accept={accept}
         aria-label="Upload files"
-        className="hidden"
+        className="sr-only"
+        hidden
         multiple={multiple}
         onChange={handleChange}
         ref={inputRef}
+        tabIndex={-1}
         title="Upload files"
         type="file"
       />

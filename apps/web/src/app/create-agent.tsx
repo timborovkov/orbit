@@ -7,11 +7,19 @@ import { createAgent } from '@/actions/agents';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
 const empty = {
   name: '',
   mission: '',
+  templateId: 'blank',
   error: '',
   errors: {} as { name?: string[]; mission?: string[] },
 };
@@ -97,24 +105,30 @@ export function CreateAgent({
             <FieldGroup className="gap-5">
               <Field>
                 <FieldLabel htmlFor="agent-template">Template</FieldLabel>
-                <select
-                  id="agent-template"
-                  name="templateId"
-                  aria-label="Template"
-                  defaultValue="blank"
+                <input type="hidden" name="templateId" value={form.templateId} />
+                <Select
+                  value={form.templateId}
                   disabled={pending}
-                  className="m-0 h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30"
-                  onChange={(event) => {
-                    const template = templates.find((item) => item.id === event.target.value);
-                    setForm((previous) => ({ ...previous, mission: template?.mission ?? '' }));
+                  onValueChange={(value) => {
+                    const template = templates.find((item) => item.id === value);
+                    setForm((previous) => ({
+                      ...previous,
+                      templateId: value,
+                      mission: template?.mission ?? '',
+                    }));
                   }}
                 >
-                  {templates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.title}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="agent-template" className="w-full" aria-label="Template">
+                    <SelectValue placeholder="Choose a template" />
+                  </SelectTrigger>
+                  <SelectContent portalled={false} position="popper" className="z-[100]">
+                    {templates.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        {template.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <FieldDescription>
                   Choosing a template fills the mission. Existing agents are never changed.
                 </FieldDescription>

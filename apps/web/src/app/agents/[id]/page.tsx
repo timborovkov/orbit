@@ -3,14 +3,12 @@ import { ChevronDown, History } from 'lucide-react';
 import { z } from 'zod';
 
 import { saveConfiguration } from '@/actions/workspace';
-import { AccessPanel } from '@/app/access-panel';
+import { AccessWorkbench } from '@/app/access-workbench';
 import { AgentAvatar } from '@/app/agent-avatar';
-import { BudgetSettings } from '@/app/budget-settings';
 import { ConfigFields } from '@/app/config-fields';
-import { LifecycleControls } from '@/app/lifecycle-controls';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { PlaygroundChat } from '@/app/playground-chat';
-import { ConsentSettings, ProposalReview, ReviewSettings } from '@/app/policy-settings';
+import { ProposalReview } from '@/app/policy-settings';
 import { ProfilePictureEditor } from '@/app/profile-picture-editor';
 import { RunContent } from '@/app/run-content';
 import { WorkspaceForm } from '@/app/workspace-form';
@@ -76,18 +74,17 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     </section>
   );
   const access = (
-    <div className="access-stack">
-      <LifecycleControls agentId={id} lifecycle={lifecycle} />
-      <BudgetSettings agentId={id} budgets={agent.budgets} usage={usage} />
-      <ReviewSettings agentId={id} approvalTools={agent.approvalTools} />
-      <ConsentSettings agentId={id} consents={consents} />
-      <AccessPanel
-        agentId={id}
-        agentName={agent.name}
-        hasAgentCredential={hasAgentCredential}
-        keySource={keySource}
-      />
-    </div>
+    <AccessWorkbench
+      agentId={id}
+      agentName={agent.name}
+      lifecycle={lifecycle}
+      budgets={agent.budgets}
+      usage={usage}
+      approvalTools={agent.approvalTools}
+      consents={consents}
+      hasAgentCredential={hasAgentCredential}
+      keySource={keySource}
+    />
   );
   const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;
   const playground = (

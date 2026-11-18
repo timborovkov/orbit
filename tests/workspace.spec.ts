@@ -20,7 +20,8 @@ test('template copies, independent versions, encrypted keys and durable manual r
     ['Sarah', 'Customer Support'],
   ]) {
     await page.getByRole('button', { name: 'Create agent', exact: true }).click();
-    await page.getByLabel('Template', { exact: true }).selectOption({ label: template });
+    await page.getByLabel('Template', { exact: true }).click();
+    await page.getByRole('option', { name: template, exact: true }).click();
     await page.getByLabel(/^Name/).fill(name);
     await expect(page.getByLabel(/^Mission/)).not.toHaveValue('');
     await page.getByRole('button', { name: 'Create shadow agent' }).click();
@@ -68,6 +69,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
   }
   await page.getByRole('radio', { name: 'Light', exact: true }).check();
   await page.getByRole('tab', { name: 'Access', exact: true }).click();
+  await page.getByRole('button', { name: 'OpenRouter', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'No key available', exact: true })).toBeVisible();
   await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
   for (const width of [1440, 390]) {
@@ -102,19 +104,20 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await expect(page.getByRole('heading', { name: 'No key available', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Playground', exact: true }).click();
   const input = 'Can you help me with product setup and choosing a plan?';
-  await expect(page.getByLabel('Configuration version')).toHaveValue(
-    (await sql`SELECT id FROM agent_configurations WHERE agent_id=${john.id} AND version=2`)[0].id,
-  );
-  await page.getByLabel('Configuration version').selectOption({ label: 'Version 1 · John' });
+  const version2 = (
+    await sql`SELECT id FROM agent_configurations WHERE agent_id=${john.id} AND version=2`
+  )[0].id;
+  await expect(page.getByLabel('Configuration version')).toContainText('Version 2 · John');
+  expect(version2).toBeTruthy();
+  await page.getByLabel('Configuration version').click();
+  await page.getByRole('option', { name: 'Version 1 · John', exact: true }).click();
   await page.getByRole('tab', { name: 'Playground', exact: true }).click();
   await page.getByLabel(/^Post or question/).fill(input);
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
   await expect(page.getByText('Simulation queued', { exact: false })).toBeVisible({
     timeout: 15000,
   });
-  await expect(page.getByLabel('Configuration version').locator('option:checked')).toHaveText(
-    'Version 1 · John',
-  );
+  await expect(page.getByLabel('Configuration version')).toContainText('Version 1 · John');
   await page.getByRole('tab', { name: /^History/ }).click();
   await expect
     .poll(async () => page.locator('#history .state-label').first().textContent(), {
@@ -164,6 +167,9 @@ test('template copies, independent versions, encrypted keys and durable manual r
         await page.getByRole('button', { name: 'Identity', exact: true }).click();
         for (const tab of ['Playground', 'History', 'Access']) {
           await page.getByRole('tab', { name: new RegExp('^' + tab) }).click();
+          if (tab === 'Access') {
+            await page.getByRole('button', { name: 'OpenRouter', exact: true }).click();
+          }
           expect(
             await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
           ).toBe(true);

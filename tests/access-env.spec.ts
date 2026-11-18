@@ -16,13 +16,15 @@ test('Access tab shows environment default and agent override without revealing 
   await page.getByLabel(/^Password/).fill('test-only-password-123456');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.getByRole('button', { name: 'Create agent', exact: true }).click();
-  await page.getByLabel('Template', { exact: true }).selectOption({ label: 'Blank' });
+  await page.getByLabel('Template', { exact: true }).click();
+  await page.getByRole('option', { name: 'Blank', exact: true }).click();
   await page.getByLabel(/^Name/).fill('Env Default Agent');
   await page.getByLabel(/^Mission/).fill('Use the server OpenRouter key by default.');
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.getByRole('link', { name: 'Env Default Agent', exact: true }).click();
   await page.getByRole('tab', { name: 'Access', exact: true }).click();
+  await page.getByRole('button', { name: 'OpenRouter', exact: true }).click();
 
   await expect(
     page.getByRole('heading', { name: 'Using environment default', exact: true }),

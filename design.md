@@ -204,14 +204,18 @@ and interrupted runs show actual state. Paid inference and simulation-only actio
 explicit.
 History uses native details/summary for run content and exact configuration snapshots.
 History shows the provider’s recorded cost and labels missing cost explicitly.
-Access stacks lifecycle, budget, approval requirements, recipient consent and
-OpenRouter connection settings in one column. Daily and monthly spend limits use
-numeric fields paired with independently labelled No cap checkboxes. Consent
-records pair a recipient ID with a scope, choice and evidence reference. Playground
-accepts the same IDs for consent checks in an optional disclosure. Approvals shows
-the pending queue first, with the draft and explicit approve and reject controls.
-Lifecycle options show the current state and clearly label Live as simulation-only
-until adapters are configured. Access also shows which OpenRouter key source is active—agent key, environment
+Access uses a Configuration-style left nav (Lifecycle, Budgets, Approvals, Consent,
+OpenRouter) with one section visible at a time. Budgets use card groups and a two-column
+desktop grid, with No cap Switches beside spend fields and inline unit suffixes. Approval
+requirements use shadcn Checkbox rows (label, description, control). Consent and Playground
+version pickers use shadcn Select. Lifecycle uses radio-card rows with consistent actions.
+Playground is a single chat column: toolbar settings (version Select, recipients Collapsible),
+AI Elements Conversation with status/Loader messages, and PromptInput (attachments button +
+chips, one bordered composer, PromptInputSubmit with ArrowUp). Task tabs stay a scrollable
+tablist with edge fades on narrow viewports. Consent records pair a recipient ID with a scope, choice
+and evidence reference. Approvals shows the pending queue first, with the draft and explicit
+approve and reject controls. Lifecycle clearly labels Live as simulation-only until adapters
+are configured. Access also shows which OpenRouter key source is active—agent key, environment
 default or none—by label only, never by value or prefix. It accepts a password input
 for an agent override, clears it after submission and never reads the secret back.
 Removing an agent key falls back to the environment default when configured; otherwise

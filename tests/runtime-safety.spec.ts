@@ -39,6 +39,7 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
   await expect(page.getByText('Shadow', { exact: true }).first()).toBeVisible();
 
   await page.getByRole('tab', { name: 'Access' }).click();
+  await page.getByRole('button', { name: 'Lifecycle', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Lifecycle', exact: true })).toBeVisible();
   await expect(
     page.getByText('no external action adapters exist yet', { exact: false }),
@@ -46,17 +47,18 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
   await page.getByRole('button', { name: 'Set Paused', exact: true }).click();
   // Lifecycle form unmounts on success (Current replaces the button), so assert durable UI.
   await expect(page.locator('.agent-name-line .state-label')).toContainText('Paused');
-  await expect(page.locator('#lifecycle .lifecycle-option.selected h3')).toHaveText('Paused');
+  await expect(page.locator('#lifecycle .lifecycle-card.is-selected h3')).toHaveText('Paused');
 
   await page.getByRole('button', { name: 'Set Live', exact: true }).click();
   await expect(page.locator('.agent-name-line .state-label')).toContainText('Live');
-  await expect(page.locator('#lifecycle .lifecycle-option.selected h3')).toHaveText('Live');
+  await expect(page.locator('#lifecycle .lifecycle-card.is-selected h3')).toHaveText('Live');
   await expect(
     page.getByText('no external action adapters exist yet', { exact: false }),
   ).toBeVisible();
 
+  await page.getByRole('button', { name: 'Budgets', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Budgets', exact: true })).toBeVisible();
-  await page.getByLabel('Max tool steps per run').fill('8');
+  await page.getByLabel('Max tool steps', { exact: true }).fill('8');
   await page.getByRole('button', { name: 'Save budgets', exact: true }).click();
   await expect(page.getByText('Budgets saved.', { exact: false })).toBeVisible();
 
@@ -97,14 +99,17 @@ test('administrators control independent spend caps, consent and proposal review
   await createAgent(page, 'Review Agent');
   await page.getByRole('link', { name: 'Review Agent' }).click();
   await page.getByRole('tab', { name: 'Access' }).click();
-  const dailyCap = page.getByRole('checkbox', { name: /No cap for daily/ });
-  await dailyCap.check();
-  await page.getByLabel('Monthly OpenRouter spend cap (USD cents)', { exact: true }).fill('450');
+  await page.getByRole('button', { name: 'Budgets', exact: true }).click();
+  const dailyCap = page.getByRole('switch', { name: /No cap for daily/ });
+  await dailyCap.click();
+  await expect(dailyCap).toHaveAttribute('aria-checked', 'true');
+  await page.getByLabel('Monthly spend', { exact: true }).fill('450');
   await page.getByRole('button', { name: 'Save budgets', exact: true }).click();
   await expect(page.getByText('Budgets saved.')).toBeVisible();
   const [agent] = await sql`SELECT id, budgets FROM agents WHERE name='Review Agent'`;
   expect(agent.budgets).toMatchObject({ dailySpendCents: null, monthlySpendCents: 450 });
 
+  await page.getByRole('button', { name: 'Consent', exact: true }).click();
   await page
     .getByLabel('Recipient ID', { exact: false })
     .filter({ visible: true })
@@ -115,10 +120,12 @@ test('administrators control independent spend caps, consent and proposal review
   await page.getByRole('button', { name: 'Save consent', exact: true }).click();
   await expect(page.getByText('Consent recorded.')).toBeVisible();
   await expect(page.getByRole('list', { name: 'Recent consent records' })).toContainText('Granted');
-  await page.getByLabel('Recipient decision').selectOption('revoke');
+  await page.getByLabel('Recipient decision').click();
+  await page.getByRole('option', { name: 'Revoke', exact: true }).click();
   await page.getByRole('button', { name: 'Save consent', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Recent consent records' })).toContainText('Revoked');
 
+  await page.getByRole('button', { name: 'Approvals', exact: true }).click();
   await page.getByRole('checkbox', { name: 'Reply', exact: true }).check();
   await page.getByRole('button', { name: 'Save approval requirements', exact: true }).click();
   await expect(page.getByText('Approval requirements saved.')).toBeVisible();

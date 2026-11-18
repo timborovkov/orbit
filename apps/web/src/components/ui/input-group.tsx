@@ -99,10 +99,13 @@ function InputGroupButton({
   ...props
 }: Omit<React.ComponentProps<typeof Button>, 'size'> &
   VariantProps<typeof inputGroupButtonVariants>) {
+  const buttonSize =
+    size === 'icon-xs' || size === 'icon-sm' ? 'icon' : size === 'sm' ? 'sm' : 'xs';
   return (
     <Button
       type={type}
       data-size={size}
+      size={buttonSize}
       variant={variant}
       className={cn(inputGroupButtonVariants({ size }), className)}
       {...props}

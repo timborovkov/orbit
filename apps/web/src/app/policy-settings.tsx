@@ -1,6 +1,7 @@
 import { Inbox } from 'lucide-react';
 
-import { reviewProposal, saveApprovalTools, saveConsent } from '@/actions/policy';
+import { reviewProposal, saveConsent } from '@/actions/policy';
+import { ApprovalToolsForm } from '@/app/approval-tools-form';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
 import {
@@ -10,15 +11,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from '@/components/ui/field';
-import { proposalTypes } from '@/lib/policy/scopes';
+import { FieldGroup } from '@/components/ui/field';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
 type Workspace = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>;
@@ -40,41 +33,13 @@ export function ReviewSettings({
   agentId: string;
   approvalTools: string[];
 }) {
-  const requiredTools = new Set(approvalTools);
   return (
     <section className="access-workbench">
       <div className="editor-section-heading">
         <h2>Approval requirements</h2>
         <p className="muted">Introductions and escalations always require consent and approval.</p>
       </div>
-      <WorkspaceForm action={saveApprovalTools} label="Save approval requirements">
-        <input type="hidden" name="agentId" value={agentId} />
-        <FieldSet>
-          <FieldLegend variant="label">Other actions requiring approval</FieldLegend>
-          <FieldDescription>
-            Select actions that must wait for an administrator decision before they can proceed.
-          </FieldDescription>
-          <FieldGroup className="policy-options gap-3" data-slot="checkbox-group">
-            {proposalTypes
-              .filter((tool) => tool !== 'introduce' && tool !== 'escalate')
-              .map((tool) => (
-                <Field key={tool} orientation="horizontal" className="w-fit max-w-full gap-2">
-                  <input
-                    id={`approval-tool-${tool}`}
-                    type="checkbox"
-                    name="tool"
-                    value={tool}
-                    defaultChecked={requiredTools.has(tool)}
-                    className="m-0 size-4 w-4 shrink-0"
-                  />
-                  <FieldLabel htmlFor={`approval-tool-${tool}`} className="w-fit font-normal">
-                    {actionLabels[tool]}
-                  </FieldLabel>
-                </Field>
-              ))}
-          </FieldGroup>
-        </FieldSet>
-      </WorkspaceForm>
+      <ApprovalToolsForm agentId={agentId} approvalTools={approvalTools} />
     </section>
   );
 }

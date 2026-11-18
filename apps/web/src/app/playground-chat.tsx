@@ -4,7 +4,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, isToolUIPart, type ChatStatus, type UIMessage } from 'ai';
-import { FlaskConical, ShieldCheck } from 'lucide-react';
+import {
+  ArrowUp,
+  ChevronDown,
+  Eraser,
+  FlaskConical,
+  Paperclip,
+  ShieldCheck,
+  TriangleAlert,
+} from 'lucide-react';
 
 import {
   Conversation,
@@ -16,11 +24,16 @@ import { Loader } from '@/components/ai-elements/loader';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import {
   PromptInput,
+  PromptInputAttachment,
+  PromptInputAttachments,
   PromptInputBody,
+  PromptInputButton,
   PromptInputFooter,
+  PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
+  usePromptInputAttachments,
   type PromptInputMessage,
 } from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
@@ -32,8 +45,16 @@ import {
   ToolOutput,
 } from '@/components/ai-elements/tool';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 interface AgentVersion {
@@ -46,6 +67,14 @@ function lifecycleBlockMessage(lifecycle: string) {
   return lifecycle === 'paused'
     ? 'This agent is paused. Resume it under Access before queueing simulations.'
     : 'This agent is stopped. Change its lifecycle under Access before queueing simulations.';
+}
+
+function isStatusText(text: string) {
+  return (
+    text.startsWith('Simulation queued') ||
+    text.startsWith('Timed out waiting') ||
+    text.includes('No OpenRouter credential')
+  );
 }
 
 export function PlaygroundChat({
@@ -68,6 +97,7 @@ export function PlaygroundChat({
   const configurationId = configurationOverride ?? currentConfigurationId;
   const [recipient, setRecipient] = useState('');
   const [otherRecipient, setOtherRecipient] = useState('');
+  const [recipientsOpen, setRecipientsOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const bodyRef = useRef({ configurationId, recipient, otherRecipient });
   useEffect(() => {
@@ -120,9 +150,25 @@ export function PlaygroundChat({
 
   return (
     <div className="playground-chat">
-      <div className="editor-section-heading">
-        <h2>Test a conversation</h2>
-        <p className="muted">See how {agentName} would respond to a post or question.</p>
+      <div className="editor-section-heading playground-chat-heading">
+        <div>
+          <h2>Test a conversation</h2>
+          <p className="muted">See how {agentName} would respond to a post or question.</p>
+        </div>
+        {messages.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="playground-clear"
+            onClick={() => {
+              setMessages([]);
+            }}
+            disabled={busy}
+          >
+            <Eraser size={16} aria-hidden="true" />
+            Clear conversation
+          </Button>
+        )}
       </div>
 
       {!canSimulate && (
@@ -132,32 +178,156 @@ export function PlaygroundChat({
         </div>
       )}
 
+      <div className="playground-toolbar">
+        <Field className="playground-version-field gap-2">
+          <FieldLabel htmlFor="run-version">Configuration version</FieldLabel>
+          <Select value={configurationId} onValueChange={setConfigurationOverride} disabled={busy}>
+            <SelectTrigger
+              id="run-version"
+              className="w-full min-w-0"
+              aria-label="Configuration version"
+            >
+              <SelectValue placeholder="Choose a version" />
+            </SelectTrigger>
+            <SelectContent>
+              {versions.map((version) => (
+                <SelectItem key={version.id} value={version.id}>
+                  Version {version.version} · {version.config.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <FieldDescription>Paid model inference runs on the Bun worker.</FieldDescription>
+        </Field>
+
+        <Collapsible
+          open={recipientsOpen}
+          onOpenChange={setRecipientsOpen}
+          className="playground-recipients"
+        >
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="outline" className="playground-recipients-trigger">
+              Recipients for consent checks
+              <ChevronDown
+                size={16}
+                aria-hidden="true"
+                className={cn('playground-recipients-chevron', recipientsOpen && 'is-open')}
+              />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="playground-recipients-content">
+            <Field>
+              <FieldLabel htmlFor="run-recipient">Recipient ID</FieldLabel>
+              <Input
+                id="run-recipient"
+                name="recipient"
+                maxLength={120}
+                value={recipient}
+                disabled={busy}
+                onChange={(event) => {
+                  setRecipient(event.target.value);
+                }}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="run-other-recipient">
+                Second recipient ID (introductions)
+              </FieldLabel>
+              <Input
+                id="run-other-recipient"
+                name="otherRecipient"
+                maxLength={120}
+                value={otherRecipient}
+                disabled={busy}
+                onChange={(event) => {
+                  setOtherRecipient(event.target.value);
+                }}
+              />
+            </Field>
+            <p className="field-hint">Use the same IDs as the consent records in Access.</p>
+          </CollapsibleContent>
+        </Collapsible>
+      </div>
+
       <div className="playground-chat-shell">
         <PlaygroundConversation messages={messages} status={status} />
-        <PlaygroundComposer
-          versions={versions}
-          configurationId={configurationId}
-          onConfigurationIdChange={setConfigurationOverride}
-          recipient={recipient}
-          otherRecipient={otherRecipient}
-          onRecipientChange={setRecipient}
-          onOtherRecipientChange={setOtherRecipient}
-          canSimulate={canSimulate}
-          busy={busy}
-          status={status}
-          formError={formError}
-          chatError={error}
-          messageCount={messages.length}
-          onSubmit={onSubmit}
-          onStop={() => {
-            void stop();
-          }}
-          onClear={() => {
-            setMessages([]);
-          }}
-        />
+
+        <div className="playground-composer">
+          <PromptInput
+            className={cn('playground-prompt', !canSimulate && 'is-disabled')}
+            onSubmit={onSubmit}
+            accept="image/*,application/pdf,text/*"
+            multiple
+          >
+            <PromptInputHeader>
+              <PromptInputAttachments>
+                {(attachment) => <PromptInputAttachment data={attachment} />}
+              </PromptInputAttachments>
+            </PromptInputHeader>
+            <PromptInputBody>
+              <PromptInputTextarea
+                aria-label="Post or question"
+                placeholder="Paste a post or question…"
+                disabled={!canSimulate || busy}
+                maxLength={16000}
+                className="resize-none border-0 bg-transparent shadow-none focus-visible:border-0 focus-visible:ring-0"
+              />
+            </PromptInputBody>
+            <PromptInputFooter>
+              <PromptInputTools>
+                <PromptInputAttachButton disabled={!canSimulate || busy} />
+                <p className="simulation-note">
+                  <ShieldCheck size={15} aria-hidden="true" />
+                  <span>Nothing is posted or sent. Save your configuration before testing.</span>
+                </p>
+              </PromptInputTools>
+              {status === 'streaming' ? (
+                <PromptInputSubmit
+                  type="button"
+                  status={status}
+                  aria-label="Stop"
+                  size="icon-sm"
+                  className="playground-submit"
+                  onClick={() => {
+                    void stop();
+                  }}
+                />
+              ) : (
+                <PromptInputSubmit
+                  disabled={!canSimulate || busy}
+                  status={status}
+                  size="icon-sm"
+                  className="playground-submit"
+                >
+                  <ArrowUp className="size-4" aria-hidden="true" />
+                </PromptInputSubmit>
+              )}
+            </PromptInputFooter>
+          </PromptInput>
+
+          {(formError ?? error) && (
+            <p role="alert" className="form-error">
+              {formError ?? error?.message ?? 'Unable to run simulation.'}
+            </p>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+function PromptInputAttachButton({ disabled }: { disabled?: boolean }) {
+  const attachments = usePromptInputAttachments();
+  return (
+    <PromptInputButton
+      aria-label="Attach files"
+      disabled={disabled}
+      onClick={() => {
+        attachments.openFileDialog();
+      }}
+    >
+      <Paperclip className="size-4" />
+    </PromptInputButton>
   );
 }
 
@@ -171,7 +341,7 @@ function PlaygroundConversation({
   return (
     <Conversation className="playground-conversation">
       <ConversationContent>
-        {!messages.length && (
+        {!messages.length && status === 'ready' && (
           <ConversationEmptyState
             icon={<FlaskConical size={30} strokeWidth={1.25} aria-hidden="true" />}
             title="A safe place to try things"
@@ -181,183 +351,57 @@ function PlaygroundConversation({
         {messages.map((message) => (
           <PlaygroundMessage key={message.id} message={message} />
         ))}
-        {status === 'submitted' && <Loader />}
+        {status === 'submitted' && (
+          <Message from="assistant">
+            <MessageContent>
+              <div className="playground-status" role="status">
+                <Loader />
+                <span>Queueing simulation…</span>
+              </div>
+            </MessageContent>
+          </Message>
+        )}
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>
   );
 }
 
-function PlaygroundComposer({
-  versions,
-  configurationId,
-  onConfigurationIdChange,
-  recipient,
-  otherRecipient,
-  onRecipientChange,
-  onOtherRecipientChange,
-  canSimulate,
-  busy,
-  status,
-  formError,
-  chatError,
-  messageCount,
-  onSubmit,
-  onStop,
-  onClear,
-}: {
-  versions: AgentVersion[];
-  configurationId: string;
-  onConfigurationIdChange: (id: string) => void;
-  recipient: string;
-  otherRecipient: string;
-  onRecipientChange: (value: string) => void;
-  onOtherRecipientChange: (value: string) => void;
-  canSimulate: boolean;
-  busy: boolean;
-  status: ChatStatus;
-  formError: string | null;
-  chatError: Error | undefined;
-  messageCount: number;
-  onSubmit: (message: PromptInputMessage) => Promise<void>;
-  onStop: () => void;
-  onClear: () => void;
-}) {
+function PlaygroundStatusPart({ text }: { text: string }) {
+  const failed = /failed|error|credential|timed out/i.test(text);
   return (
-    <div className="playground-composer">
-      <Field>
-        <FieldLabel htmlFor="run-version">Configuration version</FieldLabel>
-        <select
-          id="run-version"
-          aria-label="Configuration version"
-          value={configurationId}
-          disabled={busy}
-          className={cn(
-            'h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs outline-none',
-            'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 md:text-sm',
-          )}
-          onChange={(event) => {
-            onConfigurationIdChange(event.target.value);
-          }}
-        >
-          {versions.map((version) => (
-            <option key={version.id} value={version.id}>
-              Version {version.version} · {version.config.name}
-            </option>
-          ))}
-        </select>
-        <FieldDescription>Paid model inference runs on the Bun worker.</FieldDescription>
-      </Field>
-
-      <details className="policy-recipients">
-        <summary>Recipients for consent checks</summary>
-        <Field>
-          <FieldLabel htmlFor="run-recipient">Recipient ID</FieldLabel>
-          <Input
-            id="run-recipient"
-            name="recipient"
-            maxLength={120}
-            value={recipient}
-            disabled={busy}
-            onChange={(event) => {
-              onRecipientChange(event.target.value);
-            }}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="run-other-recipient">Second recipient ID (introductions)</FieldLabel>
-          <Input
-            id="run-other-recipient"
-            name="otherRecipient"
-            maxLength={120}
-            value={otherRecipient}
-            disabled={busy}
-            onChange={(event) => {
-              onOtherRecipientChange(event.target.value);
-            }}
-          />
-        </Field>
-        <p className="field-hint">Use the same IDs as the consent records in Access.</p>
-      </details>
-
-      <PromptInput
-        className={cn('playground-prompt', !canSimulate && 'is-disabled')}
-        onSubmit={onSubmit}
-      >
-        <PromptInputBody>
-          <PromptInputTextarea
-            aria-label="Post or question"
-            placeholder="Paste a post or question…"
-            disabled={!canSimulate || busy}
-            maxLength={16000}
-          />
-        </PromptInputBody>
-        <PromptInputFooter>
-          <PromptInputTools>
-            <p className="simulation-note">
-              <ShieldCheck size={15} aria-hidden="true" />
-              <span>Nothing is posted or sent. Save your configuration before testing.</span>
-            </p>
-          </PromptInputTools>
-          {status === 'streaming' ? (
-            <PromptInputSubmit type="button" status={status} aria-label="Stop" onClick={onStop} />
-          ) : (
-            <PromptInputSubmit disabled={!canSimulate || busy} status={status} />
-          )}
-        </PromptInputFooter>
-      </PromptInput>
-
-      {(formError ?? chatError) && (
-        <p role="alert" className="form-error">
-          {formError ?? chatError?.message ?? 'Unable to run simulation.'}
-        </p>
-      )}
-
-      {messageCount > 0 && (
-        <Button
-          type="button"
-          variant="ghost"
-          className="playground-clear"
-          onClick={onClear}
-          disabled={busy}
-        >
-          Clear conversation
-        </Button>
-      )}
+    <div className={cn('playground-status', failed && 'is-error')} role="status">
+      {failed ? <TriangleAlert size={16} aria-hidden="true" /> : <Loader />}
+      <span>{text}</span>
     </div>
   );
 }
 
-function PlaygroundMessagePart({
-  messageId,
+function PlaygroundTextPart({ text }: { text: string }) {
+  if (isStatusText(text)) return <PlaygroundStatusPart text={text} />;
+  return <MessageResponse>{text}</MessageResponse>;
+}
+
+function PlaygroundReasoningPart({ text, state }: { text: string; state?: 'streaming' | 'done' }) {
+  const streaming = state === 'streaming';
+  return (
+    <Reasoning isStreaming={streaming} defaultOpen={streaming}>
+      <ReasoningTrigger />
+      <ReasoningContent>{text}</ReasoningContent>
+    </Reasoning>
+  );
+}
+
+function PlaygroundToolPart({
   part,
-  index,
 }: {
-  messageId: string;
-  part: UIMessage['parts'][number];
-  index: number;
+  part: Extract<UIMessage['parts'][number], { type: `tool-${string}` } | { type: 'dynamic-tool' }>;
 }) {
-  if (part.type === 'text') {
-    return <MessageResponse key={`${messageId}-text-${index}`}>{part.text}</MessageResponse>;
-  }
-  if (part.type === 'reasoning') {
-    return (
-      <Reasoning
-        key={`${messageId}-reasoning-${index}`}
-        isStreaming={part.state === 'streaming'}
-        defaultOpen={part.state === 'streaming'}
-      >
-        <ReasoningTrigger />
-        <ReasoningContent>{part.text}</ReasoningContent>
-      </Reasoning>
-    );
-  }
-  if (!isToolUIPart(part)) return null;
   const title = part.type.replace(/^tool-/, '');
   const toolType: `tool-${string}` =
     part.type === 'dynamic-tool' ? `tool-${title || 'action'}` : part.type;
   return (
-    <Tool key={`${messageId}-tool-${index}`} defaultOpen>
+    <Tool defaultOpen>
       <ToolHeader type={toolType} state={part.state} title={title} />
       <ToolContent>
         {'input' in part && part.input !== undefined ? <ToolInput input={part.input} /> : null}
@@ -370,6 +414,21 @@ function PlaygroundMessagePart({
       </ToolContent>
     </Tool>
   );
+}
+
+function PlaygroundMessagePart({
+  part,
+}: {
+  messageId: string;
+  part: UIMessage['parts'][number];
+  index: number;
+}) {
+  if (part.type === 'text') return <PlaygroundTextPart text={part.text} />;
+  if (part.type === 'reasoning') {
+    return <PlaygroundReasoningPart text={part.text} state={part.state} />;
+  }
+  if (!isToolUIPart(part)) return null;
+  return <PlaygroundToolPart part={part} />;
 }
 
 function PlaygroundMessage({ message }: { message: UIMessage }) {
