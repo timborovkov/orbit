@@ -244,6 +244,61 @@ describe('bounded manual simulation', () => {
     expect(resumed.steps[0].stage).toBe('evaluator');
     expect(resumed.steps[1].stage).toBe('main');
   });
+  test('resume keeps checkpointed skill attribution when the catalogue changes', async () => {
+    const checkpointed: SimulationResult = {
+      steps: [
+        {
+          stage: 'main',
+          model: 'test/main',
+          decision,
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+      ],
+      actions: decision.actions.map((action) => ({
+        ...action,
+        policy: 'suppressed' as const,
+        effect: 'Simulation only. No external action performed.',
+      })),
+      skillVersions: [
+        {
+          skillId: '00000000-0000-4000-8000-000000000099',
+          name: 'research-brief',
+          version: 3,
+          loaded: true,
+        },
+      ],
+      error: null,
+    };
+    const resumed = await simulate(
+      config,
+      'question',
+      async () => {
+        throw new Error('main must not re-run');
+      },
+      async () => {},
+      {
+        maxSteps: 2,
+        initial: checkpointed,
+        skillVersions: [
+          {
+            skillId: '00000000-0000-4000-8000-000000000099',
+            name: 'research-brief',
+            version: 99,
+            loaded: false,
+          },
+        ],
+      },
+    );
+    expect(resumed.skillVersions).toEqual([
+      {
+        skillId: '00000000-0000-4000-8000-000000000099',
+        name: 'research-brief',
+        version: 3,
+        loaded: true,
+      },
+    ]);
+  });
   test('pre-dispatch infrastructure faults release the reservation for retry', async () => {
     const { PreDispatchInfrastructureError } = await import('@/lib/runtime/errors');
     const models: string[] = [];

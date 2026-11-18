@@ -787,8 +787,13 @@ async function processSimulationRun(
         ),
       );
 
-      result.skillVersions = resources.skillVersions;
-      result.mcpConnections = resources.mcpConnections;
+      // Prefer checkpointed attribution when main already ran; otherwise use this attempt.
+      result.skillVersions = result.skillVersions?.length
+        ? result.skillVersions
+        : resources.skillVersions;
+      result.mcpConnections = result.mcpConnections?.length
+        ? result.mcpConnections
+        : resources.mcpConnections;
       result.toolCalls = resources.toolCalls;
 
       const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);

@@ -5,6 +5,7 @@ import { evaluateActionForTest } from '@/lib/policy/gateway';
 import {
   connectMcpClient,
   loadMcpToolsForAgent,
+  mcpToolAlias,
   mcpToolId,
   type McpConnectionConfig,
 } from '@/lib/runtime/mcp';
@@ -190,8 +191,8 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
       tools: ['echo'],
     },
   ]);
-  expect(Object.keys(tools)).toEqual([mcpToolId('demo', 'echo')]);
-  const result = await tools[mcpToolId('demo', 'echo')]!.execute!(
+  expect(Object.keys(tools)).toEqual([mcpToolAlias('demo', 'echo')]);
+  const result = await tools[mcpToolAlias('demo', 'echo')]!.execute!(
     { text: 'hi' },
     { ...execOptions, toolCallId: 't4' },
   );
@@ -232,7 +233,7 @@ test('MCP connection failures degrade without aborting the tool set', async () =
     },
   });
   expect(statuses.map((row) => row.status)).toEqual(['error', 'ready']);
-  expect(Object.keys(tools)).toEqual([mcpToolId('ok', 'ping')]);
+  expect(Object.keys(tools)).toEqual([mcpToolAlias('ok', 'ping')]);
   await close();
 });
 
@@ -326,8 +327,8 @@ test('MCP HTTP fake server tools register and execute through policy', async () 
     },
   });
   expect(statuses[0]?.status).toBe('ready');
-  expect(Object.keys(tools)).toEqual([mcpToolId('local-fake', 'echo')]);
-  const result = await tools[mcpToolId('local-fake', 'echo')]!.execute!(
+  expect(Object.keys(tools)).toEqual([mcpToolAlias('local-fake', 'echo')]);
+  const result = await tools[mcpToolAlias('local-fake', 'echo')]!.execute!(
     { text: 'orbit' },
     { ...execOptions, toolCallId: 't5' },
   );
@@ -361,12 +362,12 @@ test('tool step gate blocks further MCP and skill calls once exhausted', async (
         close: async () => undefined,
       }) as unknown as Awaited<ReturnType<typeof connectMcpClient>>,
   });
-  const first = await tools[mcpToolId('gated', 'a')]!.execute!(
+  const first = await tools[mcpToolAlias('gated', 'a')]!.execute!(
     {},
     { ...execOptions, toolCallId: 'g1' },
   );
   expect(first).toEqual({ ok: 1 });
-  const second = await tools[mcpToolId('gated', 'b')]!.execute!(
+  const second = await tools[mcpToolAlias('gated', 'b')]!.execute!(
     {},
     { ...execOptions, toolCallId: 'g2' },
   );
@@ -440,4 +441,14 @@ test('read-only authorization still enforces concurrency from the policy snapsho
   );
   expect(denied.decision).toBe('deny');
   expect(denied.violation).toBe('concurrency');
+});
+
+test('MCP model-facing aliases are OpenAI-compatible while policy keeps canonical ids', () => {
+  const alias = mcpToolAlias('crm', 'search');
+  expect(alias).toBe('mcp_crm_search');
+  expect(alias).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+  expect(mcpToolId('crm', 'search')).toBe('mcp:crm:search');
+  const long = mcpToolAlias('a'.repeat(80), 'b'.repeat(80));
+  expect(long.length).toBeLessThanOrEqual(64);
+  expect(long).toMatch(/^[a-zA-Z0-9_-]+$/);
 });

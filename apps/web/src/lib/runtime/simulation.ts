@@ -182,18 +182,30 @@ export async function simulate(
     ? cloneSimulationResult(options.initial)
     : { steps: [], actions: [], error: null };
   result.error = null;
-  if (options.skillVersions)
+  // Resume must keep checkpointed skill/MCP attribution — a later catalogue edit must
+  // not rewrite versions for an already-paid main decision.
+  if (options.skillVersions && !result.skillVersions?.length) {
     result.skillVersions = options.skillVersions.map((entry) => ({ ...entry }));
-  if (options.mcpConnections) {
+  }
+  if (options.mcpConnections && !result.mcpConnections?.length) {
     result.mcpConnections = options.mcpConnections.map((entry) => ({
       ...entry,
       tools: [...entry.tools],
     }));
   }
   // Share the live array so tool wrappers pushing during inference are visible to
-  // onActions / step-limit checks (a shallow copy would stay empty).
-  if (options.toolCalls) result.toolCalls = options.toolCalls;
-  else result.toolCalls ??= [];
+  // onActions / step-limit checks (a shallow copy would stay empty). Seed from the
+  // checkpoint when the caller passed a fresh collector.
+  if (options.toolCalls) {
+    if (!options.toolCalls.length && result.toolCalls?.length) {
+      options.toolCalls.push(
+        ...result.toolCalls.map((entry) => ({ ...entry, args: { ...entry.args } })),
+      );
+    }
+    result.toolCalls = options.toolCalls;
+  } else {
+    result.toolCalls ??= [];
+  }
   const providerTimeout = AbortSignal.timeout(120000);
   const signal = options.signal
     ? AbortSignal.any([providerTimeout, options.signal])

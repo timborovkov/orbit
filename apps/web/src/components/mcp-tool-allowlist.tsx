@@ -21,6 +21,7 @@ export function McpToolAllowlist({
   const [toolDraft, setToolDraft] = useState('');
   const [fetching, startFetch] = useTransition();
   const selectedTools = new Set(editor.tools);
+  const discoveredTools = new Set(editor.discovered);
 
   function addTool(name: string) {
     const trimmed = name.trim();
@@ -44,11 +45,11 @@ export function McpToolAllowlist({
         setEditor((previous) => ({ ...previous, discoverError: result.error }));
         return;
       }
-      const discovered = new Set(result.tools);
       setEditor((previous) => ({
         ...previous,
+        // Keep existing selections even when the server no longer advertises them —
+        // filtering them out would empty the allowlist and save as null (all tools).
         discovered: result.tools,
-        tools: previous.tools.length ? previous.tools.filter((tool) => discovered.has(tool)) : [],
       }));
     });
   }
@@ -63,24 +64,35 @@ export function McpToolAllowlist({
       <div className="chip-editor">
         {!!editor.tools.length && (
           <div className="chip-list" aria-live="polite">
-            {editor.tools.map((tool) => (
-              <span key={tool} className="chip">
-                {tool}
-                <button
-                  type="button"
-                  aria-label={`Remove ${tool}`}
-                  disabled={pending}
-                  onClick={() => {
-                    setEditor((previous) => ({
-                      ...previous,
-                      tools: previous.tools.filter((item) => item !== tool),
-                    }));
-                  }}
+            {editor.tools.map((tool) => {
+              const missing = editor.discovered.length > 0 && !discoveredTools.has(tool);
+              return (
+                <span
+                  key={tool}
+                  className="chip"
+                  title={
+                    missing
+                      ? 'Not in the last Fetch tools response; kept so the allowlist stays restrictive.'
+                      : undefined
+                  }
                 >
-                  <X size={14} aria-hidden="true" />
-                </button>
-              </span>
-            ))}
+                  {missing ? `${tool} · unavailable` : tool}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${tool}`}
+                    disabled={pending}
+                    onClick={() => {
+                      setEditor((previous) => ({
+                        ...previous,
+                        tools: previous.tools.filter((item) => item !== tool),
+                      }));
+                    }}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </span>
+              );
+            })}
           </div>
         )}
         <div className="chip-add-row">
