@@ -43,18 +43,75 @@ function idempotencyKey(parts: string[]) {
  * Persist run mutations only while this claim still owns the execution token.
  * A later reclaim rotates the token so stale workers cannot overwrite progress.
  */
+function mergeQuotaReservations(
+  existing: SimulationResult['quotaReservations'],
+  incoming: SimulationResult['quotaReservations'],
+): SimulationResult['quotaReservations'] {
+  if (!existing?.length && !incoming?.length) return incoming ?? existing;
+  const byStage = new Map<
+    'evaluator' | 'main',
+    NonNullable<SimulationResult['quotaReservations']>[number]
+  >();
+  for (const entry of existing ?? []) byStage.set(entry.stage, entry);
+  for (const entry of incoming ?? []) byStage.set(entry.stage, entry);
+  return [...byStage.values()];
+}
+
 async function updateIfOwned(
   runId: string,
   executionToken: string,
   values: Partial<typeof runs.$inferInsert> & { result?: SimulationResult },
 ) {
-  return await db()
-    .update(runs)
-    .set(values)
-    .where(
-      and(eq(runs.id, runId), eq(runs.status, 'running'), eq(runs.executionToken, executionToken)),
-    )
-    .returning({ id: runs.id });
+  const incoming = values.result;
+  if (!incoming) {
+    return await db()
+      .update(runs)
+      .set(values)
+      .where(
+        and(
+          eq(runs.id, runId),
+          eq(runs.status, 'running'),
+          eq(runs.executionToken, executionToken),
+        ),
+      )
+      .returning({ id: runs.id });
+  }
+  // Preserve per-stage quota rows written by reserveRequestQuota so simulate checkpoints
+  // cannot wipe idempotency keys that retries must reuse.
+  return await db().transaction(async (tx) => {
+    const current = (
+      await tx
+        .select({ id: runs.id, result: runs.result })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.id, runId),
+            eq(runs.status, 'running'),
+            eq(runs.executionToken, executionToken),
+          ),
+        )
+        .for('update')
+    ).at(0);
+    if (!current) return [];
+    const result: SimulationResult = {
+      ...incoming,
+      quotaReservations: mergeQuotaReservations(
+        current.result.quotaReservations,
+        incoming.quotaReservations,
+      ),
+    };
+    return await tx
+      .update(runs)
+      .set({ ...values, result })
+      .where(
+        and(
+          eq(runs.id, runId),
+          eq(runs.status, 'running'),
+          eq(runs.executionToken, executionToken),
+        ),
+      )
+      .returning({ id: runs.id });
+  });
 }
 
 /** Abort this claim when another worker has rotated the execution token. */
@@ -427,7 +484,7 @@ async function processSimulationRun(
         maxSteps: budgets.maxToolStepsPerRun,
         signal,
         initial: checkpointed,
-        prepare: async (request) => {
+        prepare: async (request, partial) => {
           try {
             await withOrbitSpan(
               'orbit.budget',
@@ -450,11 +507,19 @@ async function processSimulationRun(
                 quote = hasSpendCap(budgets)
                   ? await call.quote?.(request.model, request.signal)
                   : undefined;
-                settle = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
+                const stage = request.stage === 'main' ? 'main' : 'evaluator';
+                const reserved = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
                   runId: run.id,
                   token: executionToken,
                   signal: request.signal,
+                  stage,
                 });
+                settle = reserved;
+                if (reserved.reservation) {
+                  const others =
+                    partial.quotaReservations?.filter((entry) => entry.stage !== stage) ?? [];
+                  partial.quotaReservations = [...others, reserved.reservation];
+                }
                 await assertOwned(run.id, executionToken);
                 if (request.signal.aborted) throw new BudgetError('cancelled');
               },

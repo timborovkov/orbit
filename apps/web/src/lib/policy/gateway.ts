@@ -367,10 +367,16 @@ async function recordRequestUsage(
 export async function reserveRequestQuota(
   agentId: string,
   upperBoundMicros?: number,
-  execution?: { runId: string; token: string; signal: AbortSignal },
+  execution?: {
+    runId: string;
+    token: string;
+    signal: AbortSignal;
+    /** When set, reservation is idempotent per run+stage across queue retries. */
+    stage?: 'evaluator' | 'main';
+  },
 ) {
-  const reservedMicros = BigInt(upperBoundMicros ?? 0);
-  const today = await retryableStore(() =>
+  const requestedMicros = BigInt(upperBoundMicros ?? 0);
+  const outcome = await retryableStore(() =>
     db().transaction(async (tx) => {
       const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
         0,
@@ -378,10 +384,16 @@ export async function reserveRequestQuota(
       if (!agent || agent.lifecycle === 'stopped' || execution?.signal.aborted) {
         throw new BudgetError('cancelled');
       }
+      let runRow:
+        | {
+            id: string;
+            result: (typeof runs)['$inferSelect']['result'];
+          }
+        | undefined;
       if (execution) {
-        const owned = (
+        runRow = (
           await tx
-            .select({ id: runs.id })
+            .select({ id: runs.id, result: runs.result })
             .from(runs)
             .where(
               and(
@@ -392,8 +404,9 @@ export async function reserveRequestQuota(
                 sql`${runs.expiresAt} > now()`,
               ),
             )
+            .for('update')
         ).at(0);
-        if (!owned) throw new BudgetError('cancelled');
+        if (!runRow) throw new BudgetError('cancelled');
       }
       const budgets = parseBudgets(agent.budgets);
       const today = new Date().toISOString().slice(0, 10);
@@ -402,35 +415,106 @@ export async function reserveRequestQuota(
         .select()
         .from(usageCounters)
         .where(eq(usageCounters.agentId, agentId));
-      const violation = checkRequestBudgets(
-        {
-          budgets,
-          day:
-            counters.find((row) => row.period === 'day' && row.periodStart === today) ??
-            emptyUsage(),
-          month:
-            counters.find((row) => row.period === 'month' && row.periodStart === monthStart) ??
-            emptyUsage(),
-          activeRuns: 0,
-        },
-        reservedMicros,
-      );
-      if (violation) throw new BudgetError(violation);
+      const day =
+        counters.find((row) => row.period === 'day' && row.periodStart === today) ?? emptyUsage();
+      const month =
+        counters.find((row) => row.period === 'month' && row.periodStart === monthStart) ??
+        emptyUsage();
       if (upperBoundMicros === undefined && hasSpendCap(budgets))
         throw new BudgetError('unknown-price');
-      await recordRequestUsage(tx, agentId, today, reservedMicros, 1);
-      return today;
+
+      if (execution?.stage && runRow) {
+        const existing = runRow.result.quotaReservations?.find(
+          (entry) => entry.stage === execution.stage,
+        );
+        if (existing) {
+          // Settle against the original accounting day, not the retry's UTC date.
+          const periodStart = existing.periodStart;
+          let reservedMicros = BigInt(existing.reservedMicros);
+          let reservation = existing;
+          if (requestedMicros > reservedMicros) {
+            const additional = requestedMicros - reservedMicros;
+            // Request count stays idempotent; only validate/top up spend coverage.
+            for (const [period, used, cap] of [
+              ['daily-spend', day.spendMicros, budgets.dailySpendCents],
+              ['monthly-spend', month.spendMicros, budgets.monthlySpendCents],
+            ] as const) {
+              if (cap === null) continue;
+              const limit = BigInt(cap) * BigInt(10_000);
+              if (used >= limit || used + additional > limit) {
+                throw new BudgetError(period);
+              }
+            }
+            await recordRequestUsage(tx, agentId, periodStart, additional, 0);
+            reservation = {
+              stage: execution.stage,
+              reservedMicros: requestedMicros.toString(),
+              periodStart,
+            };
+            const quotaReservations = [
+              ...(runRow.result.quotaReservations ?? []).filter(
+                (entry) => entry.stage !== execution.stage,
+              ),
+              reservation,
+            ];
+            await tx
+              .update(runs)
+              .set({ result: { ...runRow.result, quotaReservations } })
+              .where(eq(runs.id, runRow.id));
+            reservedMicros = requestedMicros;
+          }
+          return {
+            today: periodStart,
+            reservedMicros,
+            reservation,
+            reused: true as const,
+          };
+        }
+      }
+
+      const violation = checkRequestBudgets(
+        { budgets, day, month, activeRuns: 0 },
+        requestedMicros,
+      );
+      if (violation) throw new BudgetError(violation);
+      await recordRequestUsage(tx, agentId, today, requestedMicros, 1);
+      const reservation =
+        execution?.stage !== undefined
+          ? {
+              stage: execution.stage,
+              reservedMicros: requestedMicros.toString(),
+              periodStart: today,
+            }
+          : undefined;
+      if (runRow && reservation) {
+        const quotaReservations = [...(runRow.result.quotaReservations ?? []), reservation];
+        await tx
+          .update(runs)
+          .set({ result: { ...runRow.result, quotaReservations } })
+          .where(eq(runs.id, runRow.id));
+      }
+      return {
+        today,
+        reservedMicros: requestedMicros,
+        reservation,
+        reused: false as const,
+      };
     }),
   );
 
   // Keep the full reservation after ambiguous failures or missing costs. Settlement is attempted
   // once per dispatch, so a connection loss during commit cannot double-apply the adjustment.
-  return async (billedMicros: number) => {
-    const adjustment = BigInt(billedMicros) - reservedMicros;
-    if (adjustment !== BigInt(0)) {
-      await db().transaction((tx) => recordRequestUsage(tx, agentId, today, adjustment, 0));
-    }
-  };
+  return Object.assign(
+    async (billedMicros: number) => {
+      const adjustment = BigInt(billedMicros) - outcome.reservedMicros;
+      if (adjustment !== BigInt(0)) {
+        await db().transaction((tx) =>
+          recordRequestUsage(tx, agentId, outcome.today, adjustment, 0),
+        );
+      }
+    },
+    { reservation: outcome.reservation, reused: outcome.reused },
+  );
 }
 
 /** Pure evaluation helper for unit tests without persistence. */
