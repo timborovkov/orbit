@@ -465,6 +465,35 @@ describe('bounded manual simulation', () => {
     expect(durable?.dispatchedStages).toEqual(['evaluator']);
     expect(durable?.error).toContain('already used this model step');
   });
+  test('paid-step unpersisted errors survive a failing final checkpoint without rethrow', async () => {
+    const { PaidStepUnpersistedError, RetryableInfrastructureError } =
+      await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    let burnSeen = false;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        throw new PaidStepUnpersistedError('evaluator');
+      },
+      async (partial) => {
+        if (partial.error?.includes('already used this model step')) {
+          burnSeen = true;
+          // Final burn checkpoint fails — must return without Retryable escape.
+          throw new RetryableInfrastructureError('final checkpoint store outage');
+        }
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    );
+    expect(models).toEqual(['test/evaluator']);
+    expect(burnSeen).toBe(true);
+    expect(first.error).toContain('already used this model step');
+    expect(first.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+  });
   test('ownership loss at checkpoint stops before the next model stage', async () => {
     const { BudgetError } = await import('@/lib/budgets');
     let calls = 0;

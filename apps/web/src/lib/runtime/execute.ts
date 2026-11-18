@@ -19,6 +19,8 @@ import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/p
 import { enqueueJob } from '@/lib/queue/jobs';
 import {
   isRetryableInfrastructureError,
+  PAID_STEP_BURN_MESSAGE,
+  PaidStepUnpersistedError,
   PreDispatchInfrastructureError,
   retryableStore,
 } from '@/lib/runtime/errors';
@@ -520,9 +522,7 @@ async function processSimulationRun(
         } catch (error) {
           if (isBudgetError(error)) throw error;
           if (isRetryableInfrastructureError(error)) {
-            throw new Error(
-              'A previous attempt already used this model step but could not save the result. Start a new run.',
-            );
+            throw new PaidStepUnpersistedError(stage);
           }
           throw error;
         }
@@ -644,14 +644,43 @@ async function processSimulationRun(
     );
 
     const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
-    await retryableStore(() =>
-      updateIfOwned(run.id, executionToken, {
-        status: terminalStatus,
-        finishedAt: new Date(),
-        result: { ...result, traceId: telemetry.traceId },
-        deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
-      }),
-    );
+    try {
+      await retryableStore(() =>
+        updateIfOwned(run.id, executionToken, {
+          status: terminalStatus,
+          finishedAt: new Date(),
+          result: { ...result, traceId: telemetry.traceId },
+          deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
+        }),
+      );
+    } catch (error) {
+      // A paid-step burn must not requeue even if the terminal write blips.
+      if (isRetryableInfrastructureError(error) && result.error === PAID_STEP_BURN_MESSAGE) {
+        try {
+          await db()
+            .update(runs)
+            .set({
+              status: 'failed',
+              finishedAt: new Date(),
+              result: { ...result, traceId: telemetry.traceId },
+            })
+            .where(
+              and(
+                eq(runs.id, run.id),
+                eq(runs.status, 'running'),
+                eq(runs.executionToken, executionToken),
+              ),
+            );
+        } catch {
+          void reportFailure('worker.settlement', {
+            runId: run.id,
+            traceId: telemetry.traceId,
+          });
+        }
+        return;
+      }
+      throw error;
+    }
     didComplete = !result.error;
   } catch (error) {
     // Leave the run non-terminal so a reclaimed job can resume after failJob retries.
