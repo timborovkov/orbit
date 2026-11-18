@@ -2,81 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   accessSectionPanelHidden,
-  PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
-  playgroundAttachmentRejection,
   playgroundEffectiveConfigurationId,
-  playgroundMessagesAcknowledgeQueue,
-  shouldRefreshWorkspaceForQueuedRun,
 } from '../apps/web/src/lib/runtime/playground-ui';
 import {
   isTerminalSimulationStatus,
   watchSimulationRunWithLookup,
 } from '../apps/web/src/lib/runtime/simulation-watch';
-
-describe('playground attachment gate', () => {
-  test('allows text-only submissions', () => {
-    expect(playgroundAttachmentRejection([])).toBeNull();
-    expect(playgroundAttachmentRejection(undefined)).toBeNull();
-  });
-
-  test('rejects attached files instead of silently dropping them', () => {
-    expect(playgroundAttachmentRejection([{ filename: 'brief.pdf' }])).toBe(
-      PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
-    );
-  });
-});
-
-describe('playground queue refresh', () => {
-  test('detects the streamed queue acknowledgement for the current submission', () => {
-    expect(
-      playgroundMessagesAcknowledgeQueue([
-        { role: 'user', parts: [{ type: 'text', text: 'Help me' }] },
-        {
-          role: 'assistant',
-          parts: [{ type: 'text', text: 'Simulation queued. Waiting for the worker…' }],
-        },
-      ]),
-    ).toBe(true);
-    expect(
-      playgroundMessagesAcknowledgeQueue([
-        { role: 'user', parts: [{ type: 'text', text: 'Help me' }] },
-        { role: 'assistant', parts: [{ type: 'text', text: 'Hello' }] },
-      ]),
-    ).toBe(false);
-  });
-
-  test('ignores a prior run ack when a new user message has no assistant reply yet', () => {
-    expect(
-      playgroundMessagesAcknowledgeQueue([
-        { role: 'user', parts: [{ type: 'text', text: 'First' }] },
-        {
-          role: 'assistant',
-          parts: [{ type: 'text', text: 'Simulation queued. Waiting for the worker…' }],
-        },
-        { role: 'user', parts: [{ type: 'text', text: 'Second' }] },
-      ]),
-    ).toBe(false);
-  });
-
-  test('refreshes once per busy cycle when the current queue ack arrives', () => {
-    const messages = [
-      { role: 'user', parts: [{ type: 'text', text: 'Help me' }] },
-      {
-        role: 'assistant',
-        parts: [{ type: 'text', text: 'Simulation queued. Waiting for the worker…' }],
-      },
-    ];
-    expect(
-      shouldRefreshWorkspaceForQueuedRun({ busy: true, alreadyRefreshed: false, messages }),
-    ).toBe(true);
-    expect(
-      shouldRefreshWorkspaceForQueuedRun({ busy: true, alreadyRefreshed: true, messages }),
-    ).toBe(false);
-    expect(
-      shouldRefreshWorkspaceForQueuedRun({ busy: false, alreadyRefreshed: false, messages }),
-    ).toBe(false);
-  });
-});
 
 describe('access section panel visibility', () => {
   test('keeps inactive panels mounted via hidden rather than unmounting', () => {

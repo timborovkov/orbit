@@ -16,9 +16,13 @@ confirm its OpenRouter key source (agent override or environment default), then 
 an input and inspect the resulting decisions.
 
 FIRST VIEWPORT: Compact branded breadcrumb header; identity and version row;
-Configuration/Playground/History/Access tabs. Configuration has a narrow section
-navigator, one readable editor pane and a save bar. Playground places the input
-beside its latest persisted result. Mobile changes to a single column.
+Configuration, Playground, History, Approvals and Access tabs. Configuration has a
+narrow section navigator, one editor pane and a save bar. Playground uses one column
+at every width. It shows the latest persisted run above the version and recipient
+controls and the chat composer. The run card stays available after reload and shows
+the final outcome when the worker finishes. Stop watching links to the run in History.
+Workspace tabs and the Access navigator switch to Select controls at their compact
+breakpoints.
 
 FORM: No concept-seed round was conducted. The existing user direction “Vercel
 inspired” pins the brand, not this composition. The editor composition is an

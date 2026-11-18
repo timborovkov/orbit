@@ -3,18 +3,38 @@ import 'server-only';
 import { eq } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
+import { budgetViolationMessage } from '@/lib/budgets';
 import { db } from '@/lib/db';
-import { watchSimulationRunWithLookup } from '@/lib/runtime/simulation-watch';
+import {
+  isExpiredSimulationRun,
+  watchSimulationRunWithLookup,
+} from '@/lib/runtime/simulation-watch';
 import { runs } from '@/lib/schema';
-
-async function lookupSimulationRunById(runId: string) {
-  return (await db().select().from(runs).where(eq(runs.id, runId))).at(0) ?? null;
-}
 
 /** Authorized lookup of a simulation run for playground stream polling. */
 async function getSimulationRun(runId: string) {
   await requireAdmin();
-  return lookupSimulationRunById(runId);
+  const rows = await db()
+    .select({
+      id: runs.id,
+      status: runs.status,
+      result: runs.result,
+      deferReason: runs.deferReason,
+      expiresAt: runs.expiresAt,
+    })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+  const run = rows.at(0);
+  if (!run) return null;
+  if (isExpiredSimulationRun(run)) {
+    return {
+      ...run,
+      status: 'interrupted' as const,
+      deferReason: budgetViolationMessage('run-deadline'),
+    };
+  }
+  return run;
 }
 
 interface WatchOptions {

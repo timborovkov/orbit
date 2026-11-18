@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import {
   Select,
@@ -16,8 +17,31 @@ export function WorkspaceTabs({
   items: { id: string; label: string; count?: number; content: React.ReactNode }[];
 }) {
   const prefix = useId();
-  const [selected, setSelected] = useState(items[0]?.id);
+  const [selectedTab, setSelectedTab] = useState<string>();
   const [compact, setCompact] = useState(false);
+  const openedHistoryRun = useRef<HTMLDetailsElement | null>(null);
+  const historyRunId = useSearchParams().get('run');
+  const selected = historyRunId ? 'history' : (selectedTab ?? items.at(0)?.id);
+
+  function selectTab(id: string) {
+    if (id !== 'history' && historyRunId) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('run');
+      window.history.replaceState(null, '', url);
+      openedHistoryRun.current = null;
+    }
+    setSelectedTab(id);
+  }
+
+  useEffect(() => {
+    if (!historyRunId) return;
+    const run = document.getElementById(`run-${historyRunId}`);
+    if (!(run instanceof HTMLDetailsElement) || openedHistoryRun.current === run) return;
+    openedHistoryRun.current = run;
+    run.open = true;
+    run.scrollIntoView({ block: 'start' });
+    run.querySelector('summary')?.focus({ preventScroll: true });
+  }, [historyRunId, items]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 600px)');
@@ -32,11 +56,11 @@ export function WorkspaceTabs({
   }, []);
 
   useEffect(() => {
-    if (!selected || compact) return;
+    if (!selected || compact || historyRunId) return;
     document
       .getElementById(`${prefix}-${selected}-tab`)
       ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
-  }, [compact, prefix, selected]);
+  }, [compact, historyRunId, prefix, selected]);
 
   return (
     <>
@@ -48,7 +72,7 @@ export function WorkspaceTabs({
           <Select
             value={selected}
             onValueChange={(value) => {
-              setSelected(value);
+              selectTab(value);
             }}
           >
             <SelectTrigger
@@ -81,7 +105,7 @@ export function WorkspaceTabs({
                 aria-selected={selected === item.id}
                 tabIndex={selected === item.id ? 0 : -1}
                 onClick={() => {
-                  setSelected(item.id);
+                  selectTab(item.id);
                 }}
                 onKeyDown={(event) => {
                   let next = index;
@@ -93,7 +117,7 @@ export function WorkspaceTabs({
                   else return;
                   event.preventDefault();
                   const target = items[next];
-                  setSelected(target.id);
+                  selectTab(target.id);
                   document.getElementById(`${prefix}-${target.id}-tab`)?.focus();
                 }}
               >

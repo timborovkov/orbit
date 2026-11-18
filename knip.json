@@ -1,11 +1,7 @@
 {
   "workspaces": {
     "apps/web": {
-      "entry": [
-        "public/theme.js",
-        "src/components/ui/**/*.{ts,tsx}",
-        "src/components/ai-elements/**/*.{ts,tsx}"
-      ]
+      "entry": ["public/theme.js"]
     }
   }
 }

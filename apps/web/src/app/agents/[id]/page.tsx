@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import { ChevronDown, History } from 'lucide-react';
 import { z } from 'zod';
@@ -50,7 +51,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   ]);
   const lifecycle = agent.lifecycle;
   const canSimulate = canEnqueueSimulation(lifecycle);
-  const viewedHistory = history;
+  const latestRun = history.at(0);
   const hasPendingRuns = history.some(
     (run) => run.displayStatus === 'queued' || run.displayStatus === 'running',
   );
@@ -110,12 +111,33 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   const playground = (
     <section id="simulation" className="playground-panel">
       <PlaygroundChat
+        key={id}
         agentId={id}
         agentName={agent.name}
         canSimulate={canSimulate}
         lifecycle={lifecycle}
-        versions={versions}
+        versions={versions.map(({ id, version, config }) => ({ id, version, name: config.name }))}
         currentConfigurationId={current.id}
+        latestRun={
+          latestRun && (
+            <section className="playground-latest-run" aria-label="Latest persisted run">
+              <h3>Latest persisted run</h3>
+              <details key={latestRun.id} className="run-detail">
+                <summary>
+                  <div>
+                    <span className="run-title">{latestRun.input}</span>
+                    <span className="muted">Version {versionFor(latestRun.configurationId)}</span>
+                  </div>
+                  <span className="state-label" role="status">
+                    {latestRun.displayStatus}
+                  </span>
+                  <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
+                </summary>
+                <RunContent run={latestRun} interrupted={latestRun.interrupted} />
+              </details>
+            </section>
+          )
+        }
       />
     </section>
   );
@@ -135,8 +157,8 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
             <p>No runs yet. Start in the Playground to test your agent.</p>
           </div>
         )}
-        {viewedHistory.map((run) => (
-          <details key={run.id} className="run-detail">
+        {history.map((run) => (
+          <details key={run.id} id={`run-${run.id}`} className="run-detail">
             <summary>
               <div>
                 <span className="run-title">{run.input}</span>
@@ -214,20 +236,23 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
           </div>
         </div>
         <PendingRunRefresh active={hasPendingRuns} />
-        <WorkspaceTabs
-          items={[
-            { id: 'configure', label: 'Configuration', content: configuration },
-            { id: 'playground', label: 'Playground', content: playground },
-            { id: 'history', label: 'History', count: history.length, content: historyPanel },
-            {
-              id: 'approvals',
-              label: 'Approvals',
-              count: reviews.filter((review) => review.status === 'pending').length,
-              content: approvalQueue,
-            },
-            { id: 'access', label: 'Access', content: access },
-          ]}
-        />
+        <Suspense>
+          <WorkspaceTabs
+            key={id}
+            items={[
+              { id: 'configure', label: 'Configuration', content: configuration },
+              { id: 'playground', label: 'Playground', content: playground },
+              { id: 'history', label: 'History', count: history.length, content: historyPanel },
+              {
+                id: 'approvals',
+                label: 'Approvals',
+                count: reviews.filter((review) => review.status === 'pending').length,
+                content: approvalQueue,
+              },
+              { id: 'access', label: 'Access', content: access },
+            ]}
+          />
+        </Suspense>
       </main>
     </div>
   );

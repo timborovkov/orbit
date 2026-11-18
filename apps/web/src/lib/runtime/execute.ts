@@ -211,7 +211,11 @@ async function expireStaleRuns(
 ) {
   const stale = await tx
     .update(runs)
-    .set({ status: 'interrupted', finishedAt: new Date() })
+    .set({
+      status: 'interrupted',
+      finishedAt: new Date(),
+      deferReason: budgetViolationMessage('run-deadline'),
+    })
     .where(
       and(
         eq(runs.agentId, agentId),
@@ -430,11 +434,12 @@ async function processSimulationRun(
       return { skip: true as const, run };
     }
     if (run.expiresAt < new Date()) {
+      const deferReason = budgetViolationMessage('run-deadline');
       await tx
         .update(runs)
-        .set({ status: 'interrupted', finishedAt: new Date() })
+        .set({ status: 'interrupted', finishedAt: new Date(), deferReason })
         .where(eq(runs.id, run.id));
-      return { skip: true as const, run: { ...run, status: 'interrupted' as const } };
+      return { skip: true as const, run: { ...run, status: 'interrupted' as const, deferReason } };
     }
 
     const budgets = parseBudgets(agent.budgets);

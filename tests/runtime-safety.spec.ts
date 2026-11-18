@@ -47,7 +47,11 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
   await expect(
     page.getByText('no external action adapters exist yet', { exact: false }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Set Paused', exact: true }).click();
+  const lifecycle = page.getByRole('list', { name: 'Agent lifecycle' });
+  const pause = lifecycle.getByRole('button', { name: 'Set Paused', exact: true });
+  await pause.focus();
+  await expect(pause).toBeFocused();
+  await page.keyboard.press('Enter');
   // Lifecycle form unmounts on success (Current replaces the button), so assert durable UI.
   await expect(page.locator('.agent-name-line .state-label')).toContainText('Paused');
   await expect(page.locator('#lifecycle .lifecycle-card.is-selected h3')).toHaveText('Paused');

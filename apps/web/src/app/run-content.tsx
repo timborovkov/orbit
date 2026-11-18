@@ -47,6 +47,7 @@ export function RunContent({
   run: typeof runs.$inferSelect;
   interrupted?: boolean;
 }) {
+  const pending = !interrupted && (run.status === 'queued' || run.status === 'running');
   return (
     <div className="run-content">
       <section className="run-input">
@@ -56,10 +57,7 @@ export function RunContent({
       {interrupted && (
         <div className="run-notice">
           <CircleAlert size={18} aria-hidden="true" />
-          <p>
-            This run was interrupted. Its partial results are saved. Start a new simulation to
-            retry.
-          </p>
+          <p>{run.deferReason ?? 'This run was interrupted.'} Any partial results are saved.</p>
         </div>
       )}
       {run.result.error && (
@@ -99,7 +97,11 @@ export function RunContent({
           <h3>Proposed actions</h3>
           <span className="muted">{run.result.actions.length} · Simulation only</span>
         </div>
-        {!run.result.actions.length && <p className="muted">No actions proposed.</p>}
+        {!run.result.actions.length && (
+          <p className="muted">
+            {pending ? 'Waiting for proposed actions.' : 'No actions proposed.'}
+          </p>
+        )}
         {run.result.actions.map((action) => (
           <article key={action.type} className="action-proposal">
             <div className="result-section-heading">

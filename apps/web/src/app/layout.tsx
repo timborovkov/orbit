@@ -6,8 +6,6 @@ import Script from 'next/script';
 
 import '@/app/globals.css';
 
-import { TooltipProvider } from '@/components/ui/tooltip';
-
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
@@ -28,9 +26,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <meta name="theme-color" content="#fff" />
         <Script src="/theme.js" strategy="beforeInteractive" />
       </head>
-      <body>
-        <TooltipProvider>{children}</TooltipProvider>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

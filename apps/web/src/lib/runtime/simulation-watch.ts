@@ -7,6 +7,10 @@ export function isTerminalSimulationStatus(status: string) {
   return terminalStatuses.has(status);
 }
 
+export function isExpiredSimulationRun(run: { status: string; expiresAt: Date }) {
+  return !isTerminalSimulationStatus(run.status) && run.expiresAt.getTime() < Date.now();
+}
+
 interface WatchOptions {
   signal?: AbortSignal;
   deadlineMs?: number;

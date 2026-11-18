@@ -1,4 +1,9 @@
+import type { UIMessage } from 'ai';
+
 import type { SimulationResult } from '@/lib/runtime/simulation';
+import { isTerminalSimulationStatus } from '@/lib/runtime/simulation-watch';
+
+export type PlaygroundMessage = UIMessage<unknown, { run: { id: string } }>;
 
 /** Chunks the UI message stream protocol can emit for a playground reply. */
 export type PlaygroundStreamChunk =
@@ -65,7 +70,9 @@ function summarizeActions(actions: SimulationResult['actions']): string {
 export function playgroundChunksFromResult(
   result: SimulationResult,
   progress: PlaygroundStreamProgress,
-  options: { status: string; runId?: string } = { status: 'running' },
+  options: { status: string; runId?: string; deferReason?: string | null } = {
+    status: 'running',
+  },
 ): PlaygroundStreamChunk[] {
   const chunks: PlaygroundStreamChunk[] = [];
 
@@ -86,7 +93,7 @@ export function playgroundChunksFromResult(
 
   // Only emit action tool cards from the finalized result so evaluator candidates
   // that the main stage later drops or rewrites do not stick around as completed tools.
-  const terminal = ['completed', 'failed', 'interrupted'].includes(options.status);
+  const terminal = isTerminalSimulationStatus(options.status);
   if (terminal) {
     for (const action of result.actions) {
       const key = `${action.type}:${action.intentId ?? action.policy}:${action.draft ?? ''}`;
@@ -121,11 +128,15 @@ export function playgroundChunksFromResult(
       chunks.push({ type: 'text-start', id: 'reply' });
       progress.textStarted = true;
     }
-    if (result.error) {
-      chunks.push({ type: 'text-delta', id: 'reply', delta: result.error });
-    } else {
-      chunks.push({ type: 'text-delta', id: 'reply', delta: summarizeActions(result.actions) });
-    }
+    const outcome =
+      options.status === 'interrupted'
+        ? 'The simulation was interrupted.'
+        : 'The simulation failed.';
+    const delta =
+      options.status === 'completed'
+        ? summarizeActions(result.actions)
+        : [outcome, options.deferReason ?? result.error].filter(Boolean).join(' ');
+    chunks.push({ type: 'text-delta', id: 'reply', delta });
     if (options.runId) {
       chunks.push({
         type: 'text-delta',
@@ -142,21 +153,4 @@ export function playgroundChunksFromResult(
   }
 
   return chunks;
-}
-
-export function lastUserText(
-  messages: { role: string; parts?: { type: string; text?: string }[]; content?: string }[],
-): string {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role !== 'user') continue;
-    if (typeof message.content === 'string' && message.content.trim())
-      return message.content.trim();
-    const text = (message.parts ?? [])
-      .flatMap((part) => (part.type === 'text' && typeof part.text === 'string' ? [part.text] : []))
-      .join('\n')
-      .trim();
-    if (text) return text;
-  }
-  return '';
 }
