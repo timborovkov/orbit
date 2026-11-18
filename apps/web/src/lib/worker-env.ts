@@ -1,3 +1,5 @@
+import { parseObservabilityEnv } from '@/lib/observability/env';
+
 /** Worker process env — shared module so web/worker both typecheck without Nest-style packages. */
 function optionalHexKey(value: string | undefined) {
   if (!value) return undefined;
@@ -16,7 +18,7 @@ function optionalOpenRouterKey(value: string | undefined) {
   return trimmed;
 }
 
-function parseWorkerEnv(input: Record<string, string | undefined>) {
+export function parseWorkerEnv(input: Record<string, string | undefined>) {
   const databaseUrl = input.DATABASE_URL;
   if (!databaseUrl) throw new Error('DATABASE_URL is required');
   try {
@@ -33,6 +35,7 @@ function parseWorkerEnv(input: Record<string, string | undefined>) {
     ORBIT_ENCRYPTION_KEY: optionalHexKey(input.ORBIT_ENCRYPTION_KEY),
     OPENROUTER_API_KEY: optionalOpenRouterKey(input.OPENROUTER_API_KEY),
     ORBIT_WORKER_ID: workerId === '' ? undefined : workerId,
+    observability: parseObservabilityEnv(input),
   };
 }
 

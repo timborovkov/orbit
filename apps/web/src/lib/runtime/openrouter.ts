@@ -76,7 +76,8 @@ async function quoteOpenRouter(
 
 export function openRouterInference(apiKey: string): ModelCall {
   const provider = createOpenRouter({ apiKey });
-  const call: ModelCall = async ({ model, system, input, signal, quote, tools, maxToolSteps }) => {
+  const call: ModelCall = async (request) => {
+    const { model, system, input, signal, quote, tools, maxToolSteps, telemetry } = request;
     const hasTools = Boolean(tools && Object.keys(tools).length);
     const response = await generateText({
       model: provider(model, {
@@ -99,7 +100,7 @@ export function openRouterInference(apiKey: string): ModelCall {
       maxOutputTokens,
       maxRetries: 0,
       abortSignal: signal,
-      telemetry: { isEnabled: false },
+      telemetry: telemetry ?? { isEnabled: false },
     });
     // Sum every generation step's OpenRouter cost — tool loops issue multiple paid requests.
     const costSchema = z.object({

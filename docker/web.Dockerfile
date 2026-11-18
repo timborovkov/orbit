@@ -8,6 +8,12 @@ RUN --mount=type=secret,id=npm_ca \
     if [ -f /run/secrets/npm_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/npm_ca; fi; \
     bun install --frozen-lockfile
 COPY apps/web apps/web
+# Inlined into the client bundle at build time. Empty keeps browser Sentry off.
+# Railway injects matching service variables when these ARG names are declared.
+ARG NEXT_PUBLIC_SENTRY_DSN=
+ARG NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=
+ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN \
+    NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
 RUN bun run --filter @orbit/web build
 
 FROM oven/bun:1.4.4-debian

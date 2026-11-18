@@ -1,4 +1,4 @@
-import type { Tool } from 'ai';
+import type { TelemetryOptions, Tool } from 'ai';
 import { z } from 'zod';
 
 import { isBudgetError } from '@/lib/budgets';
@@ -52,6 +52,7 @@ export type ModelCall = ((request: {
   quote?: InferenceQuote;
   tools?: Record<string, Tool>;
   maxToolSteps?: number;
+  telemetry?: TelemetryOptions;
 }) => Promise<ModelResult>) & {
   quote?: (model: string, signal: AbortSignal) => Promise<InferenceQuote | undefined>;
 };

@@ -19,9 +19,14 @@ Before starting the web service, run `bun run db:migrate` from a source checkout
 Build the deployment images from the repository root:
 
 ```sh
-docker build -f docker/web.Dockerfile -t orbit-web .
+docker build -f docker/web.Dockerfile \
+  --build-arg NEXT_PUBLIC_SENTRY_DSN="$NEXT_PUBLIC_SENTRY_DSN" \
+  --build-arg NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE="$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE" \
+  -t orbit-web .
 docker build -f docker/worker.Dockerfile -t orbit-worker .
 ```
+
+`NEXT_PUBLIC_SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` are inlined into the browser bundle at image build. Unset, browser Sentry stays off. Setting them only on the running web container cannot enable capture. Compose forwards them from the host env as web build args. Railway injects matching service variables because the Dockerfile declares those `ARG` names. Server-side Sentry still uses runtime `SENTRY_DSN` on web and worker.
 
 The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker claims durable PostgreSQL jobs (simulation runs today), heartbeats leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
 
@@ -65,13 +70,13 @@ before deleting orphans. No storage cleanup worker is scheduled in this mileston
 
 ## Runtime telemetry
 
-Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` on the worker. Set
-`LANGFUSE_BASE_URL` to the project’s host if it differs from
-`https://cloud.langfuse.com`. The worker sends OpenTelemetry generation spans for
-the evaluator and main model to that project.
+Observability is optional. The variables, including sample rates and prompt
+capture, are listed in [`.env.example`](../.env.example). Unset, the web app and
+worker make no exporter network calls.
 
-Set `SENTRY_DSN` on both services to report server and worker failures. Worker
-inference events carry the Orbit run ID, the Langfuse trace ID when configured,
-and the failed stage’s duration. Both telemetry paths use an explicit metadata
-allowlist. Prompts, drafts, provider errors, headers and credentials stay in the
-application boundary. Set retention and access controls in the telemetry projects.
+Create one Sentry project (web and worker can share it) and one Langfuse
+project, plus an optional development Langfuse project — not a project per
+agent. Browser capture needs `NEXT_PUBLIC_SENTRY_DSN` at web image build, as
+above. Source map upload needs `SENTRY_AUTH_TOKEN` and is skipped without it.
+See [architecture.md](../architecture.md) §12 and the Phase 2 observability
+decision for tracing behaviour, redaction and evaluations.

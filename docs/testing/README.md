@@ -122,8 +122,8 @@ These checks apply when the named behavior changes, not to unrelated docs or CI
 routing edits.
 
 - Run `bun run test:unit` when auth/env parsing, simulation runtime logic without
-  persistence, picture helpers, budgets, lifecycle, policy gateway or in-memory
-  queue logic change.
+  persistence, picture helpers, budgets, lifecycle, policy gateway, in-memory
+  queue logic, redaction, observability env validation or tracing spans change.
 - Run `bun run test:queue` / `bun run test:integration` when the durable job queue,
   worker claim/lease path or web→worker enqueue path changes (requires migrated
   `orbit_test`).
