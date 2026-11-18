@@ -110,8 +110,8 @@ export async function connectMcpClient(
   );
 }
 
-export function mcpDiscoverySignal(signal?: AbortSignal) {
-  const timeout = AbortSignal.timeout(30_000);
+export function mcpDiscoverySignal(signal?: AbortSignal, timeoutMs = 30_000) {
+  const timeout = AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
@@ -197,7 +197,8 @@ async function loadOneConnection(
 ): Promise<LoadedConnection> {
   let client: MCPClient | undefined;
   try {
-    const signal = mcpDiscoverySignal(options.signal);
+    // Leave time for inference even when the agent uses the minimum run deadline.
+    const signal = mcpDiscoverySignal(options.signal, 10_000);
     const allowlist = normalizeMcpAllowlist(connection.toolAllowlist);
     const registered: string[] = [];
     const tools: Record<string, Tool> = {};
