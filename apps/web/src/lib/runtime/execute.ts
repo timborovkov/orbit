@@ -16,11 +16,16 @@ import {
 import { db } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
-import { enqueueJob } from '@/lib/queue/jobs';
+import { deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
 import {
   isRetryableInfrastructureError,
+  isUnrecoverablePaidStepFinalizationError,
+  PAID_STEP_BURN_MESSAGE,
+  PaidStepUnpersistedError,
   PreDispatchInfrastructureError,
+  RetryableInfrastructureError,
   retryableStore,
+  UnrecoverablePaidStepFinalizationError,
 } from '@/lib/runtime/errors';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
@@ -134,6 +139,46 @@ async function assertOwned(runId: string, executionToken: string) {
   if (!row) throw new BudgetError('cancelled');
 }
 
+/**
+ * Burn a paid stage as soon as the provider returns, before later ownership checks
+ * that may throw Retryable and would otherwise leave only a pending reservation.
+ * Reclaim while a call is still in flight still works — nothing is marked until return.
+ */
+async function markStageDispatchedIfOwned(
+  runId: string,
+  executionToken: string,
+  stage: 'evaluator' | 'main',
+) {
+  return await db().transaction(async (tx) => {
+    const current = (
+      await tx
+        .select({ id: runs.id, result: runs.result })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.id, runId),
+            eq(runs.status, 'running'),
+            eq(runs.executionToken, executionToken),
+          ),
+        )
+        .for('update')
+    ).at(0);
+    if (!current) return [];
+    const dispatchedStages = [...new Set([...(current.result.dispatchedStages ?? []), stage])];
+    return await tx
+      .update(runs)
+      .set({ result: { ...current.result, dispatchedStages } })
+      .where(
+        and(
+          eq(runs.id, runId),
+          eq(runs.status, 'running'),
+          eq(runs.executionToken, executionToken),
+        ),
+      )
+      .returning({ id: runs.id });
+  });
+}
+
 async function expireStaleRuns(
   tx: Parameters<Parameters<ReturnType<typeof db>['transaction']>[0]>[0],
   agentId: string,
@@ -188,7 +233,10 @@ export async function enqueueSimulation({
     if (!agent) return { error: 'Agent not found.' as const };
     if (!canEnqueueSimulation(agent.lifecycle)) {
       return {
-        error: 'This agent is stopped. Change its lifecycle before starting a simulation.' as const,
+        error:
+          agent.lifecycle === 'paused'
+            ? ('This agent is paused. Resume it before starting a simulation.' as const)
+            : ('This agent is stopped. Change its lifecycle before starting a simulation.' as const),
       };
     }
 
@@ -402,6 +450,26 @@ async function processSimulationRun(
   if (claimed.skip) return;
 
   const { run, config, budgets, executionToken, expiresAt, agent } = claimed;
+  // Refuse model work for paused/stopped agents even if a job was already claimed.
+  if (!canEnqueueSimulation(agent.lifecycle)) {
+    const message =
+      agent.lifecycle === 'paused'
+        ? 'Agent is paused. Resume it before starting new work.'
+        : 'Agent is stopped. Change its lifecycle before starting new work.';
+    await retryableStore(() =>
+      updateIfOwned(run.id, executionToken, {
+        status: 'failed',
+        finishedAt: new Date(),
+        deferReason: message,
+        result: {
+          steps: [],
+          actions: [],
+          error: message,
+        },
+      }),
+    );
+    return;
+  }
   // Reconstruct the original start so deadline checks accumulate across retries.
   const startedAt = new Date(expiresAt.getTime() - budgets.runDeadlineSeconds * 1000);
   const remainingMs = expiresAt.getTime() - Date.now();
@@ -429,6 +497,14 @@ async function processSimulationRun(
     lifecycle: agent.lifecycle,
     trigger: 'playground',
   });
+  const failureCorrelation = (extra: { stage?: 'evaluator' | 'main' } = {}) => ({
+    runId: run.id,
+    agentId: run.agentId,
+    jobId: claim?.jobId,
+    lifecycle: agent.lifecycle,
+    traceId: telemetry.traceId,
+    ...extra,
+  });
   let didComplete = false;
   let statusMessage: string | undefined;
   try {
@@ -441,6 +517,32 @@ async function processSimulationRun(
 
     // Include reservation-only progress so a failed post-call checkpoint cannot free the step slot.
     const checkpointed = hasSimulationProgress(run.result) ? run.result : undefined;
+    // A prior attempt already burned a paid step but failed to mark the run terminal — finalize
+    // without calling the provider again.
+    if (checkpointed?.error === PAID_STEP_BURN_MESSAGE) {
+      statusMessage = 'paid-step-burn';
+      await telemetry.withSpan(
+        'orbit.runtime',
+        {
+          stage: 'main',
+          agent_id: run.agentId,
+          run_id: run.id,
+          job_id: claim?.jobId,
+          lifecycle: agent.lifecycle,
+          outcome: 'paid-step-burn',
+        },
+        async () => {
+          await retryableStore(() =>
+            updateIfOwned(run.id, executionToken, {
+              status: 'failed',
+              finishedAt: new Date(),
+              result: { ...checkpointed, traceId: telemetry.traceId },
+            }),
+          );
+        },
+      );
+      return;
+    }
     let settle!: (billedMicros: number) => Promise<void>;
     let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
     const result = await telemetry.inRunContext(() =>
@@ -449,19 +551,42 @@ async function processSimulationRun(
         run.input,
         async (request) => {
           const response = await telemetry.callModel(call, { ...request, quote });
+          const stage = request.stage === 'main' ? 'main' : 'evaluator';
+          // Persist the dispatch burn before assertOwned / settlement. A Retryable blip after
+          // a paid return must not requeue with only a pending reservation (double-spend).
+          // We intentionally do not mark before the provider call: that blocked reclaim and
+          // pre-return infrastructure retries in smoke tests.
+          await telemetry.withSpan(
+            'orbit.runtime',
+            {
+              stage,
+              agent_id: run.agentId,
+              run_id: run.id,
+              job_id: claim?.jobId,
+              lifecycle: agent.lifecycle,
+            },
+            async () => {
+              try {
+                const marked = await retryableStore(() =>
+                  markStageDispatchedIfOwned(run.id, executionToken, stage),
+                );
+                if (!marked.length) throw new BudgetError('cancelled');
+              } catch (error) {
+                if (isBudgetError(error)) throw error;
+                if (isRetryableInfrastructureError(error)) {
+                  throw new PaidStepUnpersistedError(stage);
+                }
+                throw error;
+              }
+            },
+          );
           if (response.costMicros !== undefined) {
             // Failure leaves the conservative reservation in place. Never repeat a paid call
             // solely because the adjustment could not be recorded.
             try {
               await settle(response.costMicros);
             } catch {
-              reportFailure('worker.settlement', {
-                runId: run.id,
-                agentId: run.agentId,
-                jobId: claim?.jobId,
-                lifecycle: agent.lifecycle,
-                traceId: telemetry.traceId,
-              });
+              reportFailure('worker.settlement', failureCorrelation({ stage }));
               console.warn('OpenRouter cost settlement failed', { runId: run.id });
             }
           }
@@ -622,30 +747,83 @@ async function processSimulationRun(
 
     const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
     if (result.error && isTrustedBudgetMessage(result.error)) statusMessage = result.error;
-    await retryableStore(() =>
-      updateIfOwned(run.id, executionToken, {
-        status: terminalStatus,
-        finishedAt: new Date(),
-        result: { ...result, traceId: telemetry.traceId },
-        deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
-      }),
-    );
+    else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
+    try {
+      await retryableStore(() =>
+        updateIfOwned(run.id, executionToken, {
+          status: terminalStatus,
+          finishedAt: new Date(),
+          result: { ...result, traceId: telemetry.traceId },
+          deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
+        }),
+      );
+    } catch (error) {
+      // Paid-step burn: never complete the job while the run is still running. Persist the burn
+      // markers when possible, then Retryable so the queue retries finalization only (simulate
+      // will refuse to redispatch once dispatchedStages/error are durable).
+      if (isRetryableInfrastructureError(error) && result.error === PAID_STEP_BURN_MESSAGE) {
+        const burned: SimulationResult = {
+          ...result,
+          traceId: telemetry.traceId,
+          error: PAID_STEP_BURN_MESSAGE,
+        };
+        try {
+          await db()
+            .update(runs)
+            .set({
+              status: 'failed',
+              finishedAt: new Date(),
+              result: burned,
+            })
+            .where(
+              and(
+                eq(runs.id, run.id),
+                eq(runs.status, 'running'),
+                eq(runs.executionToken, executionToken),
+              ),
+            );
+          return;
+        } catch {
+          try {
+            // Burn markers must be durable before an ordinary queue retry, or the next
+            // attempt would redispatch the paid stage.
+            await db()
+              .update(runs)
+              .set({ result: burned })
+              .where(
+                and(
+                  eq(runs.id, run.id),
+                  eq(runs.status, 'running'),
+                  eq(runs.executionToken, executionToken),
+                ),
+              );
+          } catch {
+            reportFailure('worker.settlement', failureCorrelation());
+            // Not durable — do not Retryable-requeue (that would redispatch). Fall through to
+            // the non-retryable failure path which best-effort marks the run failed.
+            throw new Error(PAID_STEP_BURN_MESSAGE);
+          }
+          throw new RetryableInfrastructureError(
+            'Paid step burn finalization pending; will retry without redistributing the call.',
+          );
+        }
+      }
+      throw error;
+    }
     didComplete = !result.error;
   } catch (error) {
     // Leave the run non-terminal so a reclaimed job can resume after failJob retries.
     if (isRetryableInfrastructureError(error)) throw error;
-    if (!isBudgetError(error)) {
-      reportFailure(
-        'worker.runtime',
-        {
-          runId: run.id,
-          agentId: run.agentId,
-          jobId: claim?.jobId,
-          lifecycle: agent.lifecycle,
-          traceId: telemetry.traceId,
-        },
-        error,
-      );
+    if (isUnrecoverablePaidStepFinalizationError(error)) {
+      statusMessage = 'force-dead-letter';
+      reportFailure('worker.dead_letter', failureCorrelation(), error);
+      throw error;
+    }
+    if (
+      !isBudgetError(error) &&
+      !(error instanceof Error && error.message === PAID_STEP_BURN_MESSAGE)
+    ) {
+      reportFailure('worker.runtime', failureCorrelation(), error);
     }
     const fallback =
       'Unable to complete inference. Check the agent credential or OPENROUTER_API_KEY, server encryption key and provider availability, then try again.';
@@ -655,25 +833,89 @@ async function processSimulationRun(
       inspectable = error.message;
       isBudget = true;
       statusMessage = `budget:${error.kind}`;
+    } else if (error instanceof Error && error.message === PAID_STEP_BURN_MESSAGE) {
+      inspectable = PAID_STEP_BURN_MESSAGE;
+      statusMessage = 'paid-step-burn';
     } else if (error instanceof Error && error.message === 'Missing OpenRouter credential') {
       inspectable =
         'No OpenRouter credential available. Save an agent key under Access or set OPENROUTER_API_KEY on the server.';
     }
-    await db()
-      .update(runs)
-      .set({
-        status: 'failed',
-        finishedAt: new Date(),
-        deferReason: isBudget ? inspectable : null,
-        result: sql`jsonb_set(${runs.result}, '{error}', to_jsonb(${inspectable}::text))`,
-      })
-      .where(
-        and(
-          eq(runs.id, run.id),
-          eq(runs.status, 'running'),
-          eq(runs.executionToken, executionToken),
-        ),
+    try {
+      await db()
+        .update(runs)
+        .set({
+          status: 'failed',
+          finishedAt: new Date(),
+          deferReason: isBudget ? inspectable : null,
+          result: sql`jsonb_set(${runs.result}, '{error}', to_jsonb(${inspectable}::text))`,
+        })
+        .where(
+          and(
+            eq(runs.id, run.id),
+            eq(runs.status, 'running'),
+            eq(runs.executionToken, executionToken),
+          ),
+        );
+    } catch {
+      reportFailure('worker.settlement', failureCorrelation());
+      // Paid-step burn: never ordinary-retry without a durable marker (redispatch risk).
+      if (inspectable === PAID_STEP_BURN_MESSAGE) {
+        try {
+          await db()
+            .update(runs)
+            .set({
+              result: sql`jsonb_set(
+                coalesce(${runs.result}, '{"steps":[],"actions":[],"error":null}'::jsonb),
+                '{error}',
+                to_jsonb(${PAID_STEP_BURN_MESSAGE}::text)
+              )`,
+            })
+            .where(
+              and(
+                eq(runs.id, run.id),
+                eq(runs.status, 'running'),
+                eq(runs.executionToken, executionToken),
+              ),
+            );
+          throw new RetryableInfrastructureError(
+            'Paid step burn finalization pending; will retry without redistributing the call.',
+          );
+        } catch (error) {
+          if (isRetryableInfrastructureError(error)) throw error;
+          if (claim) {
+            try {
+              await telemetry.withSpan(
+                'orbit.runtime',
+                {
+                  stage: 'main',
+                  agent_id: run.agentId,
+                  run_id: run.id,
+                  job_id: claim.jobId,
+                  lifecycle: agent.lifecycle,
+                  outcome: 'force-dead-letter',
+                },
+                async () => {
+                  await deadLetterJob(claim.jobId, claim.workerId, PAID_STEP_BURN_MESSAGE);
+                  await finalizeExhaustedSimulationJob({ runId: run.id }, PAID_STEP_BURN_MESSAGE);
+                },
+              );
+              statusMessage = 'force-dead-letter';
+              reportFailure('worker.dead_letter', failureCorrelation(), PAID_STEP_BURN_MESSAGE);
+              return;
+            } catch {
+              reportFailure('worker.settlement', failureCorrelation());
+            }
+          }
+          // Worker force-deads; do not Retryable-requeue without a burn marker.
+          statusMessage = 'force-dead-letter';
+          throw new UnrecoverablePaidStepFinalizationError();
+        }
+      }
+      // Do not return successfully — that would complete the job while the run stays running.
+      throw new RetryableInfrastructureError(
+        'Failed to persist terminal simulation failure; will retry finalization.',
       );
+    }
   } finally {
     await telemetry.finish(!didComplete, statusMessage);
   }
@@ -742,4 +984,37 @@ export async function finalizeOrphanedDeadSimulationRuns() {
       AND j.type = ${SIMULATION_JOB_TYPE}
       AND r.status IN ('queued', 'running')
   `);
+}
+
+/**
+ * Repair runs left `running` after their job was marked completed (e.g. terminal persistence
+ * failed but the worker still acknowledged the claim). Idempotent.
+ */
+export async function finalizeOrphanedCompletedSimulationRuns() {
+  const inspectable = exhaustedJobMessage(
+    'reconciled after job completed without run finalization',
+  );
+  await db().execute(sql`
+    UPDATE simulation_runs AS r
+    SET
+      status = 'failed',
+      finished_at = now(),
+      defer_reason = ${inspectable},
+      result = jsonb_set(
+        coalesce(r.result, '{"steps":[],"actions":[],"error":null}'::jsonb),
+        '{error}',
+        to_jsonb(${inspectable}::text)
+      )
+    FROM jobs AS j
+    WHERE r.job_id = j.id
+      AND j.status = 'completed'
+      AND j.type = ${SIMULATION_JOB_TYPE}
+      AND r.status IN ('queued', 'running')
+  `);
+}
+
+/** Periodic reconcile for orphaned simulation runs linked to finished jobs. */
+export async function reconcileOrphanedSimulationRuns() {
+  await finalizeOrphanedDeadSimulationRuns();
+  await finalizeOrphanedCompletedSimulationRuns();
 }

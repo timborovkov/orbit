@@ -21,6 +21,10 @@ import {
   langfuseMetadataAttributes,
 } from '@/lib/observability/langfuse-attributes';
 import { redactValue, safeOrbitTags } from '@/lib/observability/redact';
+import {
+  isPaidStepUnpersistedError,
+  isUnrecoverablePaidStepFinalizationError,
+} from '@/lib/runtime/errors';
 import type { ModelCall } from '@/lib/runtime/simulation';
 
 interface LangfuseHandle {
@@ -347,6 +351,17 @@ export function createRunTelemetry(run: RunTelemetryContext) {
         span.setAttribute('langfuse.observation.level', 'ERROR');
         span.setAttribute('langfuse.observation.status_message', message);
         span.setAttributes(langfuseMetadataAttributes({ 'orbit.budget_violation': error.kind }));
+        span.setStatus({ code: SpanStatusCode.ERROR, message });
+      } else if (
+        isPaidStepUnpersistedError(error) ||
+        isUnrecoverablePaidStepFinalizationError(error)
+      ) {
+        const message = isUnrecoverablePaidStepFinalizationError(error)
+          ? 'force-dead-letter'
+          : 'paid-step-burn';
+        span.setAttribute('langfuse.observation.level', 'ERROR');
+        span.setAttribute('langfuse.observation.status_message', message);
+        span.setAttributes(langfuseMetadataAttributes({ 'orbit.outcome': message }));
         span.setStatus({ code: SpanStatusCode.ERROR, message });
       } else {
         span.setStatus({ code: SpanStatusCode.ERROR, message: 'failed' });

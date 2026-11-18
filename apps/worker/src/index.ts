@@ -7,8 +7,8 @@ import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import { startJobWorker } from '@/lib/queue/worker';
 import {
   finalizeExhaustedSimulationJob,
-  finalizeOrphanedDeadSimulationRuns,
   processSimulationJob,
+  reconcileOrphanedSimulationRuns,
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
 import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
@@ -71,7 +71,7 @@ const worker = startJobWorker({
     await finalizeExhaustedSimulationJob(job.payload, error);
   },
   reconcileDeadLetters: async () => {
-    await finalizeOrphanedDeadSimulationRuns();
+    await reconcileOrphanedSimulationRuns();
   },
   onError: (error) => {
     console.error('Worker queue operation failed.');

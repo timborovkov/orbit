@@ -20,9 +20,9 @@ export const lifecycleDescriptions: Record<LifecycleState, string> = {
     'Pending jobs are cancelled where feasible. External writes are blocked until an administrator changes state.',
 };
 
-/** Playground simulations are always mocked/suppressed; only stopped blocks enqueue. */
+/** Simulations and worker jobs are refused while paused or stopped. */
 export function canEnqueueSimulation(lifecycle: LifecycleState): boolean {
-  return lifecycle !== 'stopped';
+  return lifecycle !== 'stopped' && lifecycle !== 'paused';
 }
 
 /** Background/event jobs require an active lifecycle that is not paused or stopped. */

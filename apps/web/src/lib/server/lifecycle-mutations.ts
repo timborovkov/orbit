@@ -29,7 +29,7 @@ export async function persistLifecycle(actor: string, agentId: string, next: Lif
     await tx.update(agents).set({ lifecycle: parsed.data }).where(eq(agents.id, agentId));
     await tx.insert(audit).values({
       actor,
-      action: `Changed agent ${agentId} lifecycle to ${parsed.data}`,
+      action: `Changed ${agent.name} lifecycle to ${parsed.data}`,
     });
 
     if (shouldCancelPendingJobs(parsed.data)) {
@@ -42,8 +42,8 @@ export async function persistLifecycle(actor: string, agentId: string, next: Lif
         actor,
         action:
           parsed.data === 'stopped'
-            ? `Cancelled ${cancelledIds.length} pending/claimed job(s) for agent ${agentId} on stopped`
-            : `Cancelled ${cancelledIds.length} pending job(s) for agent ${agentId} on paused`,
+            ? `Cancelled ${cancelledIds.length} pending/claimed job(s) for ${agent.name} on stopped`
+            : `Cancelled ${cancelledIds.length} pending job(s) for ${agent.name} on paused`,
       });
     }
 
@@ -65,11 +65,11 @@ export async function persistBudgets(actor: string, agentId: string, budgets: Ag
       .update(agents)
       .set({ budgets: parsed.data })
       .where(eq(agents.id, agentId))
-      .returning({ id: agents.id });
+      .returning({ id: agents.id, name: agents.name });
     if (!rows.length) return false;
     await tx.insert(audit).values({
       actor,
-      action: `Updated budgets for agent ${agentId}`,
+      action: `Updated budgets for ${rows[0].name}`,
     });
     return true;
   });
@@ -87,11 +87,11 @@ export async function persistApprovalTools(
       .update(agents)
       .set({ approvalTools })
       .where(eq(agents.id, agentId))
-      .returning({ id: agents.id });
+      .returning({ id: agents.id, name: agents.name });
     if (!rows.length) return false;
     await tx
       .insert(audit)
-      .values({ actor, action: `Changed approval requirements for agent ${agentId}` });
+      .values({ actor, action: `Changed approval requirements for ${rows[0].name}` });
     return true;
   });
 }

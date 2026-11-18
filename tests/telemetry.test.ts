@@ -6,6 +6,7 @@ import { reportFailure } from '@/lib/observability/errors';
 import {
   applyOpenRouterCostToSpan,
   generationCostAttributes,
+  langfuseBlockedStatus,
   langfuseMetadataAttributes,
   openRouterCostUsd,
 } from '@/lib/observability/langfuse-attributes';
@@ -26,6 +27,10 @@ import {
   recordLangfuseScore,
   resetTestTelemetry,
 } from '@/lib/observability/telemetry';
+import {
+  PaidStepUnpersistedError,
+  UnrecoverablePaidStepFinalizationError,
+} from '@/lib/runtime/errors';
 import { parseWorkerEnv } from '@/lib/worker-env';
 
 const production = {
@@ -404,6 +409,104 @@ describe('run spans', () => {
     const budget = spans.find((span) => span.name === 'orbit.budget');
     expect(budget?.attributes['langfuse.observation.level']).toBe('ERROR');
     expect(budget?.attributes['langfuse.observation.status_message']).toBe('budget:daily-requests');
+  });
+
+  test('records paid-step burn and force-dead-letter as Langfuse error outcomes', async () => {
+    installTestTelemetry();
+    const telemetry = createRunTelemetry({
+      runId,
+      agentId,
+      configurationId,
+      version: 3,
+      jobId,
+      lifecycle: 'shadow',
+    });
+    await telemetry.withSpan(
+      'orbit.runtime',
+      {
+        stage: 'main',
+        run_id: runId,
+        agent_id: agentId,
+        outcome: 'paid-step-burn',
+      },
+      () => undefined,
+    );
+    await telemetry.withSpan(
+      'orbit.runtime',
+      {
+        stage: 'main',
+        run_id: runId,
+        agent_id: agentId,
+        outcome: 'force-dead-letter',
+      },
+      () => undefined,
+    );
+    await expect(
+      telemetry.withSpan(
+        'orbit.runtime',
+        { stage: 'evaluator', run_id: runId, agent_id: agentId },
+        async () => {
+          throw new PaidStepUnpersistedError('evaluator');
+        },
+      ),
+    ).rejects.toBeInstanceOf(PaidStepUnpersistedError);
+    await expect(
+      telemetry.withSpan(
+        'orbit.runtime',
+        { stage: 'main', run_id: runId, agent_id: agentId },
+        async () => {
+          throw new UnrecoverablePaidStepFinalizationError();
+        },
+      ),
+    ).rejects.toBeInstanceOf(UnrecoverablePaidStepFinalizationError);
+    await telemetry.finish(true, 'paid-step-burn');
+    await flushTelemetry();
+
+    const spans = getTestSpans();
+    const attributed = spans.filter(
+      (span) =>
+        span.name === 'orbit.runtime' && span.attributes['orbit.outcome'] === 'paid-step-burn',
+    );
+    const forceDead = spans.filter(
+      (span) =>
+        span.name === 'orbit.runtime' && span.attributes['orbit.outcome'] === 'force-dead-letter',
+    );
+    expect(attributed.length).toBeGreaterThanOrEqual(1);
+    expect(forceDead.length).toBeGreaterThanOrEqual(1);
+    expect(attributed[0]?.attributes['langfuse.observation.status_message']).toBe('paid-step-burn');
+    expect(attributed[0]?.attributes['langfuse.observation.level']).toBe('ERROR');
+    expect(attributed[0]?.attributes['langfuse.observation.metadata.orbit.outcome']).toBe(
+      JSON.stringify('paid-step-burn'),
+    );
+    expect(forceDead[0]?.attributes['langfuse.observation.status_message']).toBe(
+      'force-dead-letter',
+    );
+    const thrownBurn = spans.find(
+      (span) =>
+        span.name === 'orbit.runtime' &&
+        span.attributes['langfuse.observation.status_message'] === 'paid-step-burn' &&
+        span.attributes['orbit.outcome'] === undefined,
+    );
+    expect(thrownBurn?.attributes['langfuse.observation.metadata.orbit.outcome']).toBe(
+      JSON.stringify('paid-step-burn'),
+    );
+    const thrownDead = spans.find(
+      (span) =>
+        span.name === 'orbit.runtime' &&
+        span.attributes['langfuse.observation.status_message'] === 'force-dead-letter' &&
+        span.attributes['orbit.outcome'] === undefined,
+    );
+    expect(thrownDead).toBeDefined();
+    const root = spans.find((span) => span.name === 'orbit.run');
+    expect(root?.attributes['langfuse.observation.status_message']).toBe('paid-step-burn');
+    expect(langfuseBlockedStatus({ outcome: 'paid-step-burn' })).toEqual({
+      level: 'ERROR',
+      message: 'paid-step-burn',
+    });
+    expect(langfuseBlockedStatus({ outcome: 'force-dead-letter' })).toEqual({
+      level: 'ERROR',
+      message: 'force-dead-letter',
+    });
   });
 
   test('maps OpenRouter cost onto Langfuse generation attributes', () => {

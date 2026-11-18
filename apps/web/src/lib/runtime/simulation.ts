@@ -5,8 +5,10 @@ import { isBudgetError } from '@/lib/budgets';
 import { proposalTypes } from '@/lib/policy/scopes';
 import type { AgentConfig } from '@/lib/runtime/config';
 import {
+  isPaidStepUnpersistedError,
   isPreDispatchInfrastructureError,
   isRetryableInfrastructureError,
+  PAID_STEP_BURN_MESSAGE,
 } from '@/lib/runtime/errors';
 
 const action = z.object({
@@ -211,8 +213,7 @@ export async function simulate(
       if (reserved.includes(stage) && dispatched.includes(stage)) {
         // Provider dispatch already happened but the response never landed.
         // Do not re-dispatch: that would exceed the paid-step budget.
-        result.error =
-          'A previous attempt already used this model step but could not save the result. Start a new run.';
+        result.error = PAID_STEP_BURN_MESSAGE;
         break;
       }
       if (!reserved.includes(stage)) {
@@ -253,18 +254,28 @@ export async function simulate(
           throw error;
         }
       }
-      // Durably mark dispatch before the paid provider request so a post-call store outage
-      // cannot leave a pending reservation that retries would redo.
-      if (!dispatched.includes(stage)) {
-        result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), stage])];
-        await checkpoint(result);
-      }
+      // Call first so a reclaimed lease or pre-return infrastructure fault can retry.
+      // Once the provider returns, mark dispatched before the step body so a later
+      // checkpoint failure cannot free the paid slot for a redo.
       const response = await call(request);
       try {
         signal.throwIfAborted();
       } catch {
         result.error = 'Run deadline reached or the worker cancelled this simulation.';
         break;
+      }
+      if (!dispatched.includes(stage)) {
+        result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), stage])];
+        try {
+          await checkpoint(result);
+        } catch (error) {
+          if (isRetryableInfrastructureError(error)) {
+            // Paid response is in memory but not durable — do not ask the queue to redo.
+            result.error = PAID_STEP_BURN_MESSAGE;
+            break;
+          }
+          throw error;
+        }
       }
       const decision = decisionSchema.parse(response.decision);
       result.steps.push({ ...response, decision, stage, model });
@@ -274,30 +285,41 @@ export async function simulate(
       if (!(await applyPolicy(stage, decision))) break;
     }
   } catch (error) {
-    // Infrastructure failures must propagate so the queue can retry; do not persist as inference errors.
-    if (isRetryableInfrastructureError(error)) throw error;
-    // Provider exceptions can contain request headers, keys and raw response bodies.
-    // Only BudgetError instances are trusted; never inspect provider text for budget keywords.
-    const cancelled =
-      (error instanceof Error && error.name === 'AbortError') ||
-      (typeof DOMException !== 'undefined' &&
-        error instanceof DOMException &&
-        error.name === 'AbortError');
-    if (isBudgetError(error)) {
+    if (isPaidStepUnpersistedError(error)) {
+      // execute already received a paid response but could not burn it durably.
       result.error = error.message;
-    } else if (cancelled) {
-      result.error = 'Run deadline reached or the worker cancelled this simulation.';
+      result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), error.stage])];
+    } else if (isRetryableInfrastructureError(error)) {
+      // Infrastructure failures must propagate so the queue can retry; do not persist as inference errors.
+      throw error;
     } else {
-      result.error =
-        'Inference failed or timed out. Check the OpenRouter key, model availability and provider balance, then start a new run.';
+      // Provider exceptions can contain request headers, keys and raw response bodies.
+      // Only BudgetError instances are trusted; never inspect provider text for budget keywords.
+      const cancelled =
+        (error instanceof Error && error.name === 'AbortError') ||
+        (typeof DOMException !== 'undefined' &&
+          error instanceof DOMException &&
+          error.name === 'AbortError');
+      if (isBudgetError(error)) {
+        result.error = error.message;
+      } else if (cancelled) {
+        result.error = 'Run deadline reached or the worker cancelled this simulation.';
+      } else {
+        result.error =
+          'Inference failed or timed out. Check the OpenRouter key, model availability and provider balance, then start a new run.';
+      }
     }
   }
   try {
     await checkpoint(result);
   } catch (error) {
     // Ownership loss after an earlier cancel should not fail the caller; the token fence already
-    // prevents durable writes. Retryable store faults still propagate for queue retry.
-    if (isRetryableInfrastructureError(error)) throw error;
+    // prevents durable writes. Retryable store faults still propagate for queue retry —
+    // except after a paid-step burn, which must not be requeued.
+    if (isRetryableInfrastructureError(error)) {
+      if (result.error === PAID_STEP_BURN_MESSAGE) return result;
+      throw error;
+    }
     if (isBudgetError(error) && error.kind === 'cancelled') {
       result.error ??= error.message;
       return result;

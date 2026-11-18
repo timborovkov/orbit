@@ -77,6 +77,10 @@ export function langfuseBlockedStatus(
   const budget =
     typeof attributes.budget_violation === 'string' ? attributes.budget_violation : undefined;
   if (budget) return { level: 'ERROR', message: `budget:${budget}` };
+  const outcome = typeof attributes.outcome === 'string' ? attributes.outcome : undefined;
+  if (outcome === 'paid-step-burn' || outcome === 'force-dead-letter') {
+    return { level: 'ERROR', message: outcome };
+  }
 }
 
 function policyDecisionOf(value: unknown): string | undefined {

@@ -98,6 +98,8 @@ export type BudgetViolation =
   | 'unknown-price'
   | 'daily-spend'
   | 'monthly-spend'
+  | 'daily-spend-reservation'
+  | 'monthly-spend-reservation'
   | 'daily-requests'
   | 'monthly-requests'
   | 'daily-outbound'
@@ -114,13 +116,14 @@ export function checkRequestBudgets(
   if (activeRuns >= budgets.maxConcurrentRuns) return 'concurrency';
   if (day.requests >= budgets.dailyRequests) return 'daily-requests';
   if (month.requests >= budgets.monthlyRequests) return 'monthly-requests';
-  for (const [period, used, cap] of [
-    ['daily-spend', day.spendMicros, budgets.dailySpendCents],
-    ['monthly-spend', month.spendMicros, budgets.monthlySpendCents],
+  for (const [reached, reservation, used, cap] of [
+    ['daily-spend', 'daily-spend-reservation', day.spendMicros, budgets.dailySpendCents],
+    ['monthly-spend', 'monthly-spend-reservation', month.spendMicros, budgets.monthlySpendCents],
   ] as const) {
     if (cap === null) continue;
     const limit = BigInt(cap) * BigInt(10_000);
-    if (used >= limit || used + reserveMicros > limit) return period;
+    if (used >= limit) return reached;
+    if (used + reserveMicros > limit) return reservation;
   }
   return null;
 }
@@ -154,6 +157,10 @@ export function budgetViolationMessage(violation: BudgetViolation): string {
       return 'Daily OpenRouter spend cap reached. Work was deferred.';
     case 'monthly-spend':
       return 'Monthly OpenRouter spend cap reached. Work was deferred.';
+    case 'daily-spend-reservation':
+      return 'Daily OpenRouter spend reservation could not fit under the cap. Work was deferred.';
+    case 'monthly-spend-reservation':
+      return 'Monthly OpenRouter spend reservation could not fit under the cap. Work was deferred.';
     case 'daily-requests':
       return 'Daily request quota reached. Work was deferred.';
     case 'monthly-requests':
@@ -196,6 +203,8 @@ const trustedBudgetMessages = new Set<string>([
       'unknown-price',
       'daily-spend',
       'monthly-spend',
+      'daily-spend-reservation',
+      'monthly-spend-reservation',
       'daily-requests',
       'monthly-requests',
       'daily-outbound',

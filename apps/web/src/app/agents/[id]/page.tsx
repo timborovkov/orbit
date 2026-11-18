@@ -18,7 +18,8 @@ import { WorkspaceHeader } from '@/app/workspace-header';
 import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
-import { lifecycleLabels } from '@/lib/lifecycle';
+import { formatUtcTimestamp } from '@/lib/format';
+import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
@@ -30,9 +31,19 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   if (!z.uuid().safeParse(id).success) notFound();
   const workspace = await getAgentWorkspace(id);
   if (!workspace) notFound();
-  const { agent, versions, hasAgentCredential, keySource, history, current, reviews, consents } =
-    workspace;
+  const {
+    agent,
+    versions,
+    hasAgentCredential,
+    keySource,
+    history,
+    current,
+    reviews,
+    consents,
+    usage,
+  } = workspace;
   const lifecycle = agent.lifecycle;
+  const canSimulate = canEnqueueSimulation(lifecycle);
   const viewedHistory = history;
   const latest = history.at(0);
   const hasPendingRuns = history.some(
@@ -68,7 +79,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   const access = (
     <div className="access-stack">
       <LifecycleControls agentId={id} lifecycle={lifecycle} />
-      <BudgetSettings agentId={id} budgets={agent.budgets} />
+      <BudgetSettings agentId={id} budgets={agent.budgets} usage={usage} />
       <ReviewSettings agentId={id} approvalTools={agent.approvalTools} />
       <ConsentSettings agentId={id} consents={consents} />
       <AccessPanel
@@ -87,7 +98,17 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
           <h2>Test a conversation</h2>
           <p className="muted">See how {agent.name} would respond to a post or question.</p>
         </div>
-        <WorkspaceForm action={runSimulation} label="Queue simulation">
+        {!canSimulate && (
+          <div className="run-notice">
+            <ShieldCheck size={18} aria-hidden="true" />
+            <p>
+              {lifecycle === 'paused'
+                ? 'This agent is paused. Resume it under Access before queueing simulations.'
+                : 'This agent is stopped. Change its lifecycle under Access before queueing simulations.'}
+            </p>
+          </div>
+        )}
+        <WorkspaceForm action={runSimulation} label="Queue simulation" disabled={!canSimulate}>
           <input type="hidden" name="agentId" value={id} />
           <WorkspaceSelect
             key={current.id}
@@ -180,13 +201,16 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
               <div>
                 <span className="run-title">{run.input}</span>
                 <time dateTime={run.createdAt.toISOString()}>
-                  {run.createdAt.toISOString().slice(0, 16).replace('T', ' ')} UTC · Version{' '}
-                  {versionFor(run.configurationId)}
-                  {run.job ? ` · job ${run.job.status}` : ''}
-                  {run.deferReason ? ` · ${run.deferReason}` : ''}
+                  {formatUtcTimestamp(run.createdAt)} · Version {versionFor(run.configurationId)}
+                  {run.job && run.job.status !== 'completed' ? ` · job ${run.job.status}` : ''}
+                  {run.displayStatus !== 'deferred' && run.deferReason
+                    ? ` · ${run.deferReason}`
+                    : ''}
                 </time>
               </div>
-              <span className="state-label">{run.displayStatus}</span>
+              <span className="state-label" title={run.deferReason ?? undefined}>
+                {run.displayStatus}
+              </span>
               <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
             </summary>
             <RunContent run={run} interrupted={run.interrupted} />
@@ -200,7 +224,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
           <details key={version.id}>
             <summary>
               <span>Version {version.version}</span>
-              <time>{version.createdAt.toISOString().slice(0, 16).replace('T', ' ')} UTC</time>
+              <time>{formatUtcTimestamp(version.createdAt)}</time>
             </summary>
             <dl className="config-snapshot">
               {Object.entries(version.config).map(([key, value]) => (

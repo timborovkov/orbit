@@ -1,6 +1,7 @@
 import {
   claimJobs,
   completeJob,
+  deadLetterJob,
   failJob,
   heartbeatJob,
   recoverExpiredLeases,
@@ -12,6 +13,7 @@ import {
   DEFAULT_RECOVERY_MS,
   type JobRecord,
 } from '@/lib/queue/types';
+import { isUnrecoverablePaidStepFinalizationError } from '@/lib/runtime/errors';
 
 type JobHandler = (job: JobRecord, signal: AbortSignal) => Promise<void>;
 
@@ -34,6 +36,7 @@ export interface WorkerOptions {
   claimJobs?: typeof claimJobs;
   completeJob?: typeof completeJob;
   failJob?: typeof failJob;
+  deadLetterJob?: typeof deadLetterJob;
   releaseClaim?: typeof releaseClaim;
   recoverExpiredLeases?: typeof recoverExpiredLeases;
   /** Must return false only for confirmed lease loss; transport errors should throw. */
@@ -56,6 +59,7 @@ export function startJobWorker(options: WorkerOptions) {
   const claim = options.claimJobs ?? claimJobs;
   const complete = options.completeJob ?? completeJob;
   const fail = options.failJob ?? failJob;
+  const forceDead = options.deadLetterJob ?? deadLetterJob;
   const release = options.releaseClaim ?? releaseClaim;
   const recover = options.recoverExpiredLeases ?? recoverExpiredLeases;
   const beat = options.heartbeat ?? heartbeatJob;
@@ -157,6 +161,30 @@ export function startJobWorker(options: WorkerOptions) {
       }
     };
 
+    /**
+     * Force-dead until durable while the lease heartbeat is still running.
+     * Ordinary failJob / lease recovery must not reclaim this job — that would redispatch
+     * a paid model step that never burned.
+     */
+    const forceDeadUntilDurable = async (errorMessage: string) => {
+      let delayMs = 250;
+      for (;;) {
+        try {
+          const failed = await forceDead(job.id, options.workerId, errorMessage);
+          if (failed?.status === 'dead') {
+            await notifyDeadLetter(job, errorMessage);
+            return;
+          }
+          // Claim is no longer ours (cancelled, reclaimed, or already finalized).
+          return;
+        } catch (failError: unknown) {
+          options.onError?.(failError);
+        }
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        delayMs = Math.min(delayMs * 2, 10_000);
+      }
+    };
+
     try {
       await handler(job, jobCancel.signal);
       try {
@@ -166,8 +194,12 @@ export function startJobWorker(options: WorkerOptions) {
         await deadLetter('Failed to mark job completed');
       }
     } catch (error: unknown) {
-      const message = 'Worker could not process the job';
-      await deadLetter(message);
+      if (isUnrecoverablePaidStepFinalizationError(error)) {
+        await forceDeadUntilDurable(error.message);
+      } else {
+        const message = 'Worker could not process the job';
+        await deadLetter(message);
+      }
       options.onError?.(error);
     } finally {
       clearInterval(heartbeat);

@@ -6,6 +6,7 @@ import {
   cancelPendingJobsForAgent,
   claimJobs,
   completeJob,
+  deadLetterJob,
   enqueueJob,
   enqueueJobInTransaction,
   failJob,
@@ -149,6 +150,26 @@ test('releaseClaim returns unexecuted work to pending without burning attempts',
   expect(row.status).toBe('pending');
   expect(row.attempts).toBe(0);
   expect(row.claimed_by).toBeNull();
+});
+
+test('deadLetterJob force-deads a claimed job before max attempts', async () => {
+  const job = await enqueueJob(db(), {
+    type: `${prefix}.force-dead`,
+    payload: {},
+    idempotencyKey: `${prefix}:force-dead`,
+    maxAttempts: 5,
+  });
+  const [claimed] = await claimJobs({
+    workerId: `${prefix}-force-dead`,
+    types: [`${prefix}.force-dead`],
+  });
+  expect(claimed.attempts).toBe(1);
+  const dead = await deadLetterJob(claimed.id, `${prefix}-force-dead`, 'paid step burn');
+  expect(dead?.status).toBe('dead');
+  expect(dead?.lastError).toContain('paid step burn');
+  const [row] = await sqlClient()`SELECT status, attempts FROM jobs WHERE id = ${job.id}`;
+  expect(row.status).toBe('dead');
+  expect(row.attempts).toBe(1);
 });
 
 test('failJob does not overwrite a cancelled or reclaimed claim', async () => {

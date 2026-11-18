@@ -9,11 +9,13 @@ export function WorkspaceForm({
   children,
   label,
   saveState = false,
+  disabled = false,
 }: {
   action: (form: FormData) => Promise<{ error?: string; message?: string }>;
   children: React.ReactNode;
   label: string;
   saveState?: boolean;
+  disabled?: boolean;
 }) {
   const [dirty, setDirty] = useState(false);
   const [state, setState] = useState<{ error?: string; message?: string }>({});
@@ -21,6 +23,7 @@ export function WorkspaceForm({
   return (
     <form
       action={(data) => {
+        if (disabled) return;
         startTransition(async () => {
           setState({});
           try {
@@ -40,7 +43,7 @@ export function WorkspaceForm({
       }}
       className="workspace-form"
     >
-      <fieldset disabled={pending}>{children}</fieldset>
+      <fieldset disabled={pending || disabled}>{children}</fieldset>
       {state.error && (
         <p role="alert" className="form-error">
           {state.error}
@@ -51,7 +54,7 @@ export function WorkspaceForm({
         {saveState && (
           <span className="save-status">{dirty ? 'Unsaved changes' : 'All changes saved'}</span>
         )}
-        <SubmitButton disabled={pending} pendingLabel="Working…">
+        <SubmitButton disabled={pending || disabled} pendingLabel="Working…">
           {pending ? 'Working…' : label}
         </SubmitButton>
       </div>

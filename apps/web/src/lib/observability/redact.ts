@@ -26,6 +26,7 @@ const orbitTagKeys = [
   'orbit.policy_decision',
   'orbit.budget_violation',
   'orbit.langfuse_trace_id',
+  'orbit.outcome',
 ] as const;
 
 const allowedTagKeys = new Set<string>(orbitTagKeys);
@@ -70,6 +71,8 @@ const allowedEnums = new Set([
   'tool-steps',
   'run-deadline',
   'cancelled',
+  'paid-step-burn',
+  'force-dead-letter',
 ]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
