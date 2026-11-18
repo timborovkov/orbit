@@ -430,14 +430,22 @@ export async function reserveRequestQuota(
         if (existing) {
           // Settle against the original accounting day, not the retry's UTC date.
           const periodStart = existing.periodStart;
+          const reservationMonthStart = `${periodStart.slice(0, 7)}-01`;
+          const reservationDay =
+            counters.find((row) => row.period === 'day' && row.periodStart === periodStart) ??
+            emptyUsage();
+          const reservationMonth =
+            counters.find(
+              (row) => row.period === 'month' && row.periodStart === reservationMonthStart,
+            ) ?? emptyUsage();
           let reservedMicros = BigInt(existing.reservedMicros);
           let reservation = existing;
           if (requestedMicros > reservedMicros) {
             const additional = requestedMicros - reservedMicros;
-            // Request count stays idempotent; only validate/top up spend coverage.
+            // Request count stays idempotent; validate/top up against the original period.
             for (const [period, used, cap] of [
-              ['daily-spend', day.spendMicros, budgets.dailySpendCents],
-              ['monthly-spend', month.spendMicros, budgets.monthlySpendCents],
+              ['daily-spend', reservationDay.spendMicros, budgets.dailySpendCents],
+              ['monthly-spend', reservationMonth.spendMicros, budgets.monthlySpendCents],
             ] as const) {
               if (cap === null) continue;
               const limit = BigInt(cap) * BigInt(10_000);
