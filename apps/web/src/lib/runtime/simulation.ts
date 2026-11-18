@@ -258,12 +258,9 @@ export async function simulate(
     if (result.knowledge?.status === 'started') {
       result.knowledge = { status: 'failed', reason: 'Retrieval was interrupted.', hits: [] };
       await checkpoint(result);
-    } else if (
-      options.retrieveKnowledge &&
-      !result.knowledge &&
-      !result.steps.length &&
-      (options.maxToolSteps ?? Infinity) >= 3
-    ) {
+    } else if (options.retrieveKnowledge && !result.knowledge && !result.steps.length) {
+      // Tool-step budget (maxToolStepsPerRun) is enforced by retrieveKnowledge /
+      // consumeKnowledgeToolStep — do not require spare inference-stage headroom.
       result.knowledge = { status: 'started', hits: [] };
       await checkpoint(result);
       result.knowledge = await options.retrieveKnowledge(signal);
