@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { saveAgentBudgets } from '@/actions/lifecycle';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { budgetFields, type AgentBudgets } from '@/lib/budgets';
@@ -108,7 +108,6 @@ function BudgetFieldControl({
   const [unlimited, setUnlimited] = useState(() => canBeUnlimited && budgets[fieldKey] === null);
   const used = usageLine(fieldKey, budgets, usage);
   const inputId = `budget-${fieldKey}`;
-  const hintId = `${inputId}-hint`;
   const usageId = used ? `${inputId}-usage` : undefined;
 
   if (!field) return null;
@@ -116,7 +115,9 @@ function BudgetFieldControl({
   return (
     <Field className="budget-field gap-2">
       <div className="budget-field-heading">
-        <FieldLabel htmlFor={inputId}>{meta.shortLabel}</FieldLabel>
+        <FieldLabel htmlFor={inputId} className="budget-field-label">
+          {meta.shortLabel}
+        </FieldLabel>
         {canBeUnlimited && (
           <label className="budget-unlimited" htmlFor={`${inputId}-unlimited`}>
             <span>No cap</span>
@@ -140,7 +141,7 @@ function BudgetFieldControl({
           defaultValue={budgets[fieldKey] ?? undefined}
           required={!canBeUnlimited || !unlimited}
           disabled={unlimited}
-          aria-describedby={[usageId, hintId].filter(Boolean).join(' ') || undefined}
+          aria-describedby={usageId}
           className="m-0"
         />
         {meta.suffix ? <span className="budget-suffix">{meta.suffix}</span> : null}
@@ -150,7 +151,6 @@ function BudgetFieldControl({
           {used}
         </p>
       )}
-      <FieldDescription id={hintId}>{field.hint}</FieldDescription>
     </Field>
   );
 }

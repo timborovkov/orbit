@@ -1874,15 +1874,23 @@ fieldset[aria-disabled='true'] textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+.budget-field-heading .budget-field-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 @media (max-width: 600px) {
   .budget-field-heading {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 8px;
   }
   .budget-unlimited {
     width: 100%;
+    margin-inline-start: 0;
     justify-content: space-between;
   }
 }
@@ -2829,12 +2837,14 @@ details[open] > summary > .disclosure-chevron {
 
 .budget-unlimited {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  justify-self: start;
   gap: 8px;
+  margin-inline-start: auto;
   color: var(--muted);
   font-size: 0.8125rem;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .policy-options,
