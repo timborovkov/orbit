@@ -16,7 +16,6 @@ import {
   installTestTelemetry,
   recordLangfuseScore,
   resetTestTelemetry,
-  withOrbitSpan,
 } from '@/lib/observability/telemetry';
 import { parseWorkerEnv } from '@/lib/worker-env';
 
@@ -192,6 +191,18 @@ describe('redaction', () => {
       /PRIVATE_|sk-or-secret|secret-token|admin@example.com/,
     );
   });
+
+  test('redacts Sentry breadcrumb arrays without throwing', () => {
+    const event = redactSentryEvent({
+      breadcrumbs: [
+        { message: 'Bearer secret-token', data: { prompt: 'PRIVATE_PROMPT is long enough' } },
+      ],
+    });
+    expect(Array.isArray(event.breadcrumbs)).toBe(true);
+    const crumbs = event.breadcrumbs as { message?: string; data?: unknown }[];
+    expect(crumbs[0]?.message).toContain('[redacted]');
+    expect(JSON.stringify(event)).not.toMatch(/secret-token|PRIVATE_PROMPT/);
+  });
 });
 
 describe('disabled observability', () => {
@@ -266,7 +277,7 @@ describe('run spans', () => {
         stage: 'evaluator',
       },
     );
-    await withOrbitSpan(
+    await telemetry.withSpan(
       'orbit.policy',
       {
         tool: 'reply',
@@ -277,7 +288,7 @@ describe('run spans', () => {
       },
       async () => 'ok',
     );
-    await withOrbitSpan(
+    await telemetry.withSpan(
       'orbit.budget',
       { stage: 'evaluator', budget_violation: 'daily-requests', run_id: runId },
       async () => 'ok',
@@ -286,8 +297,9 @@ describe('run spans', () => {
     await telemetry.finish(false);
     await flushTelemetry();
 
+    const spans = getTestSpans();
     const serialized = JSON.stringify(
-      getTestSpans().map((span) => ({
+      spans.map((span) => ({
         name: span.name,
         attributes: span.attributes,
       })),
@@ -302,5 +314,39 @@ describe('run spans', () => {
     expect(serialized).toContain('test/model');
     expect(serialized).toContain('0.0025');
     expect(serialized).not.toMatch(/PRIVATE_|sk-or-|Bearer /);
+    const root = spans.find((span) => span.name === 'orbit.run');
+    const rootId = root?.spanContext().spanId;
+    expect(rootId).toBeDefined();
+    for (const name of ['orbit.evaluator', 'orbit.policy', 'orbit.budget']) {
+      const child = spans.find((span) => span.name === name);
+      expect(child?.parentSpanContext?.spanId).toBe(rootId);
+    }
+  });
+
+  test('does not re-run a failed model call when Langfuse wrapping fails', async () => {
+    installTestTelemetry();
+    const telemetry = createRunTelemetry({
+      runId,
+      agentId,
+      configurationId,
+      version: 1,
+    });
+    let calls = 0;
+    await expect(
+      telemetry.callModel(
+        async () => {
+          calls += 1;
+          throw new Error('provider failed');
+        },
+        {
+          model: 'test/model',
+          system: 'PRIVATE_SYSTEM_PROMPT',
+          input: 'PRIVATE_SCENARIO',
+          signal: AbortSignal.timeout(2000),
+          stage: 'evaluator',
+        },
+      ),
+    ).rejects.toThrow('provider failed');
+    expect(calls).toBe(1);
   });
 });

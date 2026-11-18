@@ -155,7 +155,8 @@ export interface SentryLikeEvent {
     query_string?: unknown;
     env?: unknown;
   };
-  breadcrumbs?: { values?: { message?: string; data?: unknown }[] };
+  breadcrumbs?:
+    { message?: string; data?: unknown }[] | { values?: { message?: string; data?: unknown }[] };
   exception?: { values?: { value?: string; type?: string }[] };
   user?: unknown;
   extra_data?: unknown;
@@ -170,6 +171,20 @@ const droppedRequestHeaders = new Set([
   'x-api-key',
   'x-auth-token',
 ]);
+
+function redactCrumb<T extends { message?: string; data?: unknown }>(crumb: T): T {
+  return {
+    ...crumb,
+    message: crumb.message ? redactString(crumb.message) : crumb.message,
+    data: crumb.data ? redactValue(crumb.data, { captureContent: false }) : crumb.data,
+  };
+}
+
+function redactBreadcrumbs(breadcrumbs: SentryLikeEvent['breadcrumbs']) {
+  if (!breadcrumbs) return breadcrumbs;
+  if (Array.isArray(breadcrumbs)) return breadcrumbs.map((crumb) => redactCrumb(crumb));
+  return { values: (breadcrumbs.values ?? []).map((crumb) => redactCrumb(crumb)) };
+}
 
 /** Strip PII, request bodies, secrets and untrusted tag values from a Sentry event. */
 export function redactSentryEvent<T extends SentryLikeEvent>(event: T): T {
@@ -208,15 +223,7 @@ export function redactSentryEvent<T extends SentryLikeEvent>(event: T): T {
           headers,
         }
       : undefined,
-    breadcrumbs: event.breadcrumbs
-      ? {
-          values: (event.breadcrumbs.values ?? []).map((crumb) => ({
-            ...crumb,
-            message: crumb.message ? redactString(crumb.message) : crumb.message,
-            data: crumb.data ? redactValue(crumb.data, { captureContent: false }) : crumb.data,
-          })),
-        }
-      : undefined,
+    breadcrumbs: redactBreadcrumbs(event.breadcrumbs),
     exception: event.exception
       ? {
           values: (event.exception.values ?? []).map((item) => ({

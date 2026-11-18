@@ -137,24 +137,6 @@ export async function resetTestTelemetry() {
   }
 }
 
-export async function withOrbitSpan<T>(
-  name: string,
-  attributes: Record<string, string | number | boolean | undefined>,
-  fn: () => Promise<T> | T,
-): Promise<T> {
-  const tracer = await getTracer();
-  if (!tracer) return await fn();
-  const span = tracer.startSpan(name, { attributes: safeOrbitTags(attributes) }, context.active());
-  try {
-    return await context.with(trace.setSpan(context.active(), span), async () => await fn());
-  } catch (error) {
-    span.setStatus({ code: SpanStatusCode.ERROR, message: 'failed' });
-    throw error;
-  } finally {
-    span.end();
-  }
-}
-
 async function aiSdkTelemetry(functionId: string): Promise<TelemetryOptions | undefined> {
   if (!isLangfuseEnabled()) return { isEnabled: false };
   const captureContent = observability().langfuse?.captureContent === true;
@@ -231,13 +213,16 @@ export function createRunTelemetry(run: RunTelemetryContext) {
     }
   })();
 
+  const runContext = () => (root ? trace.setSpan(ROOT_CONTEXT, root) : context.active());
+
   const inRunContext = async <T>(fn: () => Promise<T>) => {
     await ready;
     if (!root) return fn();
-    const parent = trace.setSpan(ROOT_CONTEXT, root);
+    const parent = runContext();
+    let runFn = fn;
     try {
       const { propagateAttributes } = await import('@langfuse/tracing');
-      return await context.with(parent, () =>
+      runFn = () =>
         propagateAttributes(
           {
             sessionId: run.runId,
@@ -248,10 +233,30 @@ export function createRunTelemetry(run: RunTelemetryContext) {
             metadata: tags,
           },
           fn,
-        ),
-      );
-    } catch {
-      return await context.with(parent, fn);
+        );
+    } catch (error) {
+      swallow('Langfuse attribute propagation failed', error);
+    }
+    return await context.with(parent, runFn);
+  };
+
+  const withSpan = async <T>(
+    name: string,
+    attributes: Record<string, string | number | boolean | undefined>,
+    fn: () => Promise<T> | T,
+  ): Promise<T> => {
+    await ready;
+    const tracer = await getTracer();
+    if (!tracer) return await fn();
+    const parent = runContext();
+    const span = tracer.startSpan(name, { attributes: safeOrbitTags(attributes) }, parent);
+    try {
+      return await context.with(trace.setSpan(parent, span), async () => await fn());
+    } catch (error) {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: 'failed' });
+      throw error;
+    } finally {
+      span.end();
     }
   };
 
@@ -271,7 +276,7 @@ export function createRunTelemetry(run: RunTelemetryContext) {
               : {}),
           },
         },
-        context.active(),
+        runContext(),
       );
       try {
         const telemetry = await aiSdkTelemetry(`orbit.${stage}`);
@@ -322,6 +327,8 @@ export function createRunTelemetry(run: RunTelemetryContext) {
     get traceId() {
       return traceId;
     },
+    inRunContext,
+    withSpan,
     callModel,
     recordScore: (score: ScoreInput) => {
       recordLangfuseScore(score);

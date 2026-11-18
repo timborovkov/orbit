@@ -30,7 +30,7 @@ import {
   type ModelCall,
   type SimulationResult,
 } from '@/lib/runtime/simulation';
-import { createRunTelemetry, reportFailure, withOrbitSpan } from '@/lib/runtime/telemetry';
+import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
 import { agents, configurations, credentials, jobs, runs, usageCounters } from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
@@ -442,177 +442,181 @@ async function processSimulationRun(
     const checkpointed = hasSimulationProgress(run.result) ? run.result : undefined;
     let settle!: (billedMicros: number) => Promise<void>;
     let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
-    const result = await simulate(
-      config.config,
-      run.input,
-      async (request) => {
-        const response = await telemetry.callModel(call, { ...request, quote });
-        if (response.costMicros !== undefined) {
-          // Failure leaves the conservative reservation in place. Never repeat a paid call
-          // solely because the adjustment could not be recorded.
-          try {
-            await settle(response.costMicros);
-          } catch {
-            reportFailure('worker.settlement', {
-              runId: run.id,
-              agentId: run.agentId,
-              jobId: claim?.jobId,
-              lifecycle: agent.lifecycle,
-              traceId: telemetry.traceId,
-            });
-            console.warn('OpenRouter cost settlement failed', { runId: run.id });
-          }
-        }
-        if (checkRunDeadline(startedAt, new Date(), budgets)) {
-          throw new BudgetError('run-deadline');
-        }
-        try {
-          signal.throwIfAborted();
-        } catch {
-          throw new BudgetError('cancelled');
-        }
-        await assertOwned(run.id, executionToken);
-        return response;
-      },
-      async (partial) => {
-        const updated = await retryableStore(() =>
-          updateIfOwned(run.id, executionToken, { result: partial }),
-        );
-        if (!updated.length) throw new BudgetError('cancelled');
-      },
-      {
-        maxSteps: budgets.maxToolStepsPerRun,
-        signal,
-        initial: checkpointed,
-        prepare: async (request, partial) => {
-          try {
-            await withOrbitSpan(
-              'orbit.budget',
-              {
-                stage: request.stage ?? 'main',
-                agent_id: run.agentId,
-                run_id: run.id,
-                job_id: claim?.jobId,
+    const result = await telemetry.inRunContext(() =>
+      simulate(
+        config.config,
+        run.input,
+        async (request) => {
+          const response = await telemetry.callModel(call, { ...request, quote });
+          if (response.costMicros !== undefined) {
+            // Failure leaves the conservative reservation in place. Never repeat a paid call
+            // solely because the adjustment could not be recorded.
+            try {
+              await settle(response.costMicros);
+            } catch {
+              reportFailure('worker.settlement', {
+                runId: run.id,
+                agentId: run.agentId,
+                jobId: claim?.jobId,
                 lifecycle: agent.lifecycle,
-              },
-              async () => {
-                if (checkRunDeadline(startedAt, new Date(), budgets)) {
-                  throw new BudgetError('run-deadline');
-                }
-                try {
-                  signal.throwIfAborted();
-                } catch {
-                  throw new BudgetError('cancelled');
-                }
-                quote = hasSpendCap(budgets)
-                  ? await call.quote?.(request.model, request.signal)
-                  : undefined;
-                const stage = request.stage === 'main' ? 'main' : 'evaluator';
-                const reserved = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
-                  runId: run.id,
-                  token: executionToken,
-                  signal: request.signal,
-                  stage,
-                });
-                settle = reserved;
-                if (reserved.reservation) {
-                  const others =
-                    partial.quotaReservations?.filter((entry) => entry.stage !== stage) ?? [];
-                  partial.quotaReservations = [...others, reserved.reservation];
-                }
-                await assertOwned(run.id, executionToken);
-                if (request.signal.aborted) throw new BudgetError('cancelled');
-              },
-            );
-          } catch (error) {
-            // Quota/store faults here never reached the provider — mark so simulate can
-            // release the step reservation and let the queue retry the stage.
-            if (isBudgetError(error)) throw error;
-            if (isRetryableInfrastructureError(error)) {
-              throw new PreDispatchInfrastructureError(error.message);
+                traceId: telemetry.traceId,
+              });
+              console.warn('OpenRouter cost settlement failed', { runId: run.id });
             }
-            throw error;
           }
-        },
-        onActions: async (actions, partial, stage) => {
+          if (checkRunDeadline(startedAt, new Date(), budgets)) {
+            throw new BudgetError('run-deadline');
+          }
+          try {
+            signal.throwIfAborted();
+          } catch {
+            throw new BudgetError('cancelled');
+          }
           await assertOwned(run.id, executionToken);
-          const stepLimit = checkToolStepLimit(partial.steps.length, budgets);
-          if (stepLimit) {
-            await withOrbitSpan(
-              'orbit.budget',
-              {
-                stage,
-                budget_violation: stepLimit,
-                agent_id: run.agentId,
-                run_id: run.id,
-              },
-              () => undefined,
-            );
-            return actions.map((action) => ({
-              ...action,
-              policy: 'denied' as const,
-              effect: budgetViolationMessage(stepLimit),
-            }));
-          }
-          const ctx = await retryableStore(() => loadPolicyContext(run.agentId, run.actor, run.id));
-          if (!ctx) {
-            return actions.map((action) => ({
-              ...action,
-              policy: 'denied' as const,
-              effect: 'Agent unavailable for policy checks.',
-            }));
-          }
-          return await Promise.all(
-            actions.map(async (action, index) => {
-              const decision = await withOrbitSpan(
-                'orbit.policy',
+          return response;
+        },
+        async (partial) => {
+          const updated = await retryableStore(() =>
+            updateIfOwned(run.id, executionToken, { result: partial }),
+          );
+          if (!updated.length) throw new BudgetError('cancelled');
+        },
+        {
+          maxSteps: budgets.maxToolStepsPerRun,
+          signal,
+          initial: checkpointed,
+          prepare: async (request, partial) => {
+            try {
+              await telemetry.withSpan(
+                'orbit.budget',
                 {
-                  tool: action.type,
-                  stage,
+                  stage: request.stage ?? 'main',
                   agent_id: run.agentId,
                   run_id: run.id,
                   job_id: claim?.jobId,
                   lifecycle: agent.lifecycle,
                 },
-                async () =>
-                  retryableStore(() =>
-                    authorizeAction(ctx, {
-                      type: action.type,
-                      recipients: run.recipients,
-                      preliminary: stage === 'evaluator',
-                      executionToken,
-                      payload: { draft: action.draft, reason: action.reason },
-                      idempotencyKey: idempotencyKey([
-                        run.id,
-                        stage,
-                        action.type,
-                        String(index),
-                        action.reason,
-                      ]),
-                    }),
-                  ),
+                async () => {
+                  if (checkRunDeadline(startedAt, new Date(), budgets)) {
+                    throw new BudgetError('run-deadline');
+                  }
+                  try {
+                    signal.throwIfAborted();
+                  } catch {
+                    throw new BudgetError('cancelled');
+                  }
+                  quote = hasSpendCap(budgets)
+                    ? await call.quote?.(request.model, request.signal)
+                    : undefined;
+                  const stage = request.stage === 'main' ? 'main' : 'evaluator';
+                  const reserved = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
+                    runId: run.id,
+                    token: executionToken,
+                    signal: request.signal,
+                    stage,
+                  });
+                  settle = reserved;
+                  if (reserved.reservation) {
+                    const others =
+                      partial.quotaReservations?.filter((entry) => entry.stage !== stage) ?? [];
+                    partial.quotaReservations = [...others, reserved.reservation];
+                  }
+                  await assertOwned(run.id, executionToken);
+                  if (request.signal.aborted) throw new BudgetError('cancelled');
+                },
               );
-              await withOrbitSpan(
-                'orbit.tool',
+            } catch (error) {
+              // Quota/store faults here never reached the provider — mark so simulate can
+              // release the step reservation and let the queue retry the stage.
+              if (isBudgetError(error)) throw error;
+              if (isRetryableInfrastructureError(error)) {
+                throw new PreDispatchInfrastructureError(error.message);
+              }
+              throw error;
+            }
+          },
+          onActions: async (actions, partial, stage) => {
+            await assertOwned(run.id, executionToken);
+            const stepLimit = checkToolStepLimit(partial.steps.length, budgets);
+            if (stepLimit) {
+              await telemetry.withSpan(
+                'orbit.budget',
                 {
-                  tool: action.type,
                   stage,
-                  policy_decision: decision.decision,
+                  budget_violation: stepLimit,
                   agent_id: run.agentId,
                   run_id: run.id,
                 },
                 () => undefined,
               );
-              return {
+              return actions.map((action) => ({
                 ...action,
-                intentId: decision.intentId,
-                policy: decision.decision,
-                effect: decision.reasons.join(' '),
-              };
-            }),
-          );
+                policy: 'denied' as const,
+                effect: budgetViolationMessage(stepLimit),
+              }));
+            }
+            const ctx = await retryableStore(() =>
+              loadPolicyContext(run.agentId, run.actor, run.id),
+            );
+            if (!ctx) {
+              return actions.map((action) => ({
+                ...action,
+                policy: 'denied' as const,
+                effect: 'Agent unavailable for policy checks.',
+              }));
+            }
+            return await Promise.all(
+              actions.map(async (action, index) => {
+                const decision = await telemetry.withSpan(
+                  'orbit.policy',
+                  {
+                    tool: action.type,
+                    stage,
+                    agent_id: run.agentId,
+                    run_id: run.id,
+                    job_id: claim?.jobId,
+                    lifecycle: agent.lifecycle,
+                  },
+                  async () =>
+                    retryableStore(() =>
+                      authorizeAction(ctx, {
+                        type: action.type,
+                        recipients: run.recipients,
+                        preliminary: stage === 'evaluator',
+                        executionToken,
+                        payload: { draft: action.draft, reason: action.reason },
+                        idempotencyKey: idempotencyKey([
+                          run.id,
+                          stage,
+                          action.type,
+                          String(index),
+                          action.reason,
+                        ]),
+                      }),
+                    ),
+                );
+                await telemetry.withSpan(
+                  'orbit.tool',
+                  {
+                    tool: action.type,
+                    stage,
+                    policy_decision: decision.decision,
+                    agent_id: run.agentId,
+                    run_id: run.id,
+                  },
+                  () => undefined,
+                );
+                return {
+                  ...action,
+                  intentId: decision.intentId,
+                  policy: decision.decision,
+                  effect: decision.reasons.join(' '),
+                };
+              }),
+            );
+          },
         },
-      },
+      ),
     );
 
     const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
