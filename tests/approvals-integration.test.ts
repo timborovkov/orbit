@@ -100,6 +100,7 @@ test('disabled approval tools leave ordinary writes on the suppress path', async
 
 test('needs-approval suspends the run, releases the job, and resume never redispatches', async () => {
   const { id, versionId } = await seedAgent({ approvalTools: ['reply'] });
+  await sql`UPDATE agents SET budgets = ${sql.json({ ...uncapped, maxConcurrentRuns: 2 })} WHERE id=${id}`;
   const queued = await enqueueSimulation({
     actor,
     agentId: id,
@@ -129,6 +130,21 @@ test('needs-approval suspends the run, releases the job, and resume never redisp
   expect(job.status).toBe('completed');
   expect(job.claimed_by).toBeNull();
 
+  // Execution-deadline cleanup must not reject suspended approvals when another run starts.
+  await sql`UPDATE simulation_runs SET expires_at = now() - interval '1 hour' WHERE id=${queued.runId!}`;
+  const second = await enqueueSimulation({
+    actor,
+    agentId: id,
+    configurationId: versionId,
+    input: 'Sibling run while first awaits approval',
+  });
+  expect(second.runId).toBeTruthy();
+  const [stillWaiting] = await sql`SELECT status FROM simulation_runs WHERE id=${queued.runId!}`;
+  expect(stillWaiting.status).toBe('awaiting_approval');
+  expect(
+    await sql`SELECT id FROM action_intents WHERE agent_id=${id} AND review_status='pending'`,
+  ).toHaveLength(1);
+
   const [intent] =
     await sql`SELECT id FROM action_intents WHERE agent_id=${id} AND review_status='pending'`;
   expect(intent).toBeTruthy();
@@ -142,8 +158,10 @@ test('needs-approval suspends the run, releases the job, and resume never redisp
   expect(edited.payload.draft).toBe('Edited draft');
   expect(edited.decision).toBe('suppressed');
 
-  const [resumed] = await sql`SELECT status, job_id FROM simulation_runs WHERE id=${queued.runId!}`;
+  const [resumed] =
+    await sql`SELECT status, job_id, expires_at FROM simulation_runs WHERE id=${queued.runId!}`;
   expect(resumed.status).toBe('queued');
+  expect(new Date(resumed.expires_at).getTime()).toBeGreaterThan(Date.now());
   const resumeCalls = { count: 0 };
   await processSimulationJob({ runId: queued.runId! }, () => async () => {
     resumeCalls.count++;

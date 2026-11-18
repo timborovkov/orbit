@@ -191,13 +191,15 @@ async function expireStaleRuns(
   tx: Parameters<Parameters<ReturnType<typeof db>['transaction']>[0]>[0],
   agentId: string,
 ) {
+  // Do not apply the execution deadline to awaiting_approval — that wait is governed by
+  // action_intents.review_expires_at / expireStaleApprovals, not run.expiresAt.
   const stale = await tx
     .update(runs)
     .set({ status: 'interrupted', finishedAt: new Date() })
     .where(
       and(
         eq(runs.agentId, agentId),
-        inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
+        inArray(runs.status, ['queued', 'running']),
         lt(runs.expiresAt, new Date()),
       ),
     )
@@ -1058,6 +1060,11 @@ export async function resumeSimulationAfterApproval(runId: string, actor: string
       .limit(1);
     if (pending.length > 0) return { skipped: true as const, waiting: true as const };
 
+    const agent = (await tx.select().from(agents).where(eq(agents.id, run.agentId))).at(0);
+    const budgets = parseBudgets(agent?.budgets);
+    // Approval wait must not consume the execution deadline; start a fresh window for resume.
+    const expiresAt = new Date(Date.now() + budgets.runDeadlineSeconds * 1000);
+
     const job = await enqueueJob(tx, {
       type: SIMULATION_JOB_TYPE,
       payload: { runId: run.id, agentId: run.agentId, configurationId: run.configurationId, actor },
@@ -1071,6 +1078,7 @@ export async function resumeSimulationAfterApproval(runId: string, actor: string
         jobId: job.id,
         deferReason: null,
         finishedAt: null,
+        expiresAt,
       })
       .where(eq(runs.id, run.id));
     return { skipped: false as const, jobId: job.id };
