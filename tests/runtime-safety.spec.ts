@@ -105,6 +105,13 @@ test('administrators control independent spend caps, consent and proposal review
   expect(agent.budgets).toMatchObject({ dailySpendCents: null, monthlySpendCents: 450 });
 
   await openAccessSection(page, 'Consent');
+  const introductionConsent = page.getByRole('checkbox', { name: 'Introductions', exact: true });
+  await expect(introductionConsent).toBeChecked();
+  await introductionConsent.uncheck();
+  await page.getByRole('button', { name: 'Save consent requirements', exact: true }).click();
+  await expect(page.getByText('Consent requirements saved.')).toBeVisible();
+  const [consentPolicy] = await sql`SELECT consent_required_tools FROM agents WHERE id=${agent.id}`;
+  expect(consentPolicy.consent_required_tools).toEqual(['escalate']);
   await page
     .getByLabel('Recipient ID', { exact: false })
     .filter({ visible: true })
@@ -121,9 +128,15 @@ test('administrators control independent spend caps, consent and proposal review
   await expect(page.getByRole('list', { name: 'Recent consent records' })).toContainText('Revoked');
 
   await openAccessSection(page, 'Approvals');
+  const introductionReview = page.getByRole('checkbox', { name: 'Introduce', exact: true });
+  await expect(introductionReview).not.toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Escalate', exact: true })).not.toBeChecked();
+  await introductionReview.check();
   await page.getByRole('checkbox', { name: 'Reply', exact: true }).check();
   await page.getByRole('button', { name: 'Save approval requirements', exact: true }).click();
   await expect(page.getByText('Approval requirements saved.')).toBeVisible();
+  const [approvalPolicy] = await sql`SELECT approval_tools FROM agents WHERE id=${agent.id}`;
+  expect(approvalPolicy.approval_tools).toEqual(['reply', 'introduce']);
   await sql`UPDATE controls SET paused=false`;
   await sql`
     INSERT INTO action_intents(agent_id, action_type, payload, idempotency_key, decision, review_status)

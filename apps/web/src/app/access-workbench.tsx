@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/select';
 import type { AgentBudgets } from '@/lib/budgets';
 import type { LifecycleState } from '@/lib/lifecycle';
+import type { ConsentScope } from '@/lib/policy/scopes';
 import type { OpenRouterKeySource } from '@/lib/runtime/openrouter-key';
 import { accessSectionPanelHidden } from '@/lib/runtime/playground-ui';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
@@ -49,6 +50,7 @@ export function AccessWorkbench({
   budgets,
   usage,
   approvalTools,
+  consentRequiredTools,
   consents,
   hasAgentCredential,
   keySource,
@@ -63,6 +65,7 @@ export function AccessWorkbench({
   budgets: AgentBudgets;
   usage: BudgetUsageView;
   approvalTools: string[];
+  consentRequiredTools: ConsentScope[];
   consents: Workspace['consents'];
   hasAgentCredential: boolean;
   keySource: OpenRouterKeySource;
@@ -97,7 +100,13 @@ export function AccessWorkbench({
     lifecycle: <LifecycleControls agentId={agentId} lifecycle={lifecycle} />,
     budgets: <BudgetSettings agentId={agentId} budgets={budgets} usage={usage} />,
     approvals: <ReviewSettings agentId={agentId} approvalTools={approvalTools} />,
-    consent: <ConsentSettings agentId={agentId} consents={consents} />,
+    consent: (
+      <ConsentSettings
+        agentId={agentId}
+        consentRequiredTools={consentRequiredTools}
+        consents={consents}
+      />
+    ),
     skills: <SkillPicker agentId={agentId} skills={skills} selectedIds={skillIds} />,
     mcp: (
       <McpPicker

@@ -34,6 +34,10 @@ export const agents = pgTable('agents', {
   lifecycle: text('lifecycle').$type<LifecycleState>().notNull().default('shadow'),
   budgets: jsonb('budgets').$type<AgentBudgets>().notNull(),
   approvalTools: jsonb('approval_tools').$type<string[]>().notNull().default([]),
+  consentRequiredTools: jsonb('consent_required_tools')
+    .$type<ConsentScope[]>()
+    .notNull()
+    .default(['introduce', 'escalate']),
   enabledTools: jsonb('enabled_tools').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

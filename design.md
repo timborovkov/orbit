@@ -218,9 +218,12 @@ a left-side navigator. At 900px and below it switches to a Select. Hidden sectio
 form values. Lifecycle uses a list of state cards with keyboard-accessible action
 buttons and a Current label. Budgets group related limits in cards. Daily and monthly
 spend caps have independently named No cap switches, with the visible switch row stacking
-beneath its label on small screens. Consent records pair a recipient ID with a scope,
-choice and evidence reference. The Approvals queue shows pending decisions first with their
-drafts and approve or reject controls. OpenRouter shows the active key source by label.
+beneath its label on small screens. Access → Approvals lists every action, including introductions
+and escalations, with administrator review off by default. Access → Consent lets the administrator
+choose which of those two actions require recorded permission. Both consent requirements start on.
+Consent records pair a recipient ID with a scope, choice and evidence reference. The Approvals
+queue shows pending decisions first with their drafts and approve or reject controls. OpenRouter
+shows the active key source by label.
 The encrypted agent override is entered in a password field and cleared after submission.
 Removing it falls back to the environment default when one is available.
 Skills and MCP attachments use checkboxes. Each attached MCP connection shows a checklist

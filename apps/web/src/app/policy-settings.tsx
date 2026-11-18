@@ -1,7 +1,12 @@
 import { Inbox } from 'lucide-react';
 
-import { reviewProposal, saveConsent } from '@/actions/policy';
-import { ApprovalToolsForm } from '@/app/approval-tools-form';
+import {
+  reviewProposal,
+  saveApprovalTools,
+  saveConsent,
+  saveConsentRequirements,
+} from '@/actions/policy';
+import { ActionRequirementsForm } from '@/app/action-requirements-form';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
 import {
@@ -12,6 +17,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty';
 import { FieldGroup } from '@/components/ui/field';
+import { proposalTypes, type ConsentScope } from '@/lib/policy/scopes';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
 type Workspace = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>;
@@ -26,6 +32,12 @@ const actionLabels = {
   escalate: 'Escalate',
 } as Record<string, string>;
 
+const approvalOptions = proposalTypes.map((value) => ({ value, label: actionLabels[value] }));
+const consentOptions = [
+  { value: 'introduce', label: 'Introductions' },
+  { value: 'escalate', label: 'Escalations' },
+];
+
 export function ReviewSettings({
   agentId,
   approvalTools,
@@ -37,9 +49,17 @@ export function ReviewSettings({
     <section className="access-workbench">
       <div className="editor-section-heading">
         <h2>Approval requirements</h2>
-        <p className="muted">Introductions and escalations always require consent and approval.</p>
       </div>
-      <ApprovalToolsForm agentId={agentId} approvalTools={approvalTools} />
+      <ActionRequirementsForm
+        agentId={agentId}
+        idPrefix="approval-tool"
+        options={approvalOptions}
+        selected={approvalTools}
+        action={saveApprovalTools}
+        label="Save approval requirements"
+        legend="Require administrator review"
+        description="Choose which proposals from this agent wait for an administrator decision."
+      />
     </section>
   );
 }
@@ -47,9 +67,11 @@ export function ReviewSettings({
 export function ConsentSettings({
   agentId,
   consents,
+  consentRequiredTools,
 }: {
   agentId: string;
   consents: Workspace['consents'];
+  consentRequiredTools: ConsentScope[];
 }) {
   return (
     <section className="access-workbench">
@@ -59,6 +81,16 @@ export function ConsentSettings({
           Record a recipient’s choice and the source of their consent for this agent.
         </p>
       </div>
+      <ActionRequirementsForm
+        agentId={agentId}
+        idPrefix="consent-tool"
+        options={consentOptions}
+        selected={consentRequiredTools}
+        action={saveConsentRequirements}
+        label="Save consent requirements"
+        legend="Require recipient consent"
+        description="Choose which actions require recorded permission from everyone involved. Recorded refusals and revocations always block the action."
+      />
       <div className="consent-records-block">
         <h3 className="consent-records-title">Existing consents</h3>
         {consents.length > 0 ? (
@@ -91,10 +123,7 @@ export function ConsentSettings({
             name="scope"
             label="Consent scope"
             initialValue="introduce"
-            options={[
-              { value: 'introduce', label: 'Introductions' },
-              { value: 'escalate', label: 'Escalations' },
-            ]}
+            options={consentOptions}
           />
           <WorkspaceSelect
             id="consent-outcome"
@@ -143,7 +172,7 @@ export function ProposalReview({
             </EmptyMedia>
             <EmptyTitle>No proposals awaiting review</EmptyTitle>
             <EmptyDescription>
-              Simulated introduce and escalate actions that need approval will appear here.
+              Simulated actions that require administrator approval appear here.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

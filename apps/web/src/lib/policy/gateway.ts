@@ -17,8 +17,8 @@ import {
   type LifecycleState,
 } from '@/lib/lifecycle';
 import { mcpToolId, mcpToolIsReadOnly, normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
-import { missingRecipientConsent } from '@/lib/policy/consent';
-import { consentScope } from '@/lib/policy/scopes';
+import { recipientConsentFailure } from '@/lib/policy/consent';
+import type { ConsentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
 import {
   actionIntents,
@@ -53,6 +53,7 @@ export interface PolicyContext {
   lifecycle: LifecycleState;
   enabledTools: string[];
   approvalTools?: string[];
+  consentRequiredTools: ConsentScope[];
   budgets: ReturnType<typeof parseBudgets>;
   globalPaused: boolean;
   usage: BudgetSnapshot['day'] & { month: BudgetSnapshot['month']; activeRuns: number };
@@ -116,6 +117,7 @@ export async function loadPolicyContext(
     lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
     approvalTools: agent.approvalTools,
+    consentRequiredTools: agent.consentRequiredTools,
     budgets: parseBudgets(agent.budgets),
     globalPaused: global?.paused ?? true,
     usage: {
@@ -201,10 +203,7 @@ export function evaluateCandidate(
     }
 
     if (consentFailure) return { decision: 'deny', reasons: [consentFailure] };
-    if (
-      !action.preliminary &&
-      (consentScope.safeParse(action.type).success || ctx.approvalTools?.includes(action.type))
-    ) {
+    if (!action.preliminary && ctx.approvalTools?.includes(action.type)) {
       return {
         decision: 'needs-approval',
         reasons: ['An administrator must review this proposal.'],
@@ -278,7 +277,13 @@ export async function authorizeAction(
     const recipients = action.recipients ?? [];
     const consentFailure = action.readOnly
       ? null
-      : await missingRecipientConsent(tx, ctx.agentId, action.type, recipients);
+      : await recipientConsentFailure(
+          tx,
+          current.agentId,
+          action.type,
+          recipients,
+          current.consentRequiredTools,
+        );
     const mcp = action.type.startsWith('mcp:') && action.readOnly ? action.mcp : undefined;
     const grant =
       mcp &&

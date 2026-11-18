@@ -90,6 +90,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       budgets={agent.budgets}
       usage={usage}
       approvalTools={agent.approvalTools}
+      consentRequiredTools={agent.consentRequiredTools}
       consents={consents}
       hasAgentCredential={hasAgentCredential}
       keySource={keySource}

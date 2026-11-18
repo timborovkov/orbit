@@ -14,7 +14,12 @@ import {
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
-import { recordConsent, reviewProposedAction } from '@/lib/server/policy-mutations';
+import { persistApprovalTools } from '@/lib/server/lifecycle-mutations';
+import {
+  persistConsentRequirements,
+  recordConsent,
+  reviewProposedAction,
+} from '@/lib/server/policy-mutations';
 
 const databaseUrl =
   process.env.TEST_DATABASE_URL ??
@@ -1249,7 +1254,7 @@ test('Stop wins against a model request waiting to reserve quota', async () => {
   expect(run.status).toBe('interrupted');
 });
 
-test('simulated introductions enforce scoped consent before and after human review', async () => {
+test('introductions honor independent consent and administrator review settings', async () => {
   const id = randomUUID();
   ids.push(id);
   await sql`UPDATE controls SET paused=false`;
@@ -1298,7 +1303,23 @@ test('simulated introductions enforce scoped consent before and after human revi
   await consent('fixture-a', true);
   await consent('fixture-b', true, 'escalate');
   expect((await run()).proposal.policy).toBe('deny');
+
+  await persistConsentRequirements(actor, id, ['escalate']);
+  expect((await run()).proposal.policy).toBe('suppressed');
+  await consent('fixture-b', false);
+  const revoked = await run();
+  expect(revoked.proposal.policy).toBe('deny');
+  expect(revoked.proposal.effect).toContain('revoked consent');
+
   await consent('fixture-b', true);
+  await persistConsentRequirements(actor, id, ['introduce', 'escalate']);
+  const autonomous = await run();
+  expect(autonomous.proposal.policy).toBe('suppressed');
+  const [autonomousIntent] =
+    await sql`SELECT review_status FROM action_intents WHERE id=${autonomous.proposal.intentId}`;
+  expect(autonomousIntent.review_status).toBeNull();
+
+  await persistApprovalTools(actor, id, ['introduce']);
   const proposed = await run();
   expect(proposed.proposal.policy).toBe('needs-approval');
   await consent('fixture-b', false);
@@ -1331,4 +1352,20 @@ test('simulated introductions enforce scoped consent before and after human revi
     'deny',
   ]);
   expect(policyLog.every((row) => row.actor === actor)).toBe(true);
+
+  const escalation = {
+    type: 'escalate',
+    idempotencyKey: 'policy-fixture-escalation',
+    recipients: ['fixture-a'],
+  };
+  // Turning the introduction setting off leaves the escalation requirement independent.
+  await persistConsentRequirements(actor, id, ['escalate']);
+  expect(await authorizeAction(ctx, escalation)).toMatchObject({
+    decision: 'deny',
+    reasons: [expect.stringContaining('consent is required')],
+  });
+  await persistConsentRequirements(actor, id, []);
+  expect(
+    await authorizeAction(ctx, { ...escalation, idempotencyKey: 'policy-fixture-escalation-off' }),
+  ).toMatchObject({ decision: 'suppressed' });
 });
