@@ -113,6 +113,19 @@ class FakeJobStore {
     return { ...row };
   }
 
+  deadLetter(id: string, workerId: string, error: string, now = new Date()): JobRecord | null {
+    const row = this.rows.get(id);
+    if (!row || row.claimedBy !== workerId || row.status !== 'claimed') return null;
+    row.status = 'dead';
+    row.finishedAt = now;
+    row.lastError = error;
+    row.claimedAt = null;
+    row.claimExpiresAt = null;
+    row.claimedBy = null;
+    row.updatedAt = now;
+    return { ...row };
+  }
+
   release(id: string, workerId: string, now = new Date()): JobRecord | null {
     const row = this.rows.get(id);
     if (!row || row.claimedBy !== workerId || row.status !== 'claimed') return null;
@@ -430,6 +443,52 @@ test('shutdown releases unexecuted claims without burning attempts', async () =>
   expect(released?.status).toBe('pending');
   expect(released?.attempts).toBe(0);
   expect(released?.claimedBy).toBeNull();
+});
+
+test('unrecoverable paid-step finalization force-deads instead of ordinary retry', async () => {
+  const { startJobWorker } = await import('@/lib/queue/worker');
+  const { UnrecoverablePaidStepFinalizationError } = await import('@/lib/runtime/errors');
+  const store = new FakeJobStore();
+  const job = store.enqueue({
+    type: 'paid-burn',
+    payload: { runId: 'run-burn' },
+    idempotencyKey: 'burn-1',
+    maxAttempts: 5,
+  });
+  let deadLetterCalls = 0;
+  let failCalls = 0;
+
+  const worker = startJobWorker({
+    workerId: 'w-burn',
+    pollMs: 20,
+    recoveryMs: 60_000,
+    leaseMs: 3_000,
+    claimJobs: async () => store.claim('w-burn', 'paid-burn', 3_000),
+    completeJob: async () => {
+      throw new Error('should not complete');
+    },
+    failJob: async (id, workerId, error) => {
+      failCalls += 1;
+      return store.fail(id, workerId, error);
+    },
+    deadLetterJob: async (id, workerId, error) => store.deadLetter(id, workerId, error),
+    recoverExpiredLeases: async () => [],
+    heartbeat: async () => true,
+    onDeadLetter: async () => {
+      deadLetterCalls += 1;
+    },
+    handlers: {
+      'paid-burn': async () => {
+        throw new UnrecoverablePaidStepFinalizationError();
+      },
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  await worker.stop();
+  expect(store.get(job.id)?.status).toBe('dead');
+  expect(failCalls).toBe(0);
+  expect(deadLetterCalls).toBe(1);
 });
 
 test('recovery tick reconciles orphaned dead letters after onDeadLetter failure', async () => {

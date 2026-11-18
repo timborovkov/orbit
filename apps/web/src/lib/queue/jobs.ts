@@ -285,6 +285,39 @@ export async function failJob(
 }
 
 /**
+ * Force a claimed job to dead without waiting for max attempts.
+ * Used when ordinary retries would redispatch a paid model step that never burned durably.
+ */
+export async function deadLetterJob(
+  jobId: string,
+  workerId: string,
+  error: string,
+  store?: Store,
+): Promise<JobRecord | null> {
+  if (!store) {
+    return db().transaction((tx) => deadLetterJob(jobId, workerId, error, tx));
+  }
+  const now = new Date();
+  const updated = (
+    await store
+      .update(jobs)
+      .set({
+        status: 'dead',
+        lastError: error.slice(0, 4000),
+        availableAt: now,
+        claimedAt: null,
+        claimExpiresAt: null,
+        claimedBy: null,
+        finishedAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(jobs.id, jobId), eq(jobs.claimedBy, workerId), eq(jobs.status, 'claimed')))
+      .returning()
+  ).at(0);
+  return updated ? mapJob(updated) : null;
+}
+
+/**
  * Recover expired leases: retry when attempts remain, otherwise dead-letter.
  * Returns every updated job so callers can finalize domain state for dead letters.
  */

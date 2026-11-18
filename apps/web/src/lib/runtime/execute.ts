@@ -16,7 +16,7 @@ import {
 import { db } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
-import { enqueueJob } from '@/lib/queue/jobs';
+import { deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
 import {
   isRetryableInfrastructureError,
   PAID_STEP_BURN_MESSAGE,
@@ -24,6 +24,7 @@ import {
   PreDispatchInfrastructureError,
   RetryableInfrastructureError,
   retryableStore,
+  UnrecoverablePaidStepFinalizationError,
 } from '@/lib/runtime/errors';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
@@ -757,6 +758,46 @@ async function processSimulationRun(
         );
     } catch {
       void reportFailure('worker.settlement', { runId: run.id, traceId: telemetry.traceId });
+      // Paid-step burn: never ordinary-retry without a durable marker (redispatch risk).
+      if (inspectable === PAID_STEP_BURN_MESSAGE) {
+        try {
+          await db()
+            .update(runs)
+            .set({
+              result: sql`jsonb_set(
+                coalesce(${runs.result}, '{"steps":[],"actions":[],"error":null}'::jsonb),
+                '{error}',
+                to_jsonb(${PAID_STEP_BURN_MESSAGE}::text)
+              )`,
+            })
+            .where(
+              and(
+                eq(runs.id, run.id),
+                eq(runs.status, 'running'),
+                eq(runs.executionToken, executionToken),
+              ),
+            );
+          throw new RetryableInfrastructureError(
+            'Paid step burn finalization pending; will retry without redistributing the call.',
+          );
+        } catch (error) {
+          if (isRetryableInfrastructureError(error)) throw error;
+          if (claim) {
+            try {
+              await deadLetterJob(claim.jobId, claim.workerId, PAID_STEP_BURN_MESSAGE);
+              await finalizeExhaustedSimulationJob({ runId: run.id }, PAID_STEP_BURN_MESSAGE);
+              return;
+            } catch {
+              void reportFailure('worker.settlement', {
+                runId: run.id,
+                traceId: telemetry.traceId,
+              });
+            }
+          }
+          // Worker force-deads; do not Retryable-requeue without a burn marker.
+          throw new UnrecoverablePaidStepFinalizationError();
+        }
+      }
       // Do not return successfully — that would complete the job while the run stays running.
       throw new RetryableInfrastructureError(
         'Failed to persist terminal simulation failure; will retry finalization.',

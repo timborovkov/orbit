@@ -1,6 +1,7 @@
 import {
   claimJobs,
   completeJob,
+  deadLetterJob,
   failJob,
   heartbeatJob,
   recoverExpiredLeases,
@@ -12,6 +13,7 @@ import {
   DEFAULT_RECOVERY_MS,
   type JobRecord,
 } from '@/lib/queue/types';
+import { isUnrecoverablePaidStepFinalizationError } from '@/lib/runtime/errors';
 
 type JobHandler = (job: JobRecord, signal: AbortSignal) => Promise<void>;
 
@@ -34,6 +36,7 @@ export interface WorkerOptions {
   claimJobs?: typeof claimJobs;
   completeJob?: typeof completeJob;
   failJob?: typeof failJob;
+  deadLetterJob?: typeof deadLetterJob;
   releaseClaim?: typeof releaseClaim;
   recoverExpiredLeases?: typeof recoverExpiredLeases;
   /** Must return false only for confirmed lease loss; transport errors should throw. */
@@ -56,6 +59,7 @@ export function startJobWorker(options: WorkerOptions) {
   const claim = options.claimJobs ?? claimJobs;
   const complete = options.completeJob ?? completeJob;
   const fail = options.failJob ?? failJob;
+  const forceDead = options.deadLetterJob ?? deadLetterJob;
   const release = options.releaseClaim ?? releaseClaim;
   const recover = options.recoverExpiredLeases ?? recoverExpiredLeases;
   const beat = options.heartbeat ?? heartbeatJob;
@@ -146,9 +150,11 @@ export function startJobWorker(options: WorkerOptions) {
       },
       options.heartbeatIntervalMs ?? Math.max(1_000, Math.floor(leaseMs / 3)),
     );
-    const deadLetter = async (errorMessage: string) => {
+    const deadLetter = async (errorMessage: string, force = false) => {
       try {
-        const failed = await fail(job.id, options.workerId, errorMessage);
+        const failed = force
+          ? await forceDead(job.id, options.workerId, errorMessage)
+          : await fail(job.id, options.workerId, errorMessage);
         if (failed?.status === 'dead') {
           await notifyDeadLetter(job, errorMessage);
         }
@@ -166,8 +172,13 @@ export function startJobWorker(options: WorkerOptions) {
         await deadLetter('Failed to mark job completed');
       }
     } catch (error: unknown) {
-      const message = 'Worker could not process the job';
-      await deadLetter(message);
+      if (isUnrecoverablePaidStepFinalizationError(error)) {
+        // Paid response without a durable burn — never ordinary-retry (redispatch risk).
+        await deadLetter(error.message, true);
+      } else {
+        const message = 'Worker could not process the job';
+        await deadLetter(message);
+      }
       options.onError?.(error);
     } finally {
       clearInterval(heartbeat);

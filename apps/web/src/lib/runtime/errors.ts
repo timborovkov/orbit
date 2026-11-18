@@ -58,6 +58,23 @@ export function isPaidStepUnpersistedError(error: unknown): error is PaidStepUnp
   return error instanceof PaidStepUnpersistedError;
 }
 
+/**
+ * A paid step could not be burned durably and must not be ordinary-retried (that would
+ * redispatch). The worker should force-dead-letter the job instead of failJob backoff.
+ */
+export class UnrecoverablePaidStepFinalizationError extends Error {
+  constructor(message = PAID_STEP_BURN_MESSAGE) {
+    super(message);
+    this.name = 'UnrecoverablePaidStepFinalizationError';
+  }
+}
+
+export function isUnrecoverablePaidStepFinalizationError(
+  error: unknown,
+): error is UnrecoverablePaidStepFinalizationError {
+  return error instanceof UnrecoverablePaidStepFinalizationError;
+}
+
 /** Classify unexpected store failures as retryable without wrapping budget/retryable errors. */
 export async function retryableStore<T>(op: () => Promise<T>): Promise<T> {
   try {
