@@ -16,16 +16,20 @@ import {
   externalWritesPermitted,
   type LifecycleState,
 } from '@/lib/lifecycle';
+import { mcpToolId, mcpToolIsReadOnly, normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
 import { missingRecipientConsent } from '@/lib/policy/consent';
 import { consentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
 import {
   actionIntents,
+  agentMcpConnections,
   agents,
   controls,
+  mcpConnections,
   policyDecisions,
   runs,
   usageCounters,
+  type McpTransport,
 } from '@/lib/schema';
 
 export type PolicyDecision = 'allow' | 'deny' | 'needs-approval' | 'suppressed';
@@ -39,6 +43,7 @@ export interface CandidateAction {
   recipients?: string[];
   preliminary?: boolean;
   executionToken?: string;
+  mcp?: { connectionId: string; name: string; url: string; transport: McpTransport };
 }
 
 export interface PolicyContext {
@@ -137,6 +142,7 @@ export function evaluateCandidate(
   ctx: PolicyContext,
   action: CandidateAction,
   consentFailure: string | null = null,
+  mcpGranted = false,
 ): {
   decision: PolicyDecision;
   reasons: string[];
@@ -164,14 +170,16 @@ export function evaluateCandidate(
     return { decision: 'deny', reasons };
   }
 
-  if (ctx.enabledTools.length > 0 && !ctx.enabledTools.includes(action.type)) {
-    // Proposal allowlists must not block skill/MCP tools granted by Access membership.
-    // Unregistered MCP tools never reach execute; names still go through this choke point.
-    const resourceTool = action.type === 'load_skill' || action.type.startsWith('mcp:');
-    if (!resourceTool) {
-      reasons.push(`Tool ${action.type} is not enabled for this agent.`);
-      return { decision: 'deny', reasons };
-    }
+  const isMcp = action.type.startsWith('mcp:');
+  if (
+    isMcp
+      ? !mcpGranted
+      : action.type !== 'load_skill' &&
+        ctx.enabledTools.length > 0 &&
+        !ctx.enabledTools.includes(action.type)
+  ) {
+    reasons.push(`Tool ${action.type} is not enabled for this agent.`);
+    return { decision: 'deny', reasons };
   }
 
   const snapshot: BudgetSnapshot = {
@@ -217,7 +225,7 @@ export function evaluateCandidate(
 
   // load_skill and authorized MCP tools add neither inference requests nor spend —
   // the stage reservation already covers them (and may exactly fill the spend cap).
-  const inRunTool = action.type === 'load_skill' || action.type.startsWith('mcp:');
+  const inRunTool = action.type === 'load_skill' || isMcp;
   const requestLimit = inRunTool
     ? checkRequestBudgets(snapshot, BigInt(0), 0, { checkSpend: false })
     : checkRequestBudgets(snapshot);
@@ -261,6 +269,7 @@ export async function authorizeAction(
               eq(runs.agentId, ctx.agentId),
               eq(runs.executionToken, action.executionToken),
               eq(runs.status, 'running'),
+              sql`${runs.expiresAt} > now()`,
             ),
           )
       ).at(0);
@@ -270,7 +279,36 @@ export async function authorizeAction(
     const consentFailure = action.readOnly
       ? null
       : await missingRecipientConsent(tx, ctx.agentId, action.type, recipients);
-    const evaluated = evaluateCandidate(current, action, consentFailure);
+    const mcp = action.type.startsWith('mcp:') && action.readOnly ? action.mcp : undefined;
+    const grant =
+      mcp &&
+      (
+        await tx
+          .select({
+            name: mcpConnections.name,
+            allowlist: mcpConnections.toolAllowlist,
+            toolNames: agentMcpConnections.toolNames,
+          })
+          .from(agentMcpConnections)
+          .innerJoin(mcpConnections, eq(mcpConnections.id, agentMcpConnections.connectionId))
+          .where(
+            and(
+              eq(agentMcpConnections.agentId, ctx.agentId),
+              eq(mcpConnections.id, mcp.connectionId),
+              eq(mcpConnections.url, mcp.url),
+              eq(mcpConnections.transport, mcp.transport),
+            ),
+          )
+          .for('share', { of: mcpConnections })
+      ).at(0);
+    const mcpGranted = Boolean(
+      mcp &&
+      grant &&
+      action.type === mcpToolId(grant.name, mcp.name) &&
+      grant.toolNames.includes(mcp.name) &&
+      mcpToolIsReadOnly(normalizeMcpAllowlist(grant.allowlist), mcp.name),
+    );
+    const evaluated = evaluateCandidate(current, action, consentFailure, mcpGranted);
     const existing = (
       await tx
         .select()

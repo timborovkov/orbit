@@ -101,6 +101,10 @@ async function updateIfOwned(
     if (!current) return [];
     const result: SimulationResult = {
       ...incoming,
+      dispatchedStages: current.result.dispatchedStages?.length
+        ? [...new Set([...current.result.dispatchedStages, ...(incoming.dispatchedStages ?? [])])]
+        : incoming.dispatchedStages,
+      providerDispatches: current.result.providerDispatches ?? incoming.providerDispatches,
       quotaReservations: mergeQuotaReservations(
         current.result.quotaReservations,
         incoming.quotaReservations,
@@ -141,14 +145,14 @@ async function assertOwned(runId: string, executionToken: string) {
 }
 
 /**
- * Burn a paid stage as soon as the provider returns, before later ownership checks
- * that may throw Retryable and would otherwise leave only a pending reservation.
- * Reclaim while a call is still in flight still works — nothing is marked until return.
+ * Record a generation before dispatch so another claim cannot replay it against
+ * the same reservation. A request whose outcome is unknown keeps its reservation.
  */
 async function markStageDispatchedIfOwned(
   runId: string,
   executionToken: string,
   stage: 'evaluator' | 'main',
+  generation?: number,
 ) {
   return await db().transaction(async (tx) => {
     const current = (
@@ -160,15 +164,36 @@ async function markStageDispatchedIfOwned(
             eq(runs.id, runId),
             eq(runs.status, 'running'),
             eq(runs.executionToken, executionToken),
+            sql`${runs.expiresAt} > now()`,
           ),
         )
         .for('update')
     ).at(0);
     if (!current) return [];
     const dispatchedStages = [...new Set([...(current.result.dispatchedStages ?? []), stage])];
+    const providerDispatches = current.result.providerDispatches;
+    if (generation !== undefined) {
+      const reservation = current.result.quotaReservations?.find((entry) => entry.stage === stage);
+      if (
+        !reservation ||
+        generation > (reservation.reservedRequests ?? 1) ||
+        generation !== (providerDispatches?.[stage] ?? 0) + 1
+      ) {
+        throw new BudgetError('cancelled');
+      }
+    }
     return await tx
       .update(runs)
-      .set({ result: { ...current.result, dispatchedStages } })
+      .set({
+        result: {
+          ...current.result,
+          dispatchedStages,
+          providerDispatches:
+            generation === undefined
+              ? providerDispatches
+              : { ...providerDispatches, [stage]: generation },
+        },
+      })
       .where(
         and(
           eq(runs.id, runId),
@@ -576,36 +601,48 @@ async function processSimulationRun(
           config.config,
           run.input,
           async (request) => {
-            const response = await telemetry.callModel(call, { ...request, quote });
             const stage = request.stage === 'main' ? 'main' : 'evaluator';
+            const dispatch = { recorded: false };
+            const response = await telemetry.callModel(call, {
+              ...request,
+              quote,
+              beforeProviderCall: async (stepNumber) => {
+                if (request.signal.aborted) throw new BudgetError('cancelled');
+                const marked = await retryableStore(() =>
+                  markStageDispatchedIfOwned(run.id, executionToken, stage, stepNumber + 1),
+                );
+                if (!marked.length) throw new BudgetError('cancelled');
+                dispatch.recorded = true;
+              },
+            });
             // Persist the dispatch burn before assertOwned / settlement. A Retryable blip after
             // a paid return must not requeue with only a pending reservation (double-spend).
-            // We intentionally do not mark before the provider call: that blocked reclaim and
-            // pre-return infrastructure retries in smoke tests.
-            await telemetry.withSpan(
-              'orbit.runtime',
-              {
-                stage,
-                agent_id: run.agentId,
-                run_id: run.id,
-                job_id: claim?.jobId,
-                lifecycle: agent.lifecycle,
-              },
-              async () => {
-                try {
-                  const marked = await retryableStore(() =>
-                    markStageDispatchedIfOwned(run.id, executionToken, stage),
-                  );
-                  if (!marked.length) throw new BudgetError('cancelled');
-                } catch (error) {
-                  if (isBudgetError(error)) throw error;
-                  if (isRetryableInfrastructureError(error)) {
-                    throw new PaidStepUnpersistedError(stage);
+            // Injected inference implementations can omit the per-request hook.
+            if (!dispatch.recorded)
+              await telemetry.withSpan(
+                'orbit.runtime',
+                {
+                  stage,
+                  agent_id: run.agentId,
+                  run_id: run.id,
+                  job_id: claim?.jobId,
+                  lifecycle: agent.lifecycle,
+                },
+                async () => {
+                  try {
+                    const marked = await retryableStore(() =>
+                      markStageDispatchedIfOwned(run.id, executionToken, stage),
+                    );
+                    if (!marked.length) throw new BudgetError('cancelled');
+                  } catch (error) {
+                    if (isBudgetError(error)) throw error;
+                    if (isRetryableInfrastructureError(error)) {
+                      throw new PaidStepUnpersistedError(stage);
+                    }
+                    throw error;
                   }
-                  throw error;
-                }
-              },
-            );
+                },
+              );
             // Settle spend when priced; always pass actual provider calls so unused
             // request slots from a conservative tool-loop reservation are released.
             try {
@@ -633,7 +670,7 @@ async function processSimulationRun(
             if (!updated.length) throw new BudgetError('cancelled');
           },
           {
-            maxSteps: budgets.maxToolStepsPerRun,
+            maxToolSteps: budgets.maxToolStepsPerRun,
             signal,
             initial: checkpointed,
             skillCatalog: resources.skillCatalog,
@@ -670,7 +707,7 @@ async function processSimulationRun(
                       : undefined;
                     // Match openRouterInference stopWhen: structured output + room for tool steps.
                     const providerCalls = hasTools
-                      ? Math.max(2, (request.maxToolSteps ?? budgets.maxToolStepsPerRun) + 1)
+                      ? (request.maxToolSteps ?? budgets.maxToolStepsPerRun) + 1
                       : 1;
                     const upperBound =
                       quote?.upperBoundMicros !== undefined

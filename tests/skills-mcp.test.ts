@@ -1,15 +1,15 @@
 import { afterAll, expect, test } from 'bun:test';
 
 import { budgetDefaults } from '@/lib/budgets';
-import { normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
-import { evaluateActionForTest } from '@/lib/policy/gateway';
+import { mcpToolId, normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
+import { evaluateActionForTest, evaluateCandidate } from '@/lib/policy/gateway';
 import {
   connectMcpClient,
   decodeMcpHeaders,
   loadMcpToolsForAgent,
+  mcpHeadersFromRows,
   mcpToolAlias,
-  mcpToolId,
-  selectMcpDiscoverHeaders,
+  sameMcpEndpoint,
   type McpConnectionConfig,
 } from '@/lib/runtime/mcp';
 import { encryptSecret } from '@/lib/runtime/secrets';
@@ -65,34 +65,20 @@ test('MCP allowlist normalization keeps legacy strings mutating', () => {
   expect(normalizeMcpAllowlist([])).toBeNull();
 });
 
-test('Fetch tools reuses stored headers unless draft rows or clear win', () => {
+test('MCP credentials are scoped to the full URL and transport', () => {
   const previous = process.env.ORBIT_ENCRYPTION_KEY;
   process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
   try {
-    const connectionId = '00000000-0000-4000-8000-0000000000aa';
-    const stored = decodeMcpHeaders(
-      connectionId,
-      encryptSecret(connectionId, JSON.stringify({ Authorization: 'Bearer stored' })),
-    );
-    expect(stored).toEqual({ Authorization: 'Bearer stored' });
-    expect(
-      selectMcpDiscoverHeaders({
-        draftHeaders: [{ key: '', value: '' }],
-        storedHeaders: stored,
-      }),
-    ).toEqual({ Authorization: 'Bearer stored' });
-    expect(
-      selectMcpDiscoverHeaders({
-        draftHeaders: [{ key: 'Authorization', value: 'Bearer draft' }],
-        storedHeaders: stored,
-      }),
-    ).toEqual({ Authorization: 'Bearer draft' });
-    expect(
-      selectMcpDiscoverHeaders({
-        clearHeaders: true,
-        storedHeaders: stored,
-      }),
-    ).toBeUndefined();
+    const id = '00000000-0000-4000-8000-0000000000aa';
+    const headers = mcpHeadersFromRows([{ key: 'Authorization', value: ' Bearer fixture ' }]);
+    expect(headers).toEqual({ Authorization: 'Bearer fixture' });
+    expect(decodeMcpHeaders(id, encryptSecret(id, JSON.stringify(headers)))).toEqual(headers);
+    expect(mcpHeadersFromRows([{ key: 'Authorization', value: '   ' }])).toBeUndefined();
+    const saved = { url: 'https://example.test/mcp', transport: 'http' } as const;
+    expect(sameMcpEndpoint(saved, { ...saved, url: 'https://example.test:443/mcp' })).toBe(true);
+    expect(sameMcpEndpoint(saved, { ...saved, url: 'https://example.test/other' })).toBe(false);
+    expect(sameMcpEndpoint(saved, { ...saved, url: 'https://different.test/mcp' })).toBe(false);
+    expect(sameMcpEndpoint(saved, { ...saved, transport: 'sse' })).toBe(false);
   } finally {
     if (previous) process.env.ORBIT_ENCRYPTION_KEY = previous;
     else delete process.env.ORBIT_ENCRYPTION_KEY;
@@ -163,7 +149,7 @@ test('load_skill refuses unattached skills and policy denials', async () => {
   expect(deniedResult).toMatchObject({ error: 'blocked' });
 });
 
-test('policy gateway permits load_skill and mcp tools when proposal allowlist is set', () => {
+test('policy requires a separate MCP tool grant when a proposal allowlist is set', () => {
   const base = {
     lifecycle: 'shadow' as const,
     enabledTools: ['like'],
@@ -183,7 +169,7 @@ test('policy gateway permits load_skill and mcp tools when proposal allowlist is
       idempotencyKey: 'm1',
       readOnly: true,
     }).decision,
-  ).toBe('allow');
+  ).toBe('deny');
   expect(evaluateActionForTest(base, { type: 'reply', idempotencyKey: 'r1' }).decision).toBe(
     'deny',
   );
@@ -206,7 +192,11 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
     url: 'http://127.0.0.1:9/mcp',
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: [{ name: 'echo', readOnly: true }],
+    toolAllowlist: [
+      { name: 'echo', readOnly: true },
+      { name: 'secret_admin', readOnly: true },
+    ],
+    grantedTools: ['echo'],
   };
   const decisions: { type: string; readOnly?: boolean }[] = [];
   const { tools, statuses, close } = await loadMcpToolsForAgent({
@@ -215,7 +205,7 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
     authorize: async (_ctx, action) => {
       decisions.push({ type: action.type, readOnly: action.readOnly });
       // Use the real gateway evaluator so allow depends on admin readOnly marks.
-      return evaluateActionForTest(policy, action);
+      return evaluateCandidate(policy, action, null, true);
     },
     connect: async () =>
       ({
@@ -245,57 +235,70 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
   await close();
 });
 
-test('unclassified and mutating MCP tools stay suppressed by the real gateway', async () => {
+test('unclassified and mutating MCP tools are never exposed, even if granted', async () => {
   const connection: McpConnectionConfig = {
     id: '00000000-0000-4000-8000-000000000021',
     name: 'crm',
     url: 'http://127.0.0.1:9/mcp',
     transport: 'http',
     encryptedHeaders: null,
-    // Legacy string allowlist → mutating; empty allowlist tools also mutate.
     toolAllowlist: ['search', { name: 'write', readOnly: false }],
+    grantedTools: ['search', 'write', 'unknown'],
   };
-  const decisions: { type: string; readOnly?: boolean; decision: string }[] = [];
+  let connected = false;
+  const { tools, close } = await loadMcpToolsForAgent({
+    connections: [connection],
+    policy: { ...policy, globalPaused: true },
+    connect: async () => {
+      connected = true;
+      throw new Error('Connection should not be opened without a callable grant');
+    },
+  });
+  expect(connected).toBe(false);
+  expect(tools).toEqual({});
+  await close();
+});
+
+test('MCP tool failures omit remote error contents', async () => {
+  const connection: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000021',
+    name: 'failing',
+    url: 'http://127.0.0.1:9/mcp',
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: [
+      { name: 'search', readOnly: true },
+      { name: 'get', readOnly: true },
+    ],
+    grantedTools: ['search', 'get'],
+  };
+  const calls: unknown[] = [];
   const { tools, close } = await loadMcpToolsForAgent({
     connections: [connection],
     policy,
-    authorize: async (_ctx, action) => {
-      const evaluated = evaluateActionForTest(policy, action);
-      decisions.push({
-        type: action.type,
-        readOnly: action.readOnly,
-        decision: evaluated.decision,
-      });
-      return evaluated;
+    authorize: async () => ({ decision: 'allow', reasons: [] }),
+    onCall: (record) => {
+      calls.push(record);
     },
     connect: async () =>
       ({
         tools: async () => ({
-          search: fakeTool(async () => ({ hits: 1 })),
-          write: fakeTool(async () => ({ ok: true })),
+          search: fakeTool(async () => {
+            throw new Error('private transport response');
+          }),
+          get: fakeTool(async () => ({
+            isError: true,
+            content: [{ type: 'text', text: 'private remote error' }],
+          })),
         }),
         close: async () => undefined,
       }) as unknown as Awaited<ReturnType<typeof connectMcpClient>>,
   });
-
-  const search = await tools[mcpToolAlias('crm', 'search')]!.execute!(
-    { q: 'acme' },
-    { ...execOptions, toolCallId: 'm1' },
-  );
-  const write = await tools[mcpToolAlias('crm', 'write')]!.execute!(
-    { id: '1' },
-    { ...execOptions, toolCallId: 'm2' },
-  );
-  expect(search).toEqual({
-    error: expect.stringContaining('Shadow mode suppresses external writes'),
-  });
-  expect(write).toEqual({
-    error: expect.stringContaining('Shadow mode suppresses external writes'),
-  });
-  expect(decisions).toEqual([
-    { type: mcpToolId('crm', 'search'), readOnly: false, decision: 'suppressed' },
-    { type: mcpToolId('crm', 'write'), readOnly: false, decision: 'suppressed' },
-  ]);
+  for (const tool of Object.values(tools)) {
+    expect(await tool.execute!({}, execOptions)).toEqual({ error: 'MCP tool execution failed.' });
+  }
+  expect(calls).toHaveLength(2);
+  expect(JSON.stringify(calls)).not.toContain('private');
   await close();
 });
 
@@ -306,7 +309,8 @@ test('MCP aliases stay unique when sanitized connection/tool names collide', asy
     url: 'http://127.0.0.1:9/a',
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: null,
+    toolAllowlist: [{ name: 'c', readOnly: true }],
+    grantedTools: ['c'],
   };
   const second: McpConnectionConfig = {
     id: '00000000-0000-4000-8000-000000000042',
@@ -314,7 +318,8 @@ test('MCP aliases stay unique when sanitized connection/tool names collide', asy
     url: 'http://127.0.0.1:9/b',
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: null,
+    toolAllowlist: [{ name: 'b_c', readOnly: true }],
+    grantedTools: ['b_c'],
   };
   const { tools, statuses, close } = await loadMcpToolsForAgent({
     connections: [first, second],
@@ -344,7 +349,8 @@ test('MCP connection failures degrade without aborting the tool set', async () =
     url: 'http://127.0.0.1:9/ok',
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: null,
+    toolAllowlist: [{ name: 'ping', readOnly: true }],
+    grantedTools: ['ping'],
   };
   const bad: McpConnectionConfig = {
     id: '00000000-0000-4000-8000-000000000022',
@@ -352,7 +358,8 @@ test('MCP connection failures degrade without aborting the tool set', async () =
     url: 'http://127.0.0.1:9/bad',
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: null,
+    toolAllowlist: [{ name: 'ping', readOnly: true }],
+    grantedTools: ['ping'],
   };
   const { tools, statuses, close } = await loadMcpToolsForAgent({
     connections: [bad, ok],
@@ -379,10 +386,16 @@ afterAll(() => {
   fakeServer?.stop(true);
 });
 
-test('MCP HTTP fake server tools register and execute through policy', async () => {
+test('MCP HTTP tools execute through policy and bound a stalled session close', async () => {
+  let closingSession: string | null = null;
   fakeServer = Bun.serve({
+    hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
+      if (request.method === 'DELETE') {
+        closingSession = request.headers.get('mcp-session-id');
+        return await new Promise<Response>(() => {});
+      }
       if (request.method !== 'POST') return new Response('method', { status: 405 });
       const message = (await request.json()) as {
         jsonrpc: string;
@@ -391,15 +404,18 @@ test('MCP HTTP fake server tools register and execute through policy', async () 
         params?: { name?: string; arguments?: Record<string, unknown> };
       };
       if (message.method === 'initialize') {
-        return Response.json({
-          jsonrpc: '2.0',
-          id: message.id,
-          result: {
-            protocolVersion: '2025-11-25',
-            capabilities: { tools: {} },
-            serverInfo: { name: 'orbit-fake', version: '1.0.0' },
+        return Response.json(
+          {
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              protocolVersion: '2025-11-25',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'orbit-fake', version: '1.0.0' },
+            },
           },
-        });
+          { headers: { 'mcp-session-id': 'http-fixture-session' } },
+        );
       }
       if (message.method === 'notifications/initialized') {
         return new Response(null, { status: 202 });
@@ -452,7 +468,8 @@ test('MCP HTTP fake server tools register and execute through policy', async () 
     url,
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: ['echo'],
+    toolAllowlist: [{ name: 'echo', readOnly: true }],
+    grantedTools: ['echo'],
   };
   const { tools, statuses, close } = await loadMcpToolsForAgent({
     connections: [connection],
@@ -472,6 +489,7 @@ test('MCP HTTP fake server tools register and execute through policy', async () 
     content: [{ type: 'text', text: 'orbit' }],
   });
   await close();
+  expect(closingSession).toBe('http-fixture-session');
 });
 
 test('tool step gate blocks further MCP and skill calls once exhausted', async () => {
@@ -482,7 +500,11 @@ test('tool step gate blocks further MCP and skill calls once exhausted', async (
     url: 'http://127.0.0.1:9/mcp',
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: null,
+    toolAllowlist: [
+      { name: 'a', readOnly: true },
+      { name: 'b', readOnly: true },
+    ],
+    grantedTools: ['a', 'b'],
   };
   const { tools, close } = await loadMcpToolsForAgent({
     connections: [connection],
@@ -532,7 +554,8 @@ test('MCP discovery aborts when the run signal expires', async () => {
     url: 'http://127.0.0.1:9/mcp',
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: null,
+    toolAllowlist: [{ name: 'hang', readOnly: true }],
+    grantedTools: ['hang'],
   };
   const controller = new AbortController();
   const { statuses, close } = await loadMcpToolsForAgent({
@@ -565,7 +588,8 @@ test('MCP discovery failure closes an initialized client', async () => {
     url: 'http://127.0.0.1:9/mcp',
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: null,
+    toolAllowlist: [{ name: 'leaky', readOnly: true }],
+    grantedTools: ['leaky'],
   };
   const { statuses, close } = await loadMcpToolsForAgent({
     connections: [connection],
@@ -654,11 +678,16 @@ test('load_skill and read-only MCP do not require spare inference quota', () => 
     }).decision,
   ).toBe('allow');
   expect(
-    evaluateActionForTest(saturated, {
-      type: mcpToolId('crm', 'search'),
-      readOnly: true,
-      idempotencyKey: 'mcp-no-extra-request',
-    }).decision,
+    evaluateCandidate(
+      { ...policy, ...saturated },
+      {
+        type: mcpToolId('crm', 'search'),
+        readOnly: true,
+        idempotencyKey: 'mcp-no-extra-request',
+      },
+      null,
+      true,
+    ).decision,
   ).toBe('allow');
   // Unrelated read-only tools still see the filled spend reservation.
   expect(

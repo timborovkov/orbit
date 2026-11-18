@@ -3,6 +3,7 @@ import { createMCPClient, type MCPClient } from '@ai-sdk/mcp';
 import type { Tool } from 'ai';
 
 import {
+  mcpToolId,
   mcpToolIsReadOnly,
   normalizeMcpAllowlist,
   type McpAllowedTool,
@@ -22,6 +23,7 @@ export interface McpConnectionConfig {
   encryptedHeaders: string | null;
   /** Structured allowlist, or legacy `string[]` (normalized at load). */
   toolAllowlist: McpToolAllowlistJson | McpAllowedTool[] | null;
+  grantedTools: string[];
 }
 
 export interface McpConnectionStatus {
@@ -30,11 +32,6 @@ export interface McpConnectionStatus {
   status: 'ready' | 'error';
   error?: string;
   tools: string[];
-}
-
-/** Canonical capability id for policy, audit and run history. */
-export function mcpToolId(connectionName: string, toolName: string) {
-  return `mcp:${connectionName}:${toolName}`;
 }
 
 /**
@@ -58,26 +55,24 @@ export function mcpToolAlias(connectionName: string, toolName: string) {
   return `${prefix}${head}${suffix}`;
 }
 
-/**
- * Prefer draft header rows; otherwise reuse stored headers unless clearing.
- * Callers that load stored headers must keep them server-side only.
- */
-export function selectMcpDiscoverHeaders(input: {
-  draftHeaders?: { key: string; value: string }[];
-  clearHeaders?: boolean;
-  storedHeaders?: Record<string, string>;
-}): Record<string, string> | undefined {
-  const draft: Record<string, string> = {};
-  for (const row of input.draftHeaders ?? []) {
-    const key = row.key.trim();
-    const value = row.value.trim();
-    if (key && value) draft[key] = value;
-  }
-  if (Object.keys(draft).length) return draft;
-  if (input.clearHeaders) return undefined;
-  return input.storedHeaders && Object.keys(input.storedHeaders).length
-    ? input.storedHeaders
-    : undefined;
+export function mcpHeadersFromRows(rows: { key: string; value: string }[]) {
+  const entries = rows.flatMap(({ key, value }) => {
+    const trimmed = value.trim();
+    return trimmed ? [[key, trimmed] as const] : [];
+  });
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+export const mcpEndpointHeaderError =
+  'Replace or clear stored headers before changing the MCP endpoint.';
+
+export function sameMcpEndpoint(
+  saved: { url: string; transport: McpTransport },
+  draft: { url: string; transport: McpTransport },
+) {
+  return (
+    saved.transport === draft.transport && URL.parse(saved.url)?.href === URL.parse(draft.url)?.href
+  );
 }
 
 /** Decrypt stored MCP auth headers. Never return ciphertext or secrets to the browser. */
@@ -104,16 +99,47 @@ export async function connectMcpClient(
   signal?: AbortSignal,
 ): Promise<MCPClient> {
   const headers = decodeMcpHeaders(connection.id, connection.encryptedHeaders);
+  if (connection.encryptedHeaders && !headers)
+    throw new Error('Stored MCP headers are unavailable.');
+  return await openMcpClient(
+    {
+      ...connection,
+      headers,
+    },
+    signal,
+  );
+}
+
+export function mcpDiscoverySignal(signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(30_000);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+export async function openMcpClient(
+  connection: { url: string; transport: McpTransport; headers?: Record<string, string> },
+  signal?: AbortSignal,
+) {
   return await createMCPClient({
     transport: {
       type: connection.transport,
       url: connection.url,
-      headers,
+      headers: connection.headers,
+      redirect: 'error',
+      fetch: Object.assign(
+        (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+          if (init?.method !== 'DELETE') return fetch(input, init);
+          // Legacy Streamable HTTP terminates the session with a separate DELETE.
+          const timeout = AbortSignal.timeout(2_000);
+          const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+          return fetch(input, { ...init, signal });
+        },
+        fetch,
+      ),
     },
     // Prefer classic initialize so admin-defined HTTP/SSE servers do not need
     // modern protocol discovery; discovery can be enabled later if required.
     protocolVersionDiscovery: false,
-    initializationOptions: signal ? { signal } : undefined,
+    initializationOptions: { signal: mcpDiscoverySignal(signal) },
   });
 }
 
@@ -125,8 +151,7 @@ interface LoadedConnection {
 
 /** List tools with a hard deadline; `client.tools()` does not accept AbortSignal. */
 export async function listRemoteTools(client: MCPClient, signal?: AbortSignal) {
-  const timeout = AbortSignal.timeout(30_000);
-  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const combined = mcpDiscoverySignal(signal);
   return await new Promise<Awaited<ReturnType<MCPClient['tools']>>>((resolve, reject) => {
     const onAbort = () => {
       reject(
@@ -172,20 +197,21 @@ async function loadOneConnection(
 ): Promise<LoadedConnection> {
   let client: MCPClient | undefined;
   try {
-    client = await options.connect(connection, options.signal);
-    const remote = await listRemoteTools(client, options.signal);
+    const signal = mcpDiscoverySignal(options.signal);
     const allowlist = normalizeMcpAllowlist(connection.toolAllowlist);
-    const allow = allowlist?.length ? new Set(allowlist.map((tool) => tool.name)) : null;
     const registered: string[] = [];
     const tools: Record<string, Tool> = {};
+    const grants = new Set(
+      connection.grantedTools.filter((name) => mcpToolIsReadOnly(allowlist, name)),
+    );
+    if (grants.size) client = await options.connect(connection, signal);
+    const remote = client ? await listRemoteTools(client, signal) : {};
 
     for (const [toolName, remoteTool] of Object.entries(remote)) {
-      if (allow && !allow.has(toolName)) continue;
+      if (!grants.has(toolName)) continue;
       const capability = mcpToolId(connection.name, toolName);
       const alias = mcpToolAlias(connection.name, toolName);
       const originalExecute = remoteTool.execute;
-      // Remote annotations are untrusted; only admin allowlist entries may set readOnly.
-      const readOnly = mcpToolIsReadOnly(allowlist, toolName);
       registered.push(toolName);
       // Register under the provider-safe alias; policy/audit still use `capability`.
       tools[alias] = {
@@ -220,7 +246,13 @@ async function loadOneConnection(
             .digest('hex');
           const decision = await options.authorize(options.policy, {
             type: capability,
-            readOnly,
+            readOnly: true,
+            mcp: {
+              connectionId: connection.id,
+              name: toolName,
+              url: connection.url,
+              transport: connection.transport,
+            },
             executionToken: options.executionToken,
             payload: args,
             idempotencyKey,
@@ -238,28 +270,29 @@ async function loadOneConnection(
             return { error: decision.reasons.join(' ') || 'MCP tool denied by policy.' };
           }
 
+          let result: unknown;
+          let error: string | undefined;
           try {
-            const result = await originalExecute(input, execOptions);
-            const record: ToolCallRecord = {
-              tool: capability,
-              args,
-              policy: 'allow',
-              result: summariseToolResult(result),
-            };
-            await options.onCall?.(record);
-            return result;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'MCP tool execution failed.';
-            const record: ToolCallRecord = {
-              tool: capability,
-              args,
-              policy: 'allow',
-              result: null,
-              error: message,
-            };
-            await options.onCall?.(record);
-            return { error: message };
+            result = await originalExecute(input, execOptions);
+            if (
+              result &&
+              typeof result === 'object' &&
+              'isError' in result &&
+              result.isError === true
+            ) {
+              error = 'MCP tool execution failed.';
+            }
+          } catch {
+            error = 'MCP tool execution failed.';
           }
+          await options.onCall?.({
+            tool: capability,
+            args,
+            policy: 'allow',
+            result: error ? null : summariseToolResult(result),
+            error,
+          });
+          return error ? { error } : result;
         },
       } as Tool;
     }

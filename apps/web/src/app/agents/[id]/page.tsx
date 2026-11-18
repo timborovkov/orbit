@@ -42,7 +42,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     consents,
     usage,
     skillIds,
-    mcpConnectionIds,
+    mcpSelections,
   } = workspace;
   const [{ items: librarySkills }, { items: libraryMcp }] = await Promise.all([
     listSkillSummaries(),
@@ -94,8 +94,16 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       keySource={keySource}
       skills={librarySkills}
       skillIds={skillIds}
-      mcpConnections={libraryMcp}
-      mcpConnectionIds={mcpConnectionIds}
+      mcpConnections={libraryMcp.map(({ id, name, url, transport, toolAllowlist, updatedAt }) => ({
+        id,
+        name,
+        url,
+        transport,
+        revision: updatedAt.toISOString(),
+        readOnlyTools:
+          toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [],
+      }))}
+      mcpSelections={mcpSelections}
     />
   );
   const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;

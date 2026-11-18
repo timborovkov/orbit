@@ -232,6 +232,7 @@ export const agentMcpConnections = pgTable(
     connectionId: uuid('connection_id')
       .notNull()
       .references(() => mcpConnections.id, { onDelete: 'cascade' }),
+    toolNames: text('tool_names').array().notNull().default([]),
   },
   (table) => [primaryKey({ columns: [table.agentId, table.connectionId] })],
 );

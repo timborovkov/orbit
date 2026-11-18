@@ -82,8 +82,19 @@ async function quoteOpenRouter(
 export function openRouterInference(apiKey: string): ModelCall {
   const provider = createOpenRouter({ apiKey });
   const call: ModelCall = async (request) => {
-    const { model, system, input, signal, quote, tools, maxToolSteps, telemetry } = request;
+    const {
+      model,
+      system,
+      input,
+      signal,
+      quote,
+      tools,
+      maxToolSteps,
+      beforeProviderCall,
+      telemetry,
+    } = request;
     const hasTools = Boolean(tools && Object.keys(tools).length);
+    const toolSteps = maxToolSteps ?? 10;
     const response = await generateText({
       model: provider(model, {
         usage: { include: true },
@@ -100,7 +111,12 @@ export function openRouterInference(apiKey: string): ModelCall {
       prompt: input,
       tools: hasTools ? tools : undefined,
       // Structured output counts as a step; leave room for tool calls when attached.
-      stopWhen: hasTools ? isStepCount(Math.max(2, (maxToolSteps ?? 10) + 1)) : undefined,
+      stopWhen: hasTools ? isStepCount(toolSteps + 1) : undefined,
+      prepareStep: async ({ stepNumber }) => {
+        signal.throwIfAborted();
+        await beforeProviderCall?.(stepNumber);
+        if (hasTools && stepNumber >= toolSteps) return { activeTools: [] };
+      },
       output: Output.object({ schema: decisionSchema }),
       maxOutputTokens,
       maxRetries: 0,

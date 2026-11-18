@@ -15,6 +15,7 @@ import {
   FieldLegend,
   FieldSet,
 } from '@/components/ui/field';
+import type { AgentMcpSelection } from '@/lib/mcp-allowlist';
 
 export function SkillPicker({
   agentId,
@@ -99,20 +100,38 @@ export function SkillPicker({
   );
 }
 
+export interface McpPickerConnection {
+  id: string;
+  name: string;
+  url: string;
+  transport: string;
+  revision: string;
+  readOnlyTools: string[];
+}
+
 export function McpPicker({
   agentId,
   connections,
-  selectedIds,
+  selections,
 }: {
   agentId: string;
-  connections: { id: string; name: string; url: string; transport: string }[];
-  selectedIds: string[];
+  connections: McpPickerConnection[];
+  selections: AgentMcpSelection[];
 }) {
-  const [checked, setChecked] = useState<Record<string, boolean>>(() => {
-    const selected = new Set(selectedIds);
-    return Object.fromEntries(
-      connections.map((connection) => [connection.id, selected.has(connection.id)]),
-    );
+  const [selected, setSelected] = useState<Record<string, string[] | undefined>>(() =>
+    Object.fromEntries(selections.map(({ connectionId, toolNames }) => [connectionId, toolNames])),
+  );
+  const submitted = connections.flatMap(({ id, revision, readOnlyTools }) => {
+    const toolNames = selected[id];
+    return toolNames
+      ? [
+          {
+            connectionId: id,
+            revision,
+            toolNames: readOnlyTools.filter((name) => toolNames.includes(name)),
+          },
+        ]
+      : [];
   });
 
   return (
@@ -120,8 +139,7 @@ export function McpPicker({
       <div className="editor-section-heading">
         <h2>MCP connections</h2>
         <p className="muted">
-          Attach shared MCP servers. Tools are registered at run time and every call is policy
-          gated.
+          Attach shared MCP servers and choose which read-only tools this agent can use.
         </p>
       </div>
       {!connections.length ? (
@@ -131,21 +149,12 @@ export function McpPicker({
       ) : (
         <WorkspaceForm action={saveAgentMcpConnections} label="Save MCP selection" saveState>
           <input type="hidden" name="agentId" value={agentId} />
-          {connections.map((connection) =>
-            checked[connection.id] ? (
-              <input
-                key={`hidden-${connection.id}`}
-                type="hidden"
-                name="connectionId"
-                value={connection.id}
-              />
-            ) : null,
-          )}
+          <input type="hidden" name="selections" value={JSON.stringify(submitted)} />
           <Card className="budget-card shadow-none">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Library connections</CardTitle>
               <CardDescription>
-                Select the MCP servers this agent may call during a run.
+                Attach a connection to grant its tools individually.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -154,32 +163,66 @@ export function McpPicker({
                 <FieldGroup className="approval-tool-list gap-0" data-slot="checkbox-group">
                   {connections.map((connection) => {
                     const id = `mcp-${connection.id}`;
+                    const grants = selected[connection.id];
                     return (
-                      <Field
-                        key={connection.id}
-                        orientation="horizontal"
-                        className="approval-tool-row"
-                      >
-                        <div className="approval-tool-copy">
-                          <FieldLabel htmlFor={id} className="font-medium">
-                            {connection.name}
-                          </FieldLabel>
-                          <FieldDescription className="text-pretty">
-                            {connection.transport.toUpperCase()} · {connection.url}
-                          </FieldDescription>
-                        </div>
-                        <Checkbox
-                          id={id}
-                          checked={checked[connection.id]}
-                          onCheckedChange={(value) => {
-                            setChecked((previous) => ({
-                              ...previous,
-                              [connection.id]: value === true,
-                            }));
-                          }}
-                          aria-label={connection.name}
-                        />
-                      </Field>
+                      <div key={connection.id}>
+                        <Field orientation="horizontal" className="approval-tool-row">
+                          <div className="approval-tool-copy">
+                            <FieldLabel htmlFor={id} className="font-medium">
+                              {connection.name}
+                            </FieldLabel>
+                            <FieldDescription className="text-pretty">
+                              {connection.transport.toUpperCase()} · {connection.url}
+                            </FieldDescription>
+                          </div>
+                          <Checkbox
+                            id={id}
+                            checked={Boolean(grants)}
+                            onCheckedChange={(value) => {
+                              setSelected((previous) => ({
+                                ...previous,
+                                [connection.id]: value === true ? [] : undefined,
+                              }));
+                            }}
+                            aria-label={connection.name}
+                          />
+                        </Field>
+                        {grants && (
+                          <FieldSet className="ms-4 gap-0 pb-3">
+                            <FieldLegend className="sr-only">
+                              {connection.name} read-only tools
+                            </FieldLegend>
+                            {!connection.readOnlyTools.length && (
+                              <FieldDescription>No read-only tools configured.</FieldDescription>
+                            )}
+                            {connection.readOnlyTools.map((name, index) => (
+                              <Field
+                                orientation="horizontal"
+                                className="approval-tool-row"
+                                key={name}
+                              >
+                                <FieldLabel htmlFor={`${id}-tool-${index}`}>{name}</FieldLabel>
+                                <Checkbox
+                                  id={`${id}-tool-${index}`}
+                                  checked={grants.includes(name)}
+                                  onCheckedChange={(value) => {
+                                    setSelected((previous) => {
+                                      const current = previous[connection.id] ?? [];
+                                      return {
+                                        ...previous,
+                                        [connection.id]:
+                                          value === true
+                                            ? [...current, name]
+                                            : current.filter((tool) => tool !== name),
+                                      };
+                                    });
+                                  }}
+                                />
+                              </Field>
+                            ))}
+                          </FieldSet>
+                        )}
+                      </div>
                     );
                   })}
                 </FieldGroup>

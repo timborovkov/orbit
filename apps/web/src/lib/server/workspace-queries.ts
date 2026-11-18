@@ -95,7 +95,10 @@ export async function getAgentWorkspace(id: string) {
         .from(agentSkills)
         .where(eq(agentSkills.agentId, id)),
       db()
-        .select({ connectionId: agentMcpConnections.connectionId })
+        .select({
+          connectionId: agentMcpConnections.connectionId,
+          toolNames: agentMcpConnections.toolNames,
+        })
         .from(agentMcpConnections)
         .where(eq(agentMcpConnections.agentId, id)),
     ]);
@@ -142,7 +145,7 @@ export async function getAgentWorkspace(id: string) {
     consents,
     current,
     skillIds: skillRows.map((row) => row.skillId),
-    mcpConnectionIds: mcpRows.map((row) => row.connectionId),
+    mcpSelections: mcpRows,
     usage: {
       day: {
         spendMicros: day.spendMicros,

@@ -1,11 +1,17 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { db } from '@/lib/db';
-import { normalizeMcpAllowlist, type McpAllowedTool } from '@/lib/mcp-allowlist';
+import {
+  mcpToolIsReadOnly,
+  normalizeMcpAllowlist,
+  type AgentMcpSelection,
+  type McpAllowedTool,
+} from '@/lib/mcp-allowlist';
+import { mcpEndpointHeaderError, mcpHeadersFromRows, sameMcpEndpoint } from '@/lib/runtime/mcp';
 import { encryptSecret } from '@/lib/runtime/secrets';
 import {
   agentMcpConnections,
@@ -31,7 +37,7 @@ const allowEntry = z.union([
   }),
 ]);
 
-const headerRow = z.object({
+export const mcpHeaderRow = z.object({
   key: z
     .string()
     .trim()
@@ -41,28 +47,35 @@ const headerRow = z.object({
   value: z.string().max(2000),
 });
 
+export const mcpEndpointInput = z.object({
+  url: z
+    .string()
+    .max(2000)
+    .pipe(z.url({ protocol: /^https?$/, normalize: true }))
+    .refine((url) => {
+      const parsed = new URL(url);
+      return !parsed.username && !parsed.password && !parsed.hash;
+    }),
+  transport: z.enum(['http', 'sse']),
+});
+
+export const mcpSelectionInput = z.object({
+  connectionId: z.uuid(),
+  revision: z.iso.datetime(),
+  toolNames: z.array(toolName).max(200),
+});
+
 export const mcpConnectionInput = z.object({
   name: skillSlug,
-  url: z.url().max(2000),
-  transport: z.enum(['http', 'sse']),
+  ...mcpEndpointInput.shape,
   toolAllowlist: z
     .array(allowEntry)
     .max(200)
     .transform((tools) => normalizeMcpAllowlist(tools)),
-  headers: z.array(headerRow).max(40),
+  headers: z.array(mcpHeaderRow).max(40),
 });
 
 export type McpConnectionInput = z.infer<typeof mcpConnectionInput>;
-
-function headersFromRows(rows: McpConnectionInput['headers']): Record<string, string> | null {
-  const headers: Record<string, string> = {};
-  for (const row of rows) {
-    const value = row.value.trim();
-    if (!value) continue;
-    headers[row.key] = value;
-  }
-  return Object.keys(headers).length ? headers : null;
-}
 
 export async function persistMcpConnection(
   actor: string,
@@ -71,12 +84,20 @@ export async function persistMcpConnection(
   clearHeaders = false,
 ) {
   return await db().transaction(async (tx) => {
-    const headers = clearHeaders ? null : headersFromRows(input.headers);
+    const headers = clearHeaders ? undefined : mcpHeadersFromRows(input.headers);
     if (connectionId) {
       const current = (
-        await tx.select().from(mcpConnections).where(eq(mcpConnections.id, connectionId))
+        await tx
+          .select()
+          .from(mcpConnections)
+          .where(eq(mcpConnections.id, connectionId))
+          .for('update')
       ).at(0);
       if (!current) return { error: 'Connection not found.' as const };
+      const endpointChanged = !sameMcpEndpoint(current, input);
+      if (endpointChanged && current.encryptedHeaders && !clearHeaders && !headers) {
+        return { error: mcpEndpointHeaderError };
+      }
       let encryptedHeaders = current.encryptedHeaders;
       if (clearHeaders) encryptedHeaders = null;
       else if (headers) {
@@ -104,6 +125,34 @@ export async function persistMcpConnection(
           .where(eq(mcpConnections.id, connectionId));
       } catch {
         return { error: 'That connection name is already in use.' as const };
+      }
+      if (endpointChanged) {
+        await tx
+          .update(agentMcpConnections)
+          .set({ toolNames: [] })
+          .where(eq(agentMcpConnections.connectionId, connectionId));
+      } else {
+        const remainingReadOnly =
+          input.toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [];
+        // Dropped or reclassified entries require a fresh grant if enabled again later.
+        const attachments = await tx
+          .select()
+          .from(agentMcpConnections)
+          .where(eq(agentMcpConnections.connectionId, connectionId));
+        for (const attachment of attachments) {
+          const toolNames = attachment.toolNames.filter((name) => remainingReadOnly.includes(name));
+          if (toolNames.length !== attachment.toolNames.length) {
+            await tx
+              .update(agentMcpConnections)
+              .set({ toolNames })
+              .where(
+                and(
+                  eq(agentMcpConnections.agentId, attachment.agentId),
+                  eq(agentMcpConnections.connectionId, connectionId),
+                ),
+              );
+          }
+        }
       }
       await tx.insert(audit).values({
         actor,
@@ -159,33 +208,55 @@ export async function deleteMcpConnection(actor: string, connectionId: string) {
 export async function persistAgentMcpConnections(
   actor: string,
   agentId: string,
-  connectionIds: string[],
+  selections: (AgentMcpSelection & { revision: string })[],
 ) {
-  const unique = [...new Set(connectionIds)];
+  const unique = new Map(selections.map((selection) => [selection.connectionId, selection]));
   return await db().transaction(async (tx) => {
     // Serialize concurrent attachment replaces so two empty→insert saves cannot union.
     const agent = (
       await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update')
     ).at(0);
     if (!agent) return { error: 'Agent not found.' };
-    if (unique.length) {
+    if (unique.size) {
       const found = await tx
-        .select({ id: mcpConnections.id })
+        .select({
+          id: mcpConnections.id,
+          allowlist: mcpConnections.toolAllowlist,
+          updatedAt: mcpConnections.updatedAt,
+        })
         .from(mcpConnections)
-        .where(inArray(mcpConnections.id, unique));
-      if (found.length !== unique.length)
+        .where(inArray(mcpConnections.id, [...unique.keys()]))
+        .for('share');
+      if (found.length !== unique.size)
         return { error: 'One or more MCP connections were not found.' };
+      for (const connection of found) {
+        const allowlist = normalizeMcpAllowlist(connection.allowlist);
+        const selection = unique.get(connection.id);
+        if (
+          selection?.revision !== connection.updatedAt.toISOString() ||
+          selection.toolNames.some((name) => !mcpToolIsReadOnly(allowlist, name))
+        ) {
+          return {
+            error:
+              'One or more MCP tools are no longer available as read-only. Refresh and try again.',
+          };
+        }
+      }
     }
     await tx.delete(agentMcpConnections).where(eq(agentMcpConnections.agentId, agentId));
-    if (unique.length) {
-      await tx
-        .insert(agentMcpConnections)
-        .values(unique.map((connectionId) => ({ agentId, connectionId })));
+    if (unique.size) {
+      await tx.insert(agentMcpConnections).values(
+        [...unique.values()].map(({ connectionId, toolNames }) => ({
+          agentId,
+          connectionId,
+          toolNames: [...new Set(toolNames)],
+        })),
+      );
     }
     await tx.insert(audit).values({
       actor,
-      action: `Updated MCP attachments for agent ${agentId} (${unique.length} selected)`,
+      action: `Updated MCP attachments and tool grants for agent ${agentId} (${unique.size} connections)`,
     });
-    return { count: unique.length };
+    return { count: unique.size };
   });
 }

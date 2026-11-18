@@ -211,6 +211,8 @@ desktop grid, with No cap Switches on the same heading row as spend labels (`spa
 - gap, switch never overlapping the label) and inline unit suffixes. Per-field copy is only
   the short usage line; longer explanations stay in the card description. Approval
   requirements and Skills/MCP pickers use shadcn Checkbox rows (label, description, control).
+  Attached MCP connections show a nested checklist of administrator-classified read-only tools.
+  New attachments start with an empty tool checklist.
   Consent and Playground version pickers use shadcn Select. Lifecycle uses radio-card rows with
   consistent actions.
   Playground is a single chat column: toolbar settings (version Select, recipients Collapsible),
@@ -248,7 +250,8 @@ with Field spacing, descriptions under labels, and Orbit control styling. Skill
 bodies use Write/Preview Markdown tabs; the slug auto-derives from the title until
 edited. MCP transport uses the shadcn Select. Tool allowlists are chip rows with an
 optional Fetch tools action; auth headers are key/value rows with masked values and
-never echo stored secrets. Overview and workspace headers link to Templates, Skills
+never echo stored secrets. Newly added tools start as Mutating. Editing the MCP endpoint
+requires replacing or clearing any stored headers before discovery or save. Overview and workspace headers link to Templates, Skills
 and MCP. Appearance, sign-in and the native create dialog retain the behavior in
 Layout and the historical decisions below.
 

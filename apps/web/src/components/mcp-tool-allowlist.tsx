@@ -25,12 +25,12 @@ export function McpToolAllowlist({
   const discoveredTools = new Set(editor.discovered);
   const availableDiscovered = editor.discovered.filter((tool) => !selectedTools.has(tool));
 
-  function addTool(name: string, readOnly = true) {
+  function addTool(name: string) {
     const trimmed = name.trim();
     if (!trimmed) return;
     setEditor((previous) => {
       if (previous.tools.some((tool) => tool.name === trimmed)) return previous;
-      const next: McpAllowedTool = { name: trimmed, readOnly };
+      const next: McpAllowedTool = { name: trimmed, readOnly: false };
       return { ...previous, tools: [...previous.tools, next] };
     });
     setToolDraft('');
@@ -70,9 +70,8 @@ export function McpToolAllowlist({
     <Field>
       <FieldLabel>Tool allowlist</FieldLabel>
       <FieldDescription>
-        Leave empty to register every discovered tool as mutating (suppressed until write adapters
-        exist). Mark tools Read-only so the policy gateway can allow them. Remote annotations are
-        ignored.
+        Mark verified read-only tools here, then grant access to individual agents. New tools are
+        classified as mutating and cannot run.
       </FieldDescription>
       <div className="chip-editor">
         {!!editor.tools.length && (

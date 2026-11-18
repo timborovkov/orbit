@@ -1,7 +1,14 @@
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { expect, test, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
-const sql = postgres('postgres://orbit:orbit_dev@localhost:5432/orbit_test');
+import { mcpFixtureAuthorization, startMcpFixture } from './fixtures/mcp-server';
+import { openAccessSection, openWorkspaceTab } from './workspace-nav';
+
+const databaseUrl = 'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
+const sql = postgres(databaseUrl);
 const email = 'admin@example.com';
 const password = 'test-only-password-123456';
 
@@ -31,6 +38,122 @@ test.beforeEach(async () => {
 
 test.afterAll(async () => {
   await sql.end();
+});
+
+test('saved Skills and authenticated MCP grants reach the worker and run history', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const fixture = await startMcpFixture();
+  try {
+    await signIn(page);
+    await page.goto('/skills');
+    await page.getByRole('button', { name: 'New skill', exact: true }).first().click();
+    await page.getByLabel(/^Title/).fill('Release check');
+    await page.getByLabel(/^When to use/).fill('Check the release fixture.');
+    await page.getByLabel(/^Markdown body/).fill('# Release check\nVerify both connections.');
+    await page.getByRole('button', { name: 'Create skill', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeHidden();
+
+    await page.goto('/mcp');
+    for (const transport of ['http', 'sse'] as const) {
+      const slug = `${transport}-fixture`;
+      const tool = `${transport}_lookup`;
+      await page.getByRole('button', { name: 'New connection', exact: true }).first().click();
+      await page.getByLabel(/^Slug/).fill(slug);
+      await page.getByLabel(/^URL/).fill(`${fixture.url}/${transport}`);
+      await page.getByRole('combobox', { name: /^Transport/ }).click();
+      await page.getByRole('option', { name: transport.toUpperCase(), exact: true }).click();
+      await page.getByLabel(/Header 1 name/).fill('Authorization');
+      await page.getByLabel(/Header 1 value/).fill(mcpFixtureAuthorization);
+      await page.getByRole('button', { name: 'Fetch tools' }).click();
+      await page.getByRole('button', { name: `Add ${tool}` }).click();
+      await page.getByRole('button', { name: new RegExp(`${tool} effect: Mutating`) }).click();
+      await page.getByRole('button', { name: 'Create connection', exact: true }).click();
+      await expect(page.getByRole('dialog')).toBeHidden();
+    }
+
+    await page.getByRole('button', { name: /Edit http-fixture/ }).click();
+    await page.getByRole('button', { name: 'Fetch tools' }).click();
+    await expect(page.getByRole('button', { name: 'Fetch tools' })).toBeEnabled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await page.getByLabel(/^URL/).fill(`${fixture.url}/different`);
+    await page.getByRole('button', { name: 'Fetch tools' }).click();
+    await expect(page.getByRole('alert')).toContainText('Replace or clear stored headers');
+    await page.getByRole('button', { name: 'Save connection', exact: true }).click();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Replace or clear stored headers' }),
+    ).toHaveCount(2);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Create agent', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Template', exact: true }).click();
+    await page.getByRole('option', { name: 'Customer Support', exact: true }).click();
+    await page.getByLabel(/^Name/).fill('Resource fixture agent');
+    await page.getByRole('button', { name: 'Create shadow agent' }).click();
+    await page.getByRole('link', { name: 'Resource fixture agent', exact: true }).click();
+    await openWorkspaceTab(page, 'Access');
+    await openAccessSection(page, 'Skills');
+    await page.getByRole('checkbox', { name: 'Release check' }).check();
+    await page.getByRole('button', { name: 'Save skill selection' }).click();
+    await expect(page.getByText('Attached 1 skill.')).toBeVisible();
+    await openAccessSection(page, 'MCP');
+    for (const transport of ['http', 'sse'] as const) {
+      await page.getByRole('checkbox', { name: `${transport}-fixture` }).check();
+      const grant = page.getByRole('checkbox', { name: `${transport}_lookup` });
+      await expect(grant).not.toBeChecked();
+      await grant.check();
+    }
+    await page.getByRole('button', { name: 'Save MCP selection' }).click();
+    await expect(page.getByText('Attached 2 MCP connections.')).toBeVisible();
+
+    await page.reload();
+    await openWorkspaceTab(page, 'Access');
+    await openAccessSection(page, 'Skills');
+    await expect(page.getByRole('checkbox', { name: 'Release check' })).toBeChecked();
+    await openAccessSection(page, 'MCP');
+    await expect(page.getByRole('checkbox', { name: 'http_lookup' })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'sse_lookup' })).toBeChecked();
+
+    const [agent] = await sql`SELECT id FROM agents WHERE name='Resource fixture agent'`;
+    await sql`UPDATE agents SET budgets=budgets || '{"dailySpendCents":null,"monthlySpendCents":null}'::jsonb WHERE id=${agent.id}`;
+    // Give the real worker runtime a dedicated fixture run so the default worker cannot claim it.
+    const [run] =
+      await sql`INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at)
+      SELECT ${agent.id}, id, 'Check fixture resources', 'queued', '{"steps":[],"actions":[],"error":null}'::jsonb,
+        ${email}, now() + interval '5 minutes' FROM agent_configurations WHERE agent_id=${agent.id} RETURNING id`;
+    await promisify(execFile)(
+      'bun',
+      [
+        '--no-env-file',
+        fileURLToPath(new URL('./fixtures/run-resource-simulation.ts', import.meta.url)),
+        run.id,
+      ],
+      {
+        env: {
+          ...process.env,
+          DATABASE_URL: databaseUrl,
+          OPENROUTER_API_KEY: 'local-model-fixture',
+          ORBIT_ENCRYPTION_KEY: 'a'.repeat(64),
+        },
+      },
+    );
+    const [completed] = await sql`SELECT status,result FROM simulation_runs WHERE id=${run.id}`;
+    expect(completed.status, completed.result.error).toBe('completed');
+    expect(completed.result.providerDispatches).toEqual({ evaluator: 1, main: 2 });
+    expect(fixture.calls.toSorted()).toEqual(['http_lookup', 'sse_lookup']);
+
+    await page.reload();
+    await openWorkspaceTab(page, /^History/);
+    await page.locator('.run-detail > summary').click();
+    const history = page.getByRole('region', { name: 'Skills and tools' });
+    await expect(history).toContainText('release-check · v1 · loaded');
+    await expect(history).toContainText('mcp:http-fixture:http_lookup · allow');
+    await expect(history).toContainText('mcp:sse-fixture:sse_lookup · allow');
+  } finally {
+    fixture.close();
+  }
 });
 
 test('skills and MCP library UI across empty, create, data and themes', async ({ page }) => {

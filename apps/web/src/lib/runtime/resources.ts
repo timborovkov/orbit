@@ -39,6 +39,7 @@ async function loadAgentMcpConnections(agentId: string): Promise<McpConnectionCo
       transport: mcpConnections.transport,
       encryptedHeaders: mcpConnections.encryptedHeaders,
       toolAllowlist: mcpConnections.toolAllowlist,
+      grantedTools: agentMcpConnections.toolNames,
     })
     .from(agentMcpConnections)
     .innerJoin(mcpConnections, eq(agentMcpConnections.connectionId, mcpConnections.id))

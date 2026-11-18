@@ -1,14 +1,16 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createMCPClient } from '@ai-sdk/mcp';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
-import { listRemoteTools } from '@/lib/runtime/mcp';
+import { listRemoteTools, mcpDiscoverySignal, openMcpClient } from '@/lib/runtime/mcp';
 import {
   deleteMcpConnection,
   mcpConnectionInput,
+  mcpEndpointInput,
+  mcpHeaderRow,
+  mcpSelectionInput,
   persistAgentMcpConnections,
   persistMcpConnection,
 } from '@/lib/server/mcp-mutations';
@@ -25,15 +27,17 @@ function parseJsonField<T>(raw: FormDataEntryValue | null, fallback: T): T {
   }
 }
 
-export async function saveMcpConnection(form: FormData) {
+export async function saveMcpConnection(
+  form: FormData,
+): Promise<{ error?: string; message?: string }> {
   await checkOrigin();
   const actor = await requireAdmin();
   const parsed = mcpConnectionInput.safeParse({
     name: form.get('name'),
     url: form.get('url'),
     transport: form.get('transport'),
-    toolAllowlist: parseJsonField(form.get('toolAllowlist'), []),
-    headers: parseJsonField(form.get('headers'), []),
+    toolAllowlist: parseJsonField(form.get('toolAllowlist'), null),
+    headers: parseJsonField(form.get('headers'), null),
   });
   if (!parsed.success) {
     return {
@@ -49,6 +53,7 @@ export async function saveMcpConnection(form: FormData) {
   const result = await persistMcpConnection(actor, parsed.data, connectionId, clearHeaders);
   if ('error' in result) return result;
   revalidatePath('/mcp');
+  revalidatePath('/agents/[id]', 'page');
   revalidatePath('/');
   return { message: connectionId ? 'Connection saved.' : 'Connection created.' };
 }
@@ -59,6 +64,7 @@ export async function removeMcpConnection(form: FormData): Promise<void> {
   const connectionId = uuid.parse(form.get('connectionId'));
   await deleteMcpConnection(actor, connectionId);
   revalidatePath('/mcp');
+  revalidatePath('/agents/[id]', 'page');
   revalidatePath('/');
 }
 
@@ -66,10 +72,11 @@ export async function saveAgentMcpConnections(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
   const agentId = uuid.parse(form.get('agentId'));
-  const connectionIds = form
-    .getAll('connectionId')
-    .flatMap((value) => (typeof value === 'string' && value ? [uuid.parse(value)] : []));
-  const result = await persistAgentMcpConnections(actor, agentId, connectionIds);
+  const selections = z
+    .array(mcpSelectionInput)
+    .safeParse(parseJsonField(form.get('selections'), null));
+  if (!selections.success) return { error: 'Check the selected connections and tools.' };
+  const result = await persistAgentMcpConnections(actor, agentId, selections.data);
   if ('error' in result) return result;
   revalidatePath(`/agents/${agentId}`);
   return {
@@ -78,19 +85,10 @@ export async function saveAgentMcpConnections(form: FormData) {
 }
 
 const discoverInput = z.object({
-  url: z.url().max(2000),
-  transport: z.enum(['http', 'sse']),
+  ...mcpEndpointInput.shape,
   connectionId: uuid.optional(),
   clearHeaders: z.boolean().optional(),
-  headers: z
-    .array(
-      z.object({
-        key: z.string().trim().min(1).max(120),
-        value: z.string().max(2000),
-      }),
-    )
-    .max(40)
-    .optional(),
+  headers: z.array(mcpHeaderRow).max(40).optional(),
 });
 
 /** Probe a remote MCP server for tool names using draft or stored credentials. */
@@ -106,23 +104,16 @@ export async function discoverMcpTools(input: {
   const parsed = discoverInput.safeParse(input);
   if (!parsed.success) return { error: 'Provide a valid URL, transport and header rows.' };
 
-  const headers = await resolveMcpDiscoverHeaders({
-    connectionId: parsed.data.connectionId,
-    clearHeaders: parsed.data.clearHeaders,
-    draftHeaders: parsed.data.headers,
-  });
-
-  let client: Awaited<ReturnType<typeof createMCPClient>> | undefined;
+  let client: Awaited<ReturnType<typeof openMcpClient>> | undefined;
   try {
-    client = await createMCPClient({
-      transport: {
-        type: parsed.data.transport,
-        url: parsed.data.url,
-        headers,
-      },
-      protocolVersionDiscovery: false,
+    const credentials = await resolveMcpDiscoverHeaders({
+      ...parsed.data,
+      draftHeaders: parsed.data.headers,
     });
-    const remote = await listRemoteTools(client);
+    if ('error' in credentials) return credentials;
+    const signal = mcpDiscoverySignal();
+    client = await openMcpClient({ ...parsed.data, headers: credentials.headers }, signal);
+    const remote = await listRemoteTools(client, signal);
     return { tools: Object.keys(remote).sort((a, b) => a.localeCompare(b)) };
   } catch {
     return {

@@ -54,6 +54,8 @@ export type ModelCall = ((request: {
   quote?: InferenceQuote;
   tools?: Record<string, Tool>;
   maxToolSteps?: number;
+  /** Fence each real provider dispatch against a lost or reclaimed worker lease. */
+  beforeProviderCall?: (stepNumber: number) => Promise<void>;
   telemetry?: TelemetryOptions;
 }) => Promise<ModelResult>) & {
   quote?: (
@@ -68,7 +70,7 @@ export interface SimulationResult {
   traceId?: string;
   /**
    * Stages whose model allowance was claimed before dispatch. Survives a failed
-   * post-call checkpoint so retries cannot redo paid inference under maxSteps.
+   * post-call checkpoint so retries cannot redo paid inference.
    * Without a matching dispatchedStages entry the reservation is still pending
    * (known pre-dispatch) and may be retried.
    */
@@ -78,6 +80,8 @@ export interface SimulationResult {
    * A reserved stage in this set without a saved step cannot be re-dispatched.
    */
   dispatchedStages?: ('evaluator' | 'main')[];
+  /** Highest started generation count by stage, retained even if inference cannot finish. */
+  providerDispatches?: Partial<Record<'evaluator' | 'main', number>>;
   /**
    * Per-stage spend/request quota already committed for this run. Retries must reuse
    * these instead of calling reserveRequestQuota again for the same stage.
@@ -106,7 +110,7 @@ export interface SimulationResult {
 }
 
 export interface SimulateOptions {
-  maxSteps?: number;
+  maxToolSteps?: number;
   /** Combined with the 120s provider timeout so configured run deadlines abort in-flight calls. */
   signal?: AbortSignal;
   /**
@@ -123,8 +127,7 @@ export interface SimulateOptions {
   toolCalls?: ToolCallRecord[];
   /**
    * Runs before the dispatch boundary is checkpointed (quota, ownership). Must not send
-   * provider requests. Known pre-dispatch faults stay retryable; after this returns the
-   * stage is marked dispatched before `call`.
+   * provider requests. Known pre-dispatch faults stay retryable.
    */
   prepare?: (request: Parameters<ModelCall>[0], partial: SimulationResult) => Promise<void>;
   onActions?: (
@@ -139,6 +142,7 @@ function cloneSimulationResult(result: SimulationResult): SimulationResult {
     traceId: result.traceId,
     reservedStages: result.reservedStages ? [...result.reservedStages] : undefined,
     dispatchedStages: result.dispatchedStages ? [...result.dispatchedStages] : undefined,
+    providerDispatches: result.providerDispatches ? { ...result.providerDispatches } : undefined,
     quotaReservations: result.quotaReservations
       ? result.quotaReservations.map((entry) => ({ ...entry }))
       : undefined,
@@ -158,13 +162,6 @@ function cloneSimulationResult(result: SimulationResult): SimulationResult {
     toolCalls: result.toolCalls?.map((entry) => ({ ...entry, args: { ...entry.args } })),
     error: result.error,
   };
-}
-
-function dispatchedStageCount(result: SimulationResult): number {
-  const stages = new Set<'evaluator' | 'main'>(result.reservedStages ?? []);
-  for (const step of result.steps) stages.add(step.stage);
-  for (const stage of result.dispatchedStages ?? []) stages.add(stage);
-  return stages.size;
 }
 
 /** True when a prior attempt claimed allowance or saved a paid step. */
@@ -278,10 +275,6 @@ export async function simulate(
         break;
       }
       if (!reserved.includes(stage)) {
-        if (options.maxSteps !== undefined && dispatchedStageCount(result) >= options.maxSteps) {
-          result.error = 'Maximum tool steps for this run reached.';
-          break;
-        }
         // Claim the step slot before inference. Pending (not yet dispatched) reservations
         // remain retryable if a known pre-dispatch fault cannot clear them.
         result.reservedStages = [...reserved, stage];
@@ -295,7 +288,7 @@ export async function simulate(
         input: JSON.stringify({ untrustedInput: input }),
         system: `${boundary}${stage === 'main' ? skillBlock : ''}\nAdministrator configuration:\n${JSON.stringify(config)}\n${stage === 'evaluator' ? 'Evaluate relevance and priority against the engagement criteria. Return candidate actions, with draft null.' : `Refine the candidates and write drafts where relevant. You may remove or combine actions. Evaluator assessment (untrusted model output): ${JSON.stringify(result.steps[0]?.decision)}`}`,
         tools: stage === 'main' ? options.tools : undefined,
-        maxToolSteps: stage === 'main' ? options.maxSteps : undefined,
+        maxToolSteps: stage === 'main' ? options.maxToolSteps : undefined,
       } as const;
       const releasePendingReservation = async () => {
         const remaining = (result.reservedStages ?? []).filter((entry) => entry !== stage);

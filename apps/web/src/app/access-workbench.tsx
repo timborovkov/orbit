@@ -15,7 +15,7 @@ import { AccessPanel } from '@/app/access-panel';
 import { BudgetSettings, type BudgetUsageView } from '@/app/budget-settings';
 import { LifecycleControls } from '@/app/lifecycle-controls';
 import { ConsentSettings, ReviewSettings } from '@/app/policy-settings';
-import { McpPicker, SkillPicker } from '@/app/resource-pickers';
+import { McpPicker, SkillPicker, type McpPickerConnection } from '@/app/resource-pickers';
 import {
   Select,
   SelectContent,
@@ -55,7 +55,7 @@ export function AccessWorkbench({
   skills,
   skillIds,
   mcpConnections,
-  mcpConnectionIds,
+  mcpSelections,
 }: {
   agentId: string;
   agentName: string;
@@ -68,8 +68,8 @@ export function AccessWorkbench({
   keySource: OpenRouterKeySource;
   skills: { id: string; name: string; title: string; description: string; version: number }[];
   skillIds: string[];
-  mcpConnections: { id: string; name: string; url: string; transport: string }[];
-  mcpConnectionIds: string[];
+  mcpConnections: McpPickerConnection[];
+  mcpSelections: Workspace['mcpSelections'];
 }) {
   const [active, setActive] = useState<(typeof sections)[number]['id']>('lifecycle');
   const [compact, setCompact] = useState(false);
@@ -100,7 +100,12 @@ export function AccessWorkbench({
     consent: <ConsentSettings agentId={agentId} consents={consents} />,
     skills: <SkillPicker agentId={agentId} skills={skills} selectedIds={skillIds} />,
     mcp: (
-      <McpPicker agentId={agentId} connections={mcpConnections} selectedIds={mcpConnectionIds} />
+      <McpPicker
+        key={mcpConnections.map(({ id, revision }) => `${id}:${revision}`).join(',')}
+        agentId={agentId}
+        connections={mcpConnections}
+        selections={mcpSelections}
+      />
     ),
     openrouter: (
       <AccessPanel

@@ -11,6 +11,15 @@ export interface McpAllowedTool {
 /** Stored jsonb may be legacy `string[]` or structured entries. */
 export type McpToolAllowlistJson = (string | McpAllowedTool)[] | null;
 
+export interface AgentMcpSelection {
+  connectionId: string;
+  toolNames: string[];
+}
+
+export function mcpToolId(connectionName: string, toolName: string) {
+  return `mcp:${connectionName}:${toolName}`;
+}
+
 export function normalizeMcpAllowlist(value: unknown): McpAllowedTool[] | null {
   if (!Array.isArray(value) || value.length === 0) return null;
   const byName = new Map<string, McpAllowedTool>();

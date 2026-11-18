@@ -198,7 +198,7 @@ describe('bounded manual simulation', () => {
     expect(result.error).not.toBeNull();
     expect(result.actions).toEqual([]);
   });
-  test('retries resume checkpointed stages without reusing the step allowance', async () => {
+  test('retries resume checkpointed stages with a one-tool budget', async () => {
     const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
     const models: string[] = [];
     let checkpointed: SimulationResult | undefined;
@@ -213,7 +213,7 @@ describe('bounded manual simulation', () => {
         checkpointed = structuredClone(partial);
       },
       {
-        maxSteps: 2,
+        maxToolSteps: 1,
         onActions: async () => {
           throw new RetryableInfrastructureError('policy persistence blip');
         },
@@ -236,7 +236,7 @@ describe('bounded manual simulation', () => {
         };
       },
       async () => {},
-      { maxSteps: 2, initial: checkpointed },
+      { maxToolSteps: 1, initial: checkpointed },
     );
     // Evaluator once, then main — policy failure must not redo the paid evaluator call.
     expect(models).toEqual(['test/evaluator', 'test/main']);
@@ -261,7 +261,7 @@ describe('bounded manual simulation', () => {
         return { decision, inputTokens: 1, outputTokens: 1 };
       },
       async () => {},
-      { maxSteps: 2, skillVersions: versions },
+      { maxToolSteps: 2, skillVersions: versions },
     );
     expect(result.skillVersions).toBe(versions);
     expect(result.skillVersions?.[0]?.loaded).toBe(true);
@@ -300,7 +300,7 @@ describe('bounded manual simulation', () => {
       },
       async () => {},
       {
-        maxSteps: 2,
+        maxToolSteps: 2,
         initial: checkpointed,
         skillVersions: [
           {
@@ -359,7 +359,7 @@ describe('bounded manual simulation', () => {
         return { decision, inputTokens: 2, outputTokens: 2 };
       },
       async () => {},
-      { maxSteps: 2, initial: checkpointed, skillVersions: live },
+      { maxToolSteps: 2, initial: checkpointed, skillVersions: live },
     );
     expect(resumed.skillVersions).toBe(live);
     expect(resumed.skillVersions?.[0]?.version).toBe(4);
@@ -379,7 +379,7 @@ describe('bounded manual simulation', () => {
         durable = structuredClone(partial);
       },
       {
-        maxSteps: 2,
+        maxToolSteps: 2,
         prepare: async () => {
           throw new PreDispatchInfrastructureError('quota reservation db blip');
         },
@@ -402,7 +402,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2, initial: durable },
+      { maxToolSteps: 2, initial: durable },
     );
     expect(models).toEqual(['test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
@@ -422,7 +422,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      { maxToolSteps: 2 },
     ).catch((error: unknown) => error);
     expect(first).toBeInstanceOf(RetryableInfrastructureError);
     expect(models).toEqual(['test/evaluator']);
@@ -441,7 +441,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2, initial: durable },
+      { maxToolSteps: 2, initial: durable },
     );
     expect(models).toEqual(['test/evaluator', 'test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
@@ -472,7 +472,7 @@ describe('bounded manual simulation', () => {
         durable = structuredClone(partial);
       },
       {
-        maxSteps: 2,
+        maxToolSteps: 2,
         prepare: async () => {
           throw new PreDispatchInfrastructureError('quota reservation db blip');
         },
@@ -495,7 +495,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2, initial: durable },
+      { maxToolSteps: 2, initial: durable },
     );
     expect(models).toEqual(['test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
@@ -523,7 +523,7 @@ describe('bounded manual simulation', () => {
         }
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      { maxToolSteps: 2 },
     ).catch((error: unknown) => error);
     expect(first).toBeInstanceOf(RetryableInfrastructureError);
     expect(models).toEqual(['test/evaluator']);
@@ -542,7 +542,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2, initial: durable },
+      { maxToolSteps: 2, initial: durable },
     );
     // Must not re-dispatch evaluator or continue to main — dispatch already burned the slot.
     expect(models).toEqual(['test/evaluator']);
@@ -576,7 +576,7 @@ describe('bounded manual simulation', () => {
         }
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      { maxToolSteps: 2 },
     );
     expect(models).toEqual(['test/evaluator']);
     expect(first.error).toContain('already used this model step');
@@ -606,7 +606,7 @@ describe('bounded manual simulation', () => {
         }
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      { maxToolSteps: 2 },
     );
     expect(models).toEqual(['test/evaluator']);
     expect(burnSeen).toBe(true);
