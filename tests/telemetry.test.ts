@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import { parseEnv } from '@/lib/env';
-import { parseObservabilityEnv } from '@/lib/observability/env';
+import { parseObservabilityEnv, resolveTracesSampleRate } from '@/lib/observability/env';
 import { reportFailure } from '@/lib/observability/errors';
 import {
   applyOpenRouterCostToSpan,
@@ -98,6 +98,11 @@ describe('observability env validation', () => {
     expect(parsed.langfuse).toBeUndefined();
     expect(parsed.sentryTracesSampleRate).toBe(0.1);
     expect(parsed.nextPublicSentryTracesSampleRate).toBe(0.1);
+    expect(resolveTracesSampleRate('')).toBe(0.1);
+    expect(resolveTracesSampleRate(undefined)).toBe(0.1);
+    expect(resolveTracesSampleRate('0')).toBe(0);
+    expect(resolveTracesSampleRate('0.25')).toBe(0.25);
+    expect(resolveTracesSampleRate('2')).toBe(0.1);
   });
 
   test('requires a well-formed Sentry DSN and sample rate', () => {

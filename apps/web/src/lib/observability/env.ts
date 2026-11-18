@@ -56,6 +56,13 @@ const optionalSecret = z.preprocess(
     .optional(),
 );
 
+/** Empty/missing rates use 0.1; invalid values also fall back (client-safe). */
+export function resolveTracesSampleRate(value: string | undefined, fallback = 0.1) {
+  if (value === undefined || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : fallback;
+}
+
 function tracesSampleRate(label: string) {
   return z.preprocess(emptyToUndefined, z.string().optional()).transform((value, ctx) => {
     if (value === undefined) return 0.1;
