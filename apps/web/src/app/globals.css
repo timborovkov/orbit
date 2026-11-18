@@ -2839,12 +2839,13 @@ details[open] > summary > .disclosure-chevron {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
   margin-inline-start: auto;
+  white-space: nowrap;
+}
+.budget-unlimited [data-slot='label'] {
   color: var(--muted);
   font-size: 0.8125rem;
   font-weight: 500;
-  white-space: nowrap;
 }
 
 .policy-options,

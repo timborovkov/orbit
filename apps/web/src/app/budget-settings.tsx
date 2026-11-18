@@ -7,6 +7,7 @@ import { WorkspaceForm } from '@/app/workspace-form';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { budgetFields, type AgentBudgets } from '@/lib/budgets';
 import { cn } from '@/lib/utils';
@@ -119,16 +120,15 @@ function BudgetFieldControl({
           {meta.shortLabel}
         </FieldLabel>
         {canBeUnlimited && (
-          <label className="budget-unlimited" htmlFor={`${inputId}-unlimited`}>
-            <span>No cap</span>
+          <div className="budget-unlimited gap-2">
+            <Label htmlFor={`${inputId}-unlimited`}>No cap</Label>
             <Switch
               id={`${inputId}-unlimited`}
               checked={unlimited}
               onCheckedChange={setUnlimited}
-              aria-label={`No cap for ${field.label.toLowerCase()}`}
             />
             {unlimited ? <input type="hidden" name={`${fieldKey}Unlimited`} value="on" /> : null}
-          </label>
+          </div>
         )}
       </div>
       <div className={cn('budget-input-wrap', meta.suffix && 'has-suffix')}>
