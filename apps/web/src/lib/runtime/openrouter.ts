@@ -125,6 +125,7 @@ export function openRouterInference(apiKey: string): ModelCall {
       inputTokens: response.usage.inputTokens ?? 0,
       outputTokens: response.usage.outputTokens ?? 0,
       costMicros: sawCost ? Math.ceil(costDollars * microsPerDollar) : undefined,
+      providerCalls: Math.max(1, response.steps.length),
     };
   };
   call.quote = quoteOpenRouter;

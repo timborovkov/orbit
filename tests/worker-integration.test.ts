@@ -223,6 +223,7 @@ test('reserveRequestQuota reuses a per-stage reservation across retries', async 
   expect(first.reservation).toEqual({
     stage: 'evaluator',
     reservedMicros: '0',
+    reservedRequests: 1,
     periodStart,
   });
   const second = await reserveRequestQuota(id, 0, {
@@ -235,6 +236,7 @@ test('reserveRequestQuota reuses a per-stage reservation across retries', async 
   expect(second.reservation).toEqual({
     stage: 'evaluator',
     reservedMicros: '0',
+    reservedRequests: 1,
     periodStart,
   });
   const [day] =
@@ -242,7 +244,7 @@ test('reserveRequestQuota reuses a per-stage reservation across retries', async 
   expect(day.requests).toBe(1);
   const [stored] = await sql`SELECT result FROM simulation_runs WHERE id=${run.id}`;
   expect(stored.result.quotaReservations).toEqual([
-    { stage: 'evaluator', reservedMicros: '0', periodStart },
+    { stage: 'evaluator', reservedMicros: '0', reservedRequests: 1, periodStart },
   ]);
 });
 
@@ -1017,8 +1019,14 @@ test('OpenRouter spend reservations serialize and missing prices require both ca
     { requests: 2, spend_micros: 3000 },
   ]);
 
+  // Conservative multi-call reservation releases unused request slots on settle.
+  const multi = await reserveRequestQuota(id, 0, { providerCalls: 11 });
+  await multi(0, 1);
+  expect([
+    ...(await sql`SELECT requests FROM usage_counters WHERE agent_id=${id} AND period='day'`),
+  ]).toEqual([{ requests: 3 }]);
+
   await sql`UPDATE agents SET budgets=${sql.json({ ...uncapped, dailyRequests: 3 })} WHERE id=${id}`;
-  await reserveRequestQuota(id);
   await expect(reserveRequestQuota(id, 0)).rejects.toThrow(
     budgetViolationMessage('daily-requests'),
   );

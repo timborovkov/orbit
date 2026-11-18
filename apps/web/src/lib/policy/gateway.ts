@@ -215,7 +215,12 @@ export function evaluateCandidate(
     return { decision: 'suppressed', reasons };
   }
 
-  const requestLimit = checkRequestBudgets(snapshot);
+  // load_skill is local catalogue I/O — the run's model reservation already covers
+  // inference quota. Do not require an extra spare request slot.
+  const requestLimit =
+    action.type === 'load_skill'
+      ? checkRequestBudgets(snapshot, BigInt(0), 0)
+      : checkRequestBudgets(snapshot);
   if (requestLimit) {
     reasons.push(budgetViolationMessage(requestLimit));
     return { decision: 'deny', reasons, violation: requestLimit };
@@ -382,9 +387,10 @@ export async function reserveRequestQuota(
   agentId: string,
   upperBoundMicros?: number,
   execution?: {
-    runId: string;
-    token: string;
-    signal: AbortSignal;
+    /** When set with token, reservation is scoped to an owned running simulation. */
+    runId?: string;
+    token?: string;
+    signal?: AbortSignal;
     /** When set, reservation is idempotent per run+stage across queue retries. */
     stage?: 'evaluator' | 'main';
     /**
@@ -401,7 +407,7 @@ export async function reserveRequestQuota(
       const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
         0,
       );
-      if (!agent || agent.lifecycle === 'stopped' || execution?.signal.aborted) {
+      if (!agent || agent.lifecycle === 'stopped' || execution?.signal?.aborted) {
         throw new BudgetError('cancelled');
       }
       let runRow:
@@ -410,7 +416,7 @@ export async function reserveRequestQuota(
             result: (typeof runs)['$inferSelect']['result'];
           }
         | undefined;
-      if (execution) {
+      if (execution?.runId && execution.token) {
         runRow = (
           await tx
             .select({ id: runs.id, result: runs.result })
@@ -459,6 +465,7 @@ export async function reserveRequestQuota(
               (row) => row.period === 'month' && row.periodStart === reservationMonthStart,
             ) ?? emptyUsage();
           let reservedMicros = BigInt(existing.reservedMicros);
+          const reservedRequests = existing.reservedRequests ?? 1;
           let reservation = existing;
           if (requestedMicros > reservedMicros) {
             const additional = requestedMicros - reservedMicros;
@@ -486,6 +493,7 @@ export async function reserveRequestQuota(
             reservation = {
               stage: execution.stage,
               reservedMicros: requestedMicros.toString(),
+              reservedRequests,
               periodStart,
             };
             const quotaReservations = [
@@ -503,6 +511,7 @@ export async function reserveRequestQuota(
           return {
             today: periodStart,
             reservedMicros,
+            reservedRequests,
             reservation,
             reused: true as const,
           };
@@ -521,6 +530,7 @@ export async function reserveRequestQuota(
           ? {
               stage: execution.stage,
               reservedMicros: requestedMicros.toString(),
+              reservedRequests: providerCalls,
               periodStart: today,
             }
           : undefined;
@@ -534,6 +544,7 @@ export async function reserveRequestQuota(
       return {
         today,
         reservedMicros: requestedMicros,
+        reservedRequests: providerCalls,
         reservation,
         reused: false as const,
       };
@@ -543,15 +554,24 @@ export async function reserveRequestQuota(
   // Keep the full reservation after ambiguous failures or missing costs. Settlement is attempted
   // once per dispatch, so a connection loss during commit cannot double-apply the adjustment.
   return Object.assign(
-    async (billedMicros: number) => {
-      const adjustment = BigInt(billedMicros) - outcome.reservedMicros;
-      if (adjustment !== BigInt(0)) {
+    async (billedMicros: number, actualProviderCalls?: number) => {
+      const spendAdjustment = BigInt(billedMicros) - outcome.reservedMicros;
+      // Release unused request slots once the generation-step count is known.
+      const requestAdjustment =
+        actualProviderCalls === undefined
+          ? 0
+          : Math.max(1, actualProviderCalls) - outcome.reservedRequests;
+      if (spendAdjustment !== BigInt(0) || requestAdjustment !== 0) {
         await db().transaction((tx) =>
-          recordRequestUsage(tx, agentId, outcome.today, adjustment, 0),
+          recordRequestUsage(tx, agentId, outcome.today, spendAdjustment, requestAdjustment),
         );
       }
     },
-    { reservation: outcome.reservation, reused: outcome.reused },
+    {
+      reservation: outcome.reservation,
+      reused: outcome.reused,
+      reservedMicros: outcome.reservedMicros,
+    },
   );
 }
 

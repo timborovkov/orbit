@@ -567,7 +567,9 @@ async function processSimulationRun(
       maxToolSteps: budgets.maxToolStepsPerRun,
     });
     try {
-      let settle!: (billedMicros: number) => Promise<void>;
+      let settle!: ((billedMicros: number, actualProviderCalls?: number) => Promise<void>) & {
+        reservedMicros?: bigint;
+      };
       let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
       const result = await telemetry.inRunContext(() =>
         simulate(
@@ -604,15 +606,14 @@ async function processSimulationRun(
                 }
               },
             );
-            if (response.costMicros !== undefined) {
-              // Failure leaves the conservative reservation in place. Never repeat a paid call
-              // solely because the adjustment could not be recorded.
-              try {
-                await settle(response.costMicros);
-              } catch {
-                reportFailure('worker.settlement', failureCorrelation({ stage }));
-                console.warn('OpenRouter cost settlement failed', { runId: run.id });
-              }
+            // Settle spend when priced; always pass actual provider calls so unused
+            // request slots from a conservative tool-loop reservation are released.
+            try {
+              const billed = response.costMicros ?? Number(settle.reservedMicros ?? 0);
+              await settle(billed, response.providerCalls ?? 1);
+            } catch {
+              reportFailure('worker.settlement', failureCorrelation({ stage }));
+              console.warn('OpenRouter cost settlement failed', { runId: run.id });
             }
             if (checkRunDeadline(startedAt, new Date(), budgets)) {
               throw new BudgetError('run-deadline');
@@ -702,10 +703,9 @@ async function processSimulationRun(
             },
             onActions: async (actions, partial, stage) => {
               await assertOwned(run.id, executionToken);
-              const stepLimit = checkToolStepLimit(
-                partial.steps.length + (partial.toolCalls?.length ?? 0),
-                budgets,
-              );
+              // Tool invocations are gated separately from paid inference stages
+              // (evaluator/main). Do not add steps.length — that double-counts.
+              const stepLimit = checkToolStepLimit(partial.toolCalls?.length ?? 0, budgets);
               if (stepLimit) {
                 await telemetry.withSpan(
                   'orbit.budget',

@@ -36,6 +36,8 @@ interface ModelResult {
   inputTokens: number;
   outputTokens: number;
   costMicros?: number;
+  /** Generation steps that hit the provider (tool loops may issue several). */
+  providerCalls?: number;
 }
 export interface InferenceQuote {
   upperBoundMicros: number;
@@ -79,6 +81,8 @@ export interface SimulationResult {
   quotaReservations?: {
     stage: 'evaluator' | 'main';
     reservedMicros: string;
+    /** Request slots charged at reservation time; settlement may release unused ones. */
+    reservedRequests?: number;
     /** Accounting day (UTC) the reservation was charged against; settlement must use this. */
     periodStart: string;
   }[];
