@@ -4,16 +4,19 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentProps,
   type HTMLAttributes,
 } from 'react';
 import { CheckIcon, CopyIcon } from 'lucide-react';
-import { codeToHtml, type BundledLanguage, type ShikiTransformer } from 'shiki';
+import type { BundledLanguage } from 'shiki';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+import { highlightCode } from '@/components/ai-elements/code-block-highlight';
 
 type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string;
@@ -21,55 +24,13 @@ type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   showLineNumbers?: boolean;
 };
 
-type CodeBlockContextType = {
+interface CodeBlockContextType {
   code: string;
-};
+}
 
 const CodeBlockContext = createContext<CodeBlockContextType>({
   code: '',
 });
-
-const lineNumberTransformer: ShikiTransformer = {
-  name: 'line-numbers',
-  line(node, line) {
-    node.children.unshift({
-      type: 'element',
-      tagName: 'span',
-      properties: {
-        className: [
-          'inline-block',
-          'min-w-10',
-          'mr-4',
-          'text-right',
-          'select-none',
-          'text-muted-foreground',
-        ],
-      },
-      children: [{ type: 'text', value: String(line) }],
-    });
-  },
-};
-
-export async function highlightCode(
-  code: string,
-  language: BundledLanguage,
-  showLineNumbers = false,
-) {
-  const transformers: ShikiTransformer[] = showLineNumbers ? [lineNumberTransformer] : [];
-
-  return await Promise.all([
-    codeToHtml(code, {
-      lang: language,
-      theme: 'one-light',
-      transformers,
-    }),
-    codeToHtml(code, {
-      lang: language,
-      theme: 'one-dark-pro',
-      transformers,
-    }),
-  ]);
-}
 
 export const CodeBlock = ({
   code,
@@ -84,7 +45,7 @@ export const CodeBlock = ({
   const mounted = useRef(false);
 
   useEffect(() => {
-    highlightCode(code, language, showLineNumbers).then(([light, dark]) => {
+    void highlightCode(code, language, showLineNumbers).then(([light, dark]) => {
       if (!mounted.current) {
         setHtml(light);
         setDarkHtml(dark);
@@ -97,8 +58,10 @@ export const CodeBlock = ({
     };
   }, [code, language, showLineNumbers]);
 
+  const contextValue = useMemo(() => ({ code }), [code]);
+
   return (
-    <CodeBlockContext.Provider value={{ code }}>
+    <CodeBlockContext.Provider value={contextValue}>
       <div
         className={cn(
           'group relative w-full overflow-hidden rounded-md border bg-background text-foreground',
@@ -144,16 +107,11 @@ export const CodeBlockCopyButton = ({
   const { code } = useContext(CodeBlockContext);
 
   const copyToClipboard = async () => {
-    if (typeof window === 'undefined' || !navigator?.clipboard?.writeText) {
-      onError?.(new Error('Clipboard API not available'));
-      return;
-    }
-
     try {
       await navigator.clipboard.writeText(code);
       setIsCopied(true);
       onCopy?.();
-      setTimeout(() => setIsCopied(false), timeout);
+      setTimeout(() => { setIsCopied(false); }, timeout);
     } catch (error) {
       onError?.(error as Error);
     }

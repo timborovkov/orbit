@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 
-import { CodeBlock } from './code-block';
+import { CodeBlock } from '@/components/ai-elements/code-block';
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
@@ -23,12 +23,12 @@ export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible className={cn('not-prose mb-4 w-full rounded-md border', className)} {...props} />
 );
 
-export type ToolHeaderProps = {
+export interface ToolHeaderProps {
   title?: string;
   type: ToolUIPart['type'];
   state: ToolUIPart['state'];
   className?: string;
-};
+}
 
 const getStatusBadge = (status: ToolUIPart['state']) => {
   const labels: Record<ToolUIPart['state'], string> = {

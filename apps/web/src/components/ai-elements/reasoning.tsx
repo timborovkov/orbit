@@ -1,14 +1,6 @@
 'use client';
 
-import {
-  createContext,
-  memo,
-  useContext,
-  useEffect,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from 'react';
+import { memo, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
 import { useControllableState } from '@radix-ui/react-use-controllable-state';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import { Streamdown } from 'streamdown';
@@ -16,24 +8,9 @@ import { Streamdown } from 'streamdown';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 
-import { Shimmer } from './shimmer';
-
-type ReasoningContextValue = {
-  isStreaming: boolean;
-  isOpen: boolean;
-  setIsOpen: (open: boolean) => void;
-  duration: number | undefined;
-};
-
-const ReasoningContext = createContext<ReasoningContextValue | null>(null);
-
-export const useReasoning = () => {
-  const context = useContext(ReasoningContext);
-  if (!context) {
-    throw new Error('Reasoning components must be used within Reasoning');
-  }
-  return context;
-};
+import { ReasoningContext } from '@/components/ai-elements/reasoning-context';
+import { useReasoning } from '@/components/ai-elements/reasoning-hooks';
+import { Shimmer } from '@/components/ai-elements/shimmer';
 
 export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   isStreaming?: boolean;
@@ -44,7 +21,6 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
 };
 
 const AUTO_CLOSE_DELAY = 1000;
-const MS_IN_S = 1000;
 
 export const Reasoning = memo(
   ({
@@ -62,25 +38,8 @@ export const Reasoning = memo(
       defaultProp: defaultOpen,
       onChange: onOpenChange,
     });
-    const [duration, setDuration] = useControllableState({
-      prop: durationProp,
-      defaultProp: undefined,
-    });
-
     const [hasAutoClosed, setHasAutoClosed] = useState(false);
-    const [startTime, setStartTime] = useState<number | null>(null);
-
-    // Track duration when streaming starts and ends
-    useEffect(() => {
-      if (isStreaming) {
-        if (startTime === null) {
-          setStartTime(Date.now());
-        }
-      } else if (startTime !== null) {
-        setDuration(Math.ceil((Date.now() - startTime) / MS_IN_S));
-        setStartTime(null);
-      }
-    }, [isStreaming, startTime, setDuration]);
+    const duration = durationProp;
 
     // Auto-open when streaming starts, auto-close when streaming ends (once only)
     useEffect(() => {
@@ -91,7 +50,7 @@ export const Reasoning = memo(
           setHasAutoClosed(true);
         }, AUTO_CLOSE_DELAY);
 
-        return () => clearTimeout(timer);
+        return () => { clearTimeout(timer); };
       }
     }, [isStreaming, isOpen, defaultOpen, setIsOpen, hasAutoClosed]);
 
@@ -99,8 +58,13 @@ export const Reasoning = memo(
       setIsOpen(newOpen);
     };
 
+    const contextValue = useMemo(
+      () => ({ isStreaming, isOpen, setIsOpen, duration }),
+      [isStreaming, isOpen, setIsOpen, duration],
+    );
+
     return (
-      <ReasoningContext.Provider value={{ isStreaming, isOpen, setIsOpen, duration }}>
+      <ReasoningContext.Provider value={contextValue}>
         <Collapsible
           className={cn('not-prose mb-4', className)}
           onOpenChange={handleOpenChange}

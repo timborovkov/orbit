@@ -1,10 +1,13 @@
 'use client';
 
 import {
+  Children,
   createContext,
+  isValidElement,
   memo,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ComponentProps,
   type HTMLAttributes,
@@ -74,7 +77,7 @@ export const MessageAction = ({
   const button = (
     <Button size={size} type="button" variant={variant} {...props}>
       {children}
-      <span className="sr-only">{label || tooltip}</span>
+      <span className="sr-only">{label ?? tooltip}</span>
     </Button>
   );
 
@@ -94,14 +97,14 @@ export const MessageAction = ({
   return button;
 };
 
-type MessageBranchContextType = {
+interface MessageBranchContextType {
   currentBranch: number;
   totalBranches: number;
   goToPrevious: () => void;
   goToNext: () => void;
   branches: ReactElement[];
   setBranches: (branches: ReactElement[]) => void;
-};
+}
 
 const MessageBranchContext = createContext<MessageBranchContextType | null>(null);
 
@@ -144,14 +147,17 @@ export const MessageBranch = ({
     handleBranchChange(newBranch);
   };
 
-  const contextValue: MessageBranchContextType = {
-    currentBranch,
-    totalBranches: branches.length,
-    goToPrevious,
-    goToNext,
-    branches,
-    setBranches,
-  };
+  const contextValue = useMemo<MessageBranchContextType>(
+    () => ({
+      currentBranch,
+      totalBranches: branches.length,
+      goToPrevious,
+      goToNext,
+      branches,
+      setBranches,
+    }),
+    [currentBranch, branches, goToPrevious, goToNext, setBranches],
+  );
 
   return (
     <MessageBranchContext.Provider value={contextValue}>
@@ -160,18 +166,22 @@ export const MessageBranch = ({
   );
 };
 
-export type MessageBranchContentProps = HTMLAttributes<HTMLDivElement>;
+type MessageBranchContentProps = HTMLAttributes<HTMLDivElement>;
 
-export const MessageBranchContent = ({ children, ...props }: MessageBranchContentProps) => {
+export function MessageBranchContent({ children, ...props }: MessageBranchContentProps) {
   const { currentBranch, setBranches, branches } = useMessageBranch();
-  const childrenArray = Array.isArray(children) ? children : [children];
+  const childrenArray = useMemo(
+    () =>
+      Children.toArray(children).filter((child): child is ReactElement => isValidElement(child)),
+    [children],
+  );
+  const branchCount = childrenArray.length;
 
-  // Use useEffect to update branches when they change
   useEffect(() => {
-    if (branches.length !== childrenArray.length) {
+    if (branches.length !== branchCount) {
       setBranches(childrenArray);
     }
-  }, [childrenArray, branches, setBranches]);
+  }, [branchCount, childrenArray, branches.length, setBranches]);
 
   return childrenArray.map((branch, index) => (
     <div
@@ -192,8 +202,8 @@ export type MessageBranchSelectorProps = HTMLAttributes<HTMLDivElement> & {
 };
 
 export const MessageBranchSelector = ({
-  className,
-  from,
+  className: _className,
+  from: _from,
   ...props
 }: MessageBranchSelectorProps) => {
   const { totalBranches } = useMessageBranch();
@@ -234,7 +244,7 @@ export const MessageBranchPrevious = ({ children, ...props }: MessageBranchPrevi
 
 export type MessageBranchNextProps = ComponentProps<typeof Button>;
 
-export const MessageBranchNext = ({ children, className, ...props }: MessageBranchNextProps) => {
+export const MessageBranchNext = ({ children, className: _className, ...props }: MessageBranchNextProps) => {
   const { goToNext, totalBranches } = useMessageBranch();
 
   return (
@@ -288,8 +298,8 @@ export type MessageAttachmentProps = HTMLAttributes<HTMLDivElement> & {
 };
 
 export function MessageAttachment({ data, className, onRemove, ...props }: MessageAttachmentProps) {
-  const filename = data.filename || '';
-  const mediaType = data.mediaType?.startsWith('image/') && data.url ? 'image' : 'file';
+  const filename = data.filename ?? '';
+  const mediaType = data.mediaType.startsWith('image/') && data.url ? 'image' : 'file';
   const isImage = mediaType === 'image';
   const attachmentLabel = filename || (isImage ? 'Image' : 'Attachment');
 

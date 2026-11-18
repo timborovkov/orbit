@@ -1,17 +1,29 @@
 'use client';
 
 import { memo, useMemo, type CSSProperties, type ElementType, type JSX } from 'react';
-import { motion } from 'motion/react';
+import { LazyMotion, domAnimation, m, type HTMLMotionProps } from 'motion/react';
 
 import { cn } from '@/lib/utils';
 
-export type TextShimmerProps = {
+export interface TextShimmerProps {
   children: string;
   as?: ElementType;
   className?: string;
   duration?: number;
   spread?: number;
-};
+}
+
+const motionComponents = new Map<string, ReturnType<typeof m.create>>();
+
+function getMotionComponent(tag: keyof JSX.IntrinsicElements) {
+  const existing = motionComponents.get(tag);
+  if (existing) {
+    return existing;
+  }
+  const created = m.create(tag);
+  motionComponents.set(tag, created);
+  return created;
+}
 
 const ShimmerComponent = ({
   children,
@@ -20,34 +32,34 @@ const ShimmerComponent = ({
   duration = 2,
   spread = 2,
 }: TextShimmerProps) => {
-  const MotionComponent = motion.create(Component as keyof JSX.IntrinsicElements);
+  const MotionComponent = getMotionComponent(Component as keyof JSX.IntrinsicElements);
 
-  const dynamicSpread = useMemo(() => (children?.length ?? 0) * spread, [children, spread]);
+  const dynamicSpread = useMemo(() => children.length * spread, [children, spread]);
+
+  const motionProps = {
+    animate: { backgroundPosition: '0% center' as const },
+    className: cn(
+      'relative inline-block bg-[length:250%_100%,auto] bg-clip-text text-transparent',
+      '[--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),var(--color-background),#0000_calc(50%+var(--spread)))] [background-repeat:no-repeat,padding-box]',
+      className,
+    ),
+    initial: { backgroundPosition: '100% center' as const },
+    style: {
+      '--spread': `${dynamicSpread}px`,
+      backgroundImage:
+        'var(--bg), linear-gradient(var(--color-muted-foreground), var(--color-muted-foreground))',
+    } as CSSProperties,
+    transition: {
+      repeat: Number.POSITIVE_INFINITY,
+      duration,
+      ease: 'linear' as const,
+    },
+  } satisfies HTMLMotionProps<'div'>;
 
   return (
-    <MotionComponent
-      animate={{ backgroundPosition: '0% center' }}
-      className={cn(
-        'relative inline-block bg-[length:250%_100%,auto] bg-clip-text text-transparent',
-        '[--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),var(--color-background),#0000_calc(50%+var(--spread)))] [background-repeat:no-repeat,padding-box]',
-        className,
-      )}
-      initial={{ backgroundPosition: '100% center' }}
-      style={
-        {
-          '--spread': `${dynamicSpread}px`,
-          backgroundImage:
-            'var(--bg), linear-gradient(var(--color-muted-foreground), var(--color-muted-foreground))',
-        } as CSSProperties
-      }
-      transition={{
-        repeat: Number.POSITIVE_INFINITY,
-        duration,
-        ease: 'linear',
-      }}
-    >
-      {children}
-    </MotionComponent>
+    <LazyMotion features={domAnimation} strict>
+      <MotionComponent {...motionProps}>{children}</MotionComponent>
+    </LazyMotion>
   );
 };
 
