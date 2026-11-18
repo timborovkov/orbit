@@ -2022,6 +2022,9 @@ fieldset[aria-disabled='true'] textarea {
 .knowledge-inspector-form {
   margin-top: 16px;
 }
+.knowledge-inspector-error {
+  margin-top: 16px;
+}
 /* Reset global form `input` margins/height so the InputGroup stays a single 40px row. */
 .knowledge-inspector-form .knowledge-inspector-query {
   background: var(--surface);

@@ -34,6 +34,22 @@ test('knowledge.search requires explicit enablement even when the tool list is e
   expect(result.reasons.join(' ')).toContain('not enabled');
 });
 
+test('enabling only knowledge.search preserves empty-list semantics for other native tools', () => {
+  const withKnowledge = { ...base, enabledTools: [KNOWLEDGE_SEARCH_TOOL] };
+  expect(
+    evaluateActionForTest(withKnowledge, {
+      type: 'reply',
+      idempotencyKey: 'knowledge-other-1',
+    }).decision,
+  ).toBe('suppressed');
+  expect(
+    evaluateActionForTest(
+      { ...base, enabledTools: [KNOWLEDGE_SEARCH_TOOL, 'like'] },
+      { type: 'reply', idempotencyKey: 'knowledge-other-2' },
+    ).decision,
+  ).toBe('deny');
+});
+
 test('paused agents cannot run knowledge.search', () => {
   const result = evaluateActionForTest(
     { ...base, lifecycle: 'paused' },

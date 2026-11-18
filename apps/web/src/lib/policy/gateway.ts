@@ -172,18 +172,16 @@ export function evaluateCandidate(
   }
 
   const isMcp = action.type.startsWith('mcp:');
-  const restrictKnowledge =
-    action.type === KNOWLEDGE_SEARCH_TOOL ||
-    ctx.enabledTools.some((tool) => tool !== KNOWLEDGE_SEARCH_TOOL);
-  if (
-    isMcp
-      ? !mcpGranted
-      : action.type === 'load_skill'
-        ? false
-        : restrictKnowledge
-          ? !ctx.enabledTools.includes(action.type)
-          : ctx.enabledTools.length > 0 && !ctx.enabledTools.includes(action.type)
-  ) {
+  // knowledge.search is opt-in and must not flip empty-list semantics for other native tools.
+  const nativeEnablementTools = ctx.enabledTools.filter((tool) => tool !== KNOWLEDGE_SEARCH_TOOL);
+  const toolDenied = isMcp
+    ? !mcpGranted
+    : action.type === 'load_skill'
+      ? false
+      : action.type === KNOWLEDGE_SEARCH_TOOL
+        ? !ctx.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
+        : nativeEnablementTools.length > 0 && !nativeEnablementTools.includes(action.type);
+  if (toolDenied) {
     reasons.push(`Tool ${action.type} is not enabled for this agent.`);
     return { decision: 'deny', reasons };
   }

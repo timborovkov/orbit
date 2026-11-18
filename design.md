@@ -482,7 +482,8 @@ The Knowledge tab uses Access-style Documents / Inspector / Playground sections 
 desktop, Select ≤900px). Documents stay list-first with pending/processing/ready/failed
 Badges. Empty library uses a dashed dropzone; header Upload remains available once
 documents exist. Row meta is muted sans; actions use an ellipsis menu with delete
-confirmation. Inspector query is a single-line InputGroup; hit counts and stub-embedding
-notices live in the inspector results header. Playground retrieval is a Switch. Soft
-refresh also covers in-flight knowledge jobs. Task tabs still use the compact Select at
-≤600px.
+confirmation. Inspector query is a single-line InputGroup; retrieval failures render a destructive
+shadcn Alert in the Inspector panel (not only under Documents). Hit counts and
+stub-embedding notices live in the inspector results header. Playground retrieval is a
+Switch. Soft refresh also covers in-flight knowledge jobs. Task tabs still use the
+compact Select at ≤600px.

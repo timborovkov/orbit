@@ -28,6 +28,10 @@ import {
   retryableStore,
   UnrecoverablePaidStepFinalizationError,
 } from '@/lib/runtime/errors';
+import {
+  consumeKnowledgeToolStep,
+  recordKnowledgeToolCall,
+} from '@/lib/runtime/knowledge/tool-step';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { prepareRunTools } from '@/lib/runtime/resources';
@@ -682,6 +686,16 @@ async function processSimulationRun(
             toolCalls: resources.toolCalls,
             retrieveKnowledge: agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
               ? async (requestSignal) => {
+                  const query = run.input.slice(0, 2000);
+                  const args = { query, limit: 4 };
+                  const slot = consumeKnowledgeToolStep(
+                    resources.toolSteps,
+                    resources.toolCalls,
+                    args,
+                  );
+                  if (!slot.ok) {
+                    return { status: 'deny', reason: slot.reason, hits: [] };
+                  }
                   try {
                     const { policy, result: searchResult } = await nativeTools[
                       KNOWLEDGE_SEARCH_TOOL
@@ -689,23 +703,35 @@ async function processSimulationRun(
                       actor: run.actor,
                       agentId: run.agentId,
                       runId: run.id,
-                      query: run.input.slice(0, 2000),
+                      query,
                       limit: 4,
                       idempotencyKey: idempotencyKey([run.id, KNOWLEDGE_SEARCH_TOOL]),
                       execution: { runId: run.id, token: executionToken, signal: requestSignal },
                     });
+                    const status = policy.decision === 'allow' ? 'allow' : 'deny';
+                    recordKnowledgeToolCall(resources.toolCalls, args, {
+                      policy: status,
+                      result: searchResult ? { hitCount: searchResult.hits.length } : null,
+                      error: status === 'allow' ? undefined : policy.reasons.join(' '),
+                    });
                     return {
-                      status: policy.decision === 'allow' ? 'allow' : 'deny',
+                      status,
                       reason: policy.reasons.join(' '),
                       hits: searchResult?.hits ?? [],
                     };
                   } catch (error) {
                     if (isBudgetError(error) || requestSignal.aborted) throw error;
                     reportFailure('worker.runtime', failureCorrelation(), error);
+                    const reason =
+                      'Knowledge retrieval failed. Check the agent’s library and OpenRouter connection.';
+                    recordKnowledgeToolCall(resources.toolCalls, args, {
+                      policy: 'deny',
+                      result: null,
+                      error: reason,
+                    });
                     return {
                       status: 'failed',
-                      reason:
-                        'Knowledge retrieval failed. Check the agent’s library and OpenRouter connection.',
+                      reason,
                       hits: [],
                     };
                   }

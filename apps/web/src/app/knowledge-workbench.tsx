@@ -172,6 +172,7 @@ export function KnowledgeWorkbench({
         query={query}
         pending={pending}
         searching={pending && busyId === 'inspect'}
+        error={error}
         inspection={inspection?.library === library ? inspection : null}
         onQueryChange={setQuery}
         onInspect={() => {

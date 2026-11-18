@@ -1,8 +1,9 @@
 'use client';
 
-import { Search } from 'lucide-react';
+import { CircleAlert, Search } from 'lucide-react';
 
 import type { InspectionHit } from '@/app/knowledge-shared';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
@@ -16,6 +17,7 @@ export function KnowledgeInspectorPanel({
   query,
   pending,
   searching,
+  error,
   inspection,
   onQueryChange,
   onInspect,
@@ -23,6 +25,7 @@ export function KnowledgeInspectorPanel({
   query: string;
   pending: boolean;
   searching: boolean;
+  error: string | null;
   inspection: {
     query: string;
     hits: InspectionHit[];
@@ -78,6 +81,14 @@ export function KnowledgeInspectorPanel({
           </InputGroupAddon>
         </InputGroup>
       </form>
+
+      {error ? (
+        <Alert variant="destructive" className="knowledge-inspector-error">
+          <CircleAlert aria-hidden="true" />
+          <AlertTitle>Search failed</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {!inspection ? (
         <div className="knowledge-inspector-empty">

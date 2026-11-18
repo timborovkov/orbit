@@ -97,6 +97,7 @@ export async function prepareRunTools(options: {
     mcpConnections: mcp.statuses,
     tools,
     toolCalls,
+    toolSteps,
     close: mcp.close,
   };
 }
