@@ -9,7 +9,7 @@ import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { budgetFields, type AgentBudgets } from '@/lib/budgets';
+import { budgetFields, budgetNoCapAriaLabel, type AgentBudgets } from '@/lib/budgets';
 import { cn } from '@/lib/utils';
 
 export interface BudgetUsageView {
@@ -126,6 +126,9 @@ function BudgetFieldControl({
               id={`${inputId}-unlimited`}
               checked={unlimited}
               onCheckedChange={setUnlimited}
+              aria-label={budgetNoCapAriaLabel(
+                fieldKey === 'dailySpendCents' ? 'dailySpendCents' : 'monthlySpendCents',
+              )}
             />
             {unlimited ? <input type="hidden" name={`${fieldKey}Unlimited`} value="on" /> : null}
           </div>
