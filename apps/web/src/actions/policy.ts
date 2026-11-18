@@ -15,7 +15,11 @@ import {
 export async function saveApprovalTools(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
-  const agentId = z.uuid().parse(form.get('agentId'));
+  const fields = z
+    .object({ agentId: z.uuid(), configurationVersion: z.coerce.number().int().positive() })
+    .safeParse(Object.fromEntries(form));
+  if (!fields.success) return { error: 'Choose a valid agent and configuration.' };
+  const { agentId, configurationVersion } = fields.data;
   const tools = z
     .array(z.enum(proposalTypes))
     .max(proposalTypes.length)
@@ -51,15 +55,15 @@ export async function saveApprovalTools(form: FormData) {
     }
   }
 
-  const saved = await persistApprovalTools(actor, agentId, [...new Set(tools.data)], {
+  const result = await persistApprovalTools(actor, agentId, configurationVersion, {
+    approvalTools: [...new Set(tools.data)],
     approvalExpiresAfterHours,
     approvalOnReject: onReject.data,
     approvalSpendCents,
   });
-  if (!saved) return { error: 'Agent not found.' };
   revalidatePath(`/agents/${agentId}`);
   revalidatePath('/approvals');
-  return { message: 'Approval requirements saved.' };
+  return result;
 }
 
 export async function saveConsent(form: FormData) {

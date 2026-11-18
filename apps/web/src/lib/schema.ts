@@ -26,6 +26,12 @@ export const sessions = pgTable('sessions', {
 });
 
 export type ApprovalOnReject = 'continue' | 'end';
+export interface ApprovalSettings {
+  approvalTools: string[];
+  approvalExpiresAfterHours: number | null;
+  approvalOnReject: ApprovalOnReject;
+  approvalSpendCents: number | null;
+}
 
 export const agents = pgTable('agents', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -77,6 +83,7 @@ export const configurations = pgTable(
       .references(() => agents.id),
     version: integer('version').notNull(),
     config: jsonb('config').$type<AgentConfig>().notNull(),
+    approvalSettings: jsonb('approval_settings').$type<ApprovalSettings>(),
     actor: text('actor').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

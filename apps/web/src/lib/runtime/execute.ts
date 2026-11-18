@@ -13,10 +13,15 @@ import {
   parseBudgets,
   type BudgetSnapshot,
 } from '@/lib/budgets';
-import { db } from '@/lib/db';
+import { db, type Tx } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
+import {
+  lockApprovalAgent,
+  recordApprovalReviews,
+  settleApprovalRun,
+} from '@/lib/runtime/approval-work';
 import {
   isRetryableInfrastructureError,
   isUnrecoverablePaidStepFinalizationError,
@@ -32,6 +37,7 @@ import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import {
   hasSimulationProgress,
   simulate,
+  SIMULATION_JOB_TYPE,
   type ModelCall,
   type SimulationResult,
 } from '@/lib/runtime/simulation';
@@ -44,9 +50,10 @@ import {
   jobs,
   runs,
   usageCounters,
+  type ApprovalOnReject,
 } from '@/lib/schema';
 
-export const SIMULATION_JOB_TYPE = 'simulation.run';
+export { SIMULATION_JOB_TYPE };
 
 function idempotencyKey(parts: string[]) {
   return createHash('sha256').update(parts.join(':')).digest('hex');
@@ -74,10 +81,11 @@ async function updateIfOwned(
   runId: string,
   executionToken: string,
   values: Partial<typeof runs.$inferInsert> & { result?: SimulationResult },
+  transaction?: Tx,
 ) {
   const incoming = values.result;
   if (!incoming) {
-    return await db()
+    return await (transaction ?? db())
       .update(runs)
       .set(values)
       .where(
@@ -91,7 +99,7 @@ async function updateIfOwned(
   }
   // Preserve per-stage quota rows written by reserveRequestQuota so simulate checkpoints
   // cannot wipe idempotency keys that retries must reuse.
-  return await db().transaction(async (tx) => {
+  const write = async (tx: Tx) => {
     const current = (
       await tx
         .select({ id: runs.id, result: runs.result })
@@ -124,7 +132,8 @@ async function updateIfOwned(
         ),
       )
       .returning({ id: runs.id });
-  });
+  };
+  return transaction ? write(transaction) : db().transaction(write);
 }
 
 /** Abort this claim when another worker has rotated the execution token. */
@@ -187,10 +196,7 @@ async function markStageDispatchedIfOwned(
   });
 }
 
-async function expireStaleRuns(
-  tx: Parameters<Parameters<ReturnType<typeof db>['transaction']>[0]>[0],
-  agentId: string,
-) {
+async function expireStaleRuns(tx: Tx, agent: Pick<typeof agents.$inferSelect, 'id' | 'name'>) {
   // Do not apply the execution deadline to awaiting_approval — that wait is governed by
   // action_intents.review_expires_at / expireStaleApprovals, not run.expiresAt.
   const stale = await tx
@@ -198,7 +204,7 @@ async function expireStaleRuns(
     .set({ status: 'interrupted', finishedAt: new Date() })
     .where(
       and(
-        eq(runs.agentId, agentId),
+        eq(runs.agentId, agent.id),
         inArray(runs.status, ['queued', 'running']),
         lt(runs.expiresAt, new Date()),
       ),
@@ -206,17 +212,17 @@ async function expireStaleRuns(
     .returning({ id: runs.id, jobId: runs.jobId });
   const runIds = stale.map((row) => row.id);
   if (runIds.length) {
-    await tx
-      .update(actionIntents)
-      .set({
-        decision: 'deny',
-        reasons: ['Run expired while awaiting approval.'],
-        reviewStatus: 'rejected',
-        reviewedBy: 'system:run-expiry',
-        reviewedAt: new Date(),
-        reviewExpiresAt: null,
-      })
+    const pending = await tx
+      .select()
+      .from(actionIntents)
       .where(and(inArray(actionIntents.runId, runIds), eq(actionIntents.reviewStatus, 'pending')));
+    await recordApprovalReviews(tx, pending, {
+      actor: 'system:run-expiry',
+      agentName: agent.name,
+      status: 'rejected',
+      reason: 'Run reached its execution deadline before suspending for review.',
+      now: new Date(),
+    });
   }
   const jobIds = stale.map((row) => row.jobId).filter((id): id is string => !!id);
   if (jobIds.length) {
@@ -264,7 +270,7 @@ export async function enqueueSimulation({
       };
     }
 
-    await expireStaleRuns(tx, agentId);
+    await expireStaleRuns(tx, agent);
 
     const budgets = parseBudgets(agent.budgets);
     const active = (
@@ -547,12 +553,17 @@ async function processSimulationRun(
   let didComplete = false;
   let statusMessage: string | undefined;
   try {
-    const credential = (
-      await db().select().from(credentials).where(eq(credentials.agentId, run.agentId))
-    ).at(0);
-    // Agent key → OPENROUTER_API_KEY → inspectable failure. Same path for web and worker.
-    const { apiKey } = resolveOpenRouterApiKey(run.agentId, credential?.encryptedKey);
-    const call = inference(apiKey);
+    let model: Promise<ModelCall> | undefined;
+    const getModel = () => {
+      model ??= (async () => {
+        const credential = await retryableStore(async () =>
+          (await db().select().from(credentials).where(eq(credentials.agentId, run.agentId))).at(0),
+        );
+        const { apiKey } = resolveOpenRouterApiKey(run.agentId, credential?.encryptedKey);
+        return inference(apiKey);
+      })();
+      return model;
+    };
 
     // Include reservation-only progress so a failed post-call checkpoint cannot free the step slot.
     const checkpointed = hasSimulationProgress(run.result) ? run.result : undefined;
@@ -583,13 +594,13 @@ async function processSimulationRun(
       return;
     }
     let settle!: (billedMicros: number) => Promise<void>;
-    let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
+    let quote: Awaited<ReturnType<NonNullable<ModelCall['quote']>>> | undefined;
     const result = await telemetry.inRunContext(() =>
       simulate(
         config.config,
         run.input,
         async (request) => {
-          const response = await telemetry.callModel(call, { ...request, quote });
+          const response = await telemetry.callModel(await getModel(), { ...request, quote });
           const stage = request.stage === 'main' ? 'main' : 'evaluator';
           // Persist the dispatch burn before assertOwned / settlement. A Retryable blip after
           // a paid return must not requeue with only a pending reservation (double-spend).
@@ -670,6 +681,7 @@ async function processSimulationRun(
                   } catch {
                     throw new BudgetError('cancelled');
                   }
+                  const call = await getModel();
                   quote = hasSpendCap(budgets)
                     ? await call.quote?.(request.model, request.signal)
                     : undefined;
@@ -792,53 +804,27 @@ async function processSimulationRun(
       ),
     );
 
-    const needsApproval =
-      !result.error && result.actions.some((action) => action.policy === 'needs-approval');
-    const terminalStatus = result.error
-      ? ('failed' as const)
-      : needsApproval
-        ? ('awaiting_approval' as const)
-        : ('completed' as const);
     if (result.error && isTrustedBudgetMessage(result.error)) statusMessage = result.error;
     else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
     try {
+      const traceResult = { ...result, traceId: telemetry.traceId };
       const owned = await retryableStore(() =>
-        updateIfOwned(run.id, executionToken, {
-          status: terminalStatus,
-          finishedAt: needsApproval ? null : new Date(),
-          result: { ...result, traceId: telemetry.traceId },
-          deferReason: needsApproval
-            ? 'Awaiting administrator approval.'
-            : result.error && isTrustedBudgetMessage(result.error)
-              ? result.error
-              : null,
-        }),
-      );
-      if (owned.length === 0) {
-        // Another worker reclaimed the run; do not complete or release its job claim.
-        return;
-      }
-      if (needsApproval) {
-        // Finish the lease only after the ownership-checked suspend succeeded.
-        if (run.jobId && claim) {
-          await completeJob(run.jobId, claim.workerId);
-        } else if (run.jobId) {
-          await db()
-            .update(jobs)
-            .set({
-              status: 'completed',
+        result.error
+          ? updateIfOwned(run.id, executionToken, {
+              status: 'failed',
               finishedAt: new Date(),
-              claimedAt: null,
-              claimExpiresAt: null,
-              claimedBy: null,
-              updatedAt: new Date(),
-              lastError: null,
+              result: traceResult,
+              deferReason: isTrustedBudgetMessage(result.error) ? result.error : null,
             })
-            .where(and(eq(jobs.id, run.jobId), inArray(jobs.status, ['pending', 'claimed'])));
-        }
-        didComplete = true;
-        return;
-      }
+          : finishSimulationWithApprovals(
+              run,
+              executionToken,
+              traceResult,
+              config.approvalSettings?.approvalOnReject,
+              claim,
+            ),
+      );
+      if (!owned.length) return;
     } catch (error) {
       // Paid-step burn: never complete the job while the run is still running. Persist the burn
       // markers when possible, then Retryable so the queue retries finalization only (simulate
@@ -918,9 +904,6 @@ async function processSimulationRun(
     } else if (error instanceof Error && error.message === PAID_STEP_BURN_MESSAGE) {
       inspectable = PAID_STEP_BURN_MESSAGE;
       statusMessage = 'paid-step-burn';
-    } else if (error instanceof Error && error.message === 'Missing OpenRouter credential') {
-      inspectable =
-        'No OpenRouter credential available. Save an agent key under Access or set OPENROUTER_API_KEY on the server.';
     }
     try {
       await db()
@@ -1003,6 +986,87 @@ async function processSimulationRun(
   }
 }
 
+async function finishSimulationWithApprovals(
+  run: typeof runs.$inferSelect,
+  executionToken: string,
+  result: SimulationResult,
+  onReject: ApprovalOnReject | undefined,
+  claim?: SimulationJobClaim,
+) {
+  return db().transaction(async (tx) => {
+    const agent = await lockApprovalAgent(tx, run.agentId);
+    if (!agent) return [];
+    const reviewStatuses =
+      (onReject ?? agent.approvalOnReject) === 'end'
+        ? (['pending', 'rejected'] as const)
+        : (['pending'] as const);
+    const review = (
+      await tx
+        .select({ id: actionIntents.id })
+        .from(actionIntents)
+        .where(
+          and(
+            eq(actionIntents.runId, run.id),
+            inArray(actionIntents.reviewStatus, [...reviewStatuses]),
+          ),
+        )
+        .limit(1)
+    ).at(0);
+
+    if (!review && !result.actions.some((action) => action.policy === 'needs-approval')) {
+      return updateIfOwned(
+        run.id,
+        executionToken,
+        {
+          status: 'completed',
+          finishedAt: new Date(),
+          result,
+          deferReason: null,
+        },
+        tx,
+      );
+    }
+
+    if (run.jobId) {
+      const job = (
+        await tx
+          .select({ status: jobs.status, claimedBy: jobs.claimedBy })
+          .from(jobs)
+          .where(eq(jobs.id, run.jobId))
+          .for('update')
+      ).at(0);
+      const ownsJob = claim
+        ? claim.jobId === run.jobId && job?.status === 'claimed' && job.claimedBy === claim.workerId
+        : job?.status === 'pending';
+      if (!ownsJob) return [];
+    }
+    const owned = await updateIfOwned(
+      run.id,
+      executionToken,
+      {
+        status: 'awaiting_approval',
+        finishedAt: null,
+        result,
+        deferReason: 'Awaiting administrator approval.',
+      },
+      tx,
+    );
+    if (!owned.length) return owned;
+
+    if (run.jobId && claim) {
+      await completeJob(run.jobId, claim.workerId, tx);
+    } else if (run.jobId) {
+      const now = new Date();
+      await tx
+        .update(jobs)
+        .set({ status: 'completed', finishedAt: now, updatedAt: now })
+        .where(eq(jobs.id, run.jobId));
+    }
+    await settleApprovalRun(tx, agent, run.id, run.actor);
+    return owned;
+  });
+}
+
 export async function processSimulationJob(
   payload: Record<string, unknown>,
   inference: (key: string) => ModelCall = openRouterInference,
@@ -1041,48 +1105,6 @@ export async function finalizeExhaustedSimulationJob(
       result: sql`jsonb_set(coalesce(${runs.result}, '{"steps":[],"actions":[],"error":null}'::jsonb), '{error}', to_jsonb(${inspectable}::text))`,
     })
     .where(and(eq(runs.id, runId), inArray(runs.status, ['queued', 'running'])));
-}
-
-/**
- * Re-enqueue a suspended run after all of its pending approvals are resolved.
- * Uses a fresh idempotency key so the completed original job is not reused.
- */
-export async function resumeSimulationAfterApproval(runId: string, actor: string) {
-  return await db().transaction(async (tx) => {
-    const run = (await tx.select().from(runs).where(eq(runs.id, runId)).for('update')).at(0);
-    if (run?.status !== 'awaiting_approval') {
-      return { skipped: true as const };
-    }
-    const pending = await tx
-      .select({ id: actionIntents.id })
-      .from(actionIntents)
-      .where(and(eq(actionIntents.runId, runId), eq(actionIntents.reviewStatus, 'pending')))
-      .limit(1);
-    if (pending.length > 0) return { skipped: true as const, waiting: true as const };
-
-    const agent = (await tx.select().from(agents).where(eq(agents.id, run.agentId))).at(0);
-    const budgets = parseBudgets(agent?.budgets);
-    // Approval wait must not consume the execution deadline; start a fresh window for resume.
-    const expiresAt = new Date(Date.now() + budgets.runDeadlineSeconds * 1000);
-
-    const job = await enqueueJob(tx, {
-      type: SIMULATION_JOB_TYPE,
-      payload: { runId: run.id, agentId: run.agentId, configurationId: run.configurationId, actor },
-      idempotencyKey: `simulation:${run.id}:resume:${Date.now()}`,
-      maxAttempts: 3,
-    });
-    await tx
-      .update(runs)
-      .set({
-        status: 'queued',
-        jobId: job.id,
-        deferReason: null,
-        finishedAt: null,
-        expiresAt,
-      })
-      .where(eq(runs.id, run.id));
-    return { skipped: false as const, jobId: job.id };
-  });
 }
 
 /**

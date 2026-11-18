@@ -37,6 +37,7 @@ export function AccessWorkbench({
   lifecycle,
   budgets,
   usage,
+  configurationVersion,
   approvalTools,
   approvalExpiresAfterHours,
   approvalOnReject,
@@ -50,6 +51,7 @@ export function AccessWorkbench({
   lifecycle: LifecycleState;
   budgets: AgentBudgets;
   usage: BudgetUsageView;
+  configurationVersion: number;
   approvalTools: string[];
   approvalExpiresAfterHours: number | null;
   approvalOnReject: 'continue' | 'end';
@@ -86,6 +88,7 @@ export function AccessWorkbench({
     approvals: (
       <ReviewSettings
         agentId={agentId}
+        configurationVersion={configurationVersion}
         approvalTools={approvalTools}
         approvalExpiresAfterHours={approvalExpiresAfterHours}
         approvalOnReject={approvalOnReject}

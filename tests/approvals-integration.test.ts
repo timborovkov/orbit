@@ -4,15 +4,17 @@ import postgres from 'postgres';
 
 import './shim-server-only';
 
-import { expireStaleApprovals, reviewProposedAction } from '@/lib/approvals/review';
-import { budgetDefaults } from '@/lib/budgets';
+import { budgetDefaults, budgetViolationMessage } from '@/lib/budgets';
 import { startJobWorker } from '@/lib/queue/worker';
+import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
 import {
   enqueueSimulation,
   processSimulationJob,
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
+import { persistApprovalTools } from '@/lib/server/lifecycle-mutations';
+import { reviewProposedAction } from '@/lib/server/policy-mutations';
 
 const databaseUrl =
   process.env.TEST_DATABASE_URL ??
@@ -308,4 +310,187 @@ test('worker-shared expiry resumes without redistributing paid stages', async ()
   await worker.stop();
   const [finished] = await sql`SELECT status FROM simulation_runs WHERE id=${queued.runId!}`;
   expect(finished.status).toBe('completed');
+});
+
+async function suspendFixture(options: Parameters<typeof seedAgent>[0] = {}) {
+  const agent = await seedAgent(options);
+  const queued = await enqueueSimulation({
+    actor,
+    agentId: agent.id,
+    configurationId: agent.versionId,
+    input: 'Approval fixture',
+  });
+  if (!queued.runId) throw new Error('Fixture failed to queue');
+  const runId = queued.runId;
+  await processSimulationJob({ runId }, () => async () => ({
+    decision: {
+      relevant: true,
+      priority: 0.5,
+      reason: 'Approval fixture',
+      actions: [{ type: 'reply', reason: 'Review me', draft: 'A draft' }],
+    },
+    inputTokens: 3,
+    outputTokens: 2,
+  }));
+  const [intent] =
+    await sql`SELECT id FROM action_intents WHERE run_id=${runId} AND review_status='pending'`;
+  const [run] = await sql`SELECT status, job_id FROM simulation_runs WHERE id=${runId}`;
+  expect(run.status).toBe('awaiting_approval');
+  return { ...agent, runId, intentId: intent.id as string, jobId: run.job_id as string };
+}
+
+test('a failed continuation insert rolls back the review and allows a retry', async () => {
+  const fixture = await suspendFixture();
+  await sql`
+    ALTER TABLE jobs ADD CONSTRAINT approvals_test_reject_resume
+    CHECK (idempotency_key NOT LIKE '%:resume:%') NOT VALID
+  `;
+  try {
+    await expect(
+      reviewProposedAction(actor, fixture.id, fixture.intentId, 'approved'),
+    ).rejects.toThrow();
+  } finally {
+    await sql`ALTER TABLE jobs DROP CONSTRAINT approvals_test_reject_resume`;
+  }
+  const [intent] = await sql`SELECT review_status FROM action_intents WHERE id=${fixture.intentId}`;
+  const [run] = await sql`SELECT status, job_id FROM simulation_runs WHERE id=${fixture.runId}`;
+  expect(intent.review_status).toBe('pending');
+  expect(run).toMatchObject({ status: 'awaiting_approval', job_id: fixture.jobId });
+  expect(await sql`SELECT id FROM audit WHERE action LIKE ${`%${fixture.intentId}%`}`).toHaveLength(
+    0,
+  );
+
+  expect(await reviewProposedAction(actor, fixture.id, fixture.intentId, 'approved')).toEqual({
+    message: 'Proposal approved.',
+  });
+  const [queued] = await sql`SELECT status, job_id FROM simulation_runs WHERE id=${fixture.runId}`;
+  expect(queued.status).toBe('queued');
+  expect(queued.job_id).not.toBe(fixture.jobId);
+});
+
+test('reconciliation repairs stranded approved runs without an OpenRouter credential', async () => {
+  const fixture = await suspendFixture();
+  await sql`UPDATE action_intents SET review_status='approved', decision='suppressed', reviewed_by=${actor} WHERE id=${fixture.intentId}`;
+  await sql`DELETE FROM agent_credentials WHERE agent_id=${fixture.id}`;
+  await reconcileSuspendedApprovals();
+  await reconcileSuspendedApprovals();
+  const [queued] = await sql`SELECT status, job_id FROM simulation_runs WHERE id=${fixture.runId}`;
+  expect(queued.status).toBe('queued');
+  expect(await sql`SELECT id FROM jobs WHERE payload->>'runId'=${fixture.runId}`).toHaveLength(2);
+
+  const original = process.env.OPENROUTER_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  try {
+    await processSimulationJob({ runId: fixture.runId }, () => {
+      throw new Error('Continuation must never construct an inference client');
+    });
+  } finally {
+    if (original !== undefined) process.env.OPENROUTER_API_KEY = original;
+  }
+  const [run] = await sql`SELECT status, result FROM simulation_runs WHERE id=${fixture.runId}`;
+  expect(run.status).toBe('completed');
+  expect(run.result.actions[0].policy).toBe('suppressed');
+  expect(run.result.steps).toHaveLength(2);
+});
+
+test('expired reviews reject atomically, end the run and audit sibling cancellations', async () => {
+  const fixture = await suspendFixture({ approvalOnReject: 'end' });
+  const [sibling] = await sql`
+    INSERT INTO action_intents(agent_id, run_id, action_type, idempotency_key, decision, review_status)
+    VALUES (${fixture.id}, ${fixture.runId}, 'like', ${randomUUID()}, 'needs-approval', 'pending')
+    RETURNING id
+  `;
+  await sql`UPDATE action_intents SET review_expires_at=now()-interval '1 minute' WHERE id=${fixture.intentId}`;
+  expect(await reviewProposedAction(actor, fixture.id, fixture.intentId, 'approved')).toEqual({
+    error: 'This proposal expired and was rejected.',
+  });
+  const [run] = await sql`SELECT status, result FROM simulation_runs WHERE id=${fixture.runId}`;
+  expect(run.status).toBe('failed');
+  expect(run.result.actions[0].policy).toBe('deny');
+  const [review] =
+    await sql`SELECT review_note, reviewed_by FROM action_intents WHERE id=${fixture.intentId}`;
+  expect(review).toMatchObject({ review_note: 'expired', reviewed_by: 'system:approval-expiry' });
+  const [cancelled] = await sql`SELECT review_status FROM action_intents WHERE id=${sibling.id}`;
+  expect(cancelled.review_status).toBe('rejected');
+  expect(
+    await sql`SELECT id FROM audit WHERE action LIKE ${`%${fixture.intentId}%`} OR action LIKE ${`%${sibling.id}%`}`,
+  ).toHaveLength(2);
+  expect(await sql`SELECT id FROM jobs WHERE payload->>'runId'=${fixture.runId}`).toHaveLength(1);
+});
+
+test('a rejection before suspension applies the selected version’s end policy', async () => {
+  const fixture = await suspendFixture({ approvalOnReject: 'end' });
+  // Restore the state between the model checkpoint and final suspension.
+  await sql`UPDATE simulation_runs SET status='running', defer_reason=NULL WHERE id=${fixture.runId}`;
+  await sql`UPDATE jobs SET status='pending', finished_at=NULL WHERE id=${fixture.jobId}`;
+  await sql`UPDATE agent_configurations SET approval_settings=${sql.json({
+    approvalTools: ['reply'],
+    approvalOnReject: 'end',
+    approvalSpendCents: null,
+    approvalExpiresAfterHours: null,
+  })} WHERE id=${fixture.versionId}`;
+  await sql`UPDATE agents SET approval_on_reject='continue' WHERE id=${fixture.id}`;
+  expect(await reviewProposedAction(actor, fixture.id, fixture.intentId, 'rejected')).toEqual({
+    message: 'Proposal rejected.',
+  });
+  const [running] = await sql`SELECT status FROM simulation_runs WHERE id=${fixture.runId}`;
+  expect(running.status).toBe('running');
+
+  await processSimulationJob({ runId: fixture.runId }, () => {
+    throw new Error('Continuation must never construct an inference client');
+  });
+  const [run] = await sql`SELECT status, result FROM simulation_runs WHERE id=${fixture.runId}`;
+  expect(run.status).toBe('failed');
+  expect(run.result.actions[0].policy).toBe('deny');
+  expect(await sql`SELECT id FROM jobs WHERE payload->>'runId'=${fixture.runId}`).toHaveLength(1);
+});
+
+test('saving per-agent rules versions them and keeps old runs on their selected policy', async () => {
+  const agent = await seedAgent({ approvalTools: [] });
+  const updated = await persistApprovalTools(actor, agent.id, 1, {
+    approvalTools: ['reply'],
+    approvalExpiresAfterHours: 2,
+    approvalOnReject: 'end',
+    approvalSpendCents: null,
+  });
+  expect(updated).toEqual({ message: 'Approval requirements saved.' });
+  const versions = await sql`
+    SELECT id, approval_settings FROM agent_configurations WHERE agent_id=${agent.id} ORDER BY version
+  `;
+  expect(versions.map((version) => version.approval_settings.approvalTools)).toEqual([
+    [],
+    ['reply'],
+  ]);
+  const runVersion = async (configurationId: string) => {
+    const queued = await enqueueSimulation({
+      actor,
+      agentId: agent.id,
+      configurationId,
+      input: 'Version fixture',
+    });
+    if (!queued.runId) throw new Error('Fixture failed to queue');
+    await processSimulationJob({ runId: queued.runId }, () => async () => ({
+      decision: {
+        relevant: true,
+        priority: 0.5,
+        reason: 'Version fixture',
+        actions: [
+          { type: 'reply', reason: 'Review based on the selected version', draft: 'A draft' },
+        ],
+      },
+      inputTokens: 3,
+      outputTokens: 2,
+    }));
+    const [run] = await sql`SELECT status FROM simulation_runs WHERE id=${queued.runId}`;
+    return run.status;
+  };
+  expect(await runVersion(versions[0].id)).toBe('completed');
+  expect(await runVersion(versions[1].id)).toBe('awaiting_approval');
+  const second = await enqueueSimulation({
+    actor,
+    agentId: agent.id,
+    configurationId: versions[1].id,
+    input: 'Wait occupies the active slot',
+  });
+  expect(second).toMatchObject({ error: budgetViolationMessage('concurrency') });
 });

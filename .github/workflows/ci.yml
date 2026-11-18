@@ -140,14 +140,8 @@ jobs:
         run: bun run db:migrate
         env:
           DATABASE_URL: postgres://orbit:orbit_dev@localhost:5432/orbit_test
-      - name: Test durable job queue
-        run: bun run test:queue
-        env:
-          DATABASE_URL: postgres://orbit:orbit_dev@localhost:5432/orbit_test
-      - name: Test simulation persistence and isolation
-        run: bun run test:simulation
-      - name: Test worker and web integration
-        run: bun test tests/worker-integration.test.ts
+      - name: Test queue, simulations, worker and approvals
+        run: bun run test:integration
         env:
           DATABASE_URL: postgres://orbit:orbit_dev@localhost:5432/orbit_test
           APP_URL: http://localhost:3000

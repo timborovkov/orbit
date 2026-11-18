@@ -1,5 +1,7 @@
 import { consentScope } from '@/lib/policy/scopes';
 
+export const approvalReviewLimit = 50;
+
 /** Merge agent and global approval tool lists (order-stable unique). */
 export function mergeApprovalTools(
   agentTools: string[] | null | undefined,

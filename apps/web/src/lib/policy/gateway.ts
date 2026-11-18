@@ -23,6 +23,7 @@ import { retryableStore } from '@/lib/runtime/errors';
 import {
   actionIntents,
   agents,
+  configurations,
   controls,
   policyDecisions,
   runs,
@@ -82,6 +83,16 @@ export async function loadPolicyContext(
 ): Promise<PolicyContext | null> {
   const agent = (await store.select().from(agents).where(eq(agents.id, agentId))).at(0);
   if (!agent) return null;
+  const snapshot = runId
+    ? (
+        await store
+          .select({ settings: configurations.approvalSettings })
+          .from(runs)
+          .innerJoin(configurations, eq(configurations.id, runs.configurationId))
+          .where(and(eq(runs.id, runId), eq(runs.agentId, agentId)))
+      ).at(0)?.settings
+    : undefined;
+  const approval = snapshot ?? agent;
   const global = (await store.select().from(controls).where(eq(controls.id, 1))).at(0);
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -105,9 +116,9 @@ export async function loadPolicyContext(
     runId: runId ?? null,
     lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
-    approvalTools: mergeApprovalTools(agent.approvalTools, global?.approvalTools),
-    approvalSpendCents: agent.approvalSpendCents ?? null,
-    approvalExpiresAfterHours: agent.approvalExpiresAfterHours ?? null,
+    approvalTools: mergeApprovalTools(approval.approvalTools, global?.approvalTools),
+    approvalSpendCents: approval.approvalSpendCents,
+    approvalExpiresAfterHours: approval.approvalExpiresAfterHours,
     budgets: parseBudgets(agent.budgets),
     globalPaused: global?.paused ?? true,
     usage: {

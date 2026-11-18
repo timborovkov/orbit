@@ -1,10 +1,9 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
-import { db, type Db, type Tx } from '@/lib/db';
+import { db, type Tx } from '@/lib/db';
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
-import { actionIntents, runs } from '@/lib/schema';
-
-type Store = Db | Tx;
+import { lockApprovalAgent, recordApprovalReviews } from '@/lib/runtime/approval-work';
+import { actionIntents, agents, runs } from '@/lib/schema';
 
 /**
  * Cancel jobs for a pause/stop transition and interrupt linked non-terminal runs.
@@ -13,8 +12,14 @@ type Store = Db | Tx;
 export async function cancelWorkForLifecycle(
   agentId: string,
   next: 'paused' | 'stopped',
-  store: Store = db(),
+  store?: Tx,
 ): Promise<string[]> {
+  if (!store) {
+    return db().transaction(async (tx) => {
+      await lockApprovalAgent(tx, agentId);
+      return cancelWorkForLifecycle(agentId, next, tx);
+    });
+  }
   const includeClaimed = next === 'stopped';
   const cancelledIds = await cancelPendingJobsForAgent(agentId, store, { includeClaimed });
   if (next === 'stopped') {
@@ -50,18 +55,21 @@ export async function cancelWorkForLifecycle(
       );
   }
   if (next === 'stopped') {
-    // Reject any leftover pending approvals so the inbox does not keep stopped work.
-    await store
-      .update(actionIntents)
-      .set({
-        decision: 'deny',
-        reasons: ['Agent stopped; pending approval cancelled.'],
-        reviewStatus: 'rejected',
-        reviewedBy: 'system:lifecycle-stop',
-        reviewedAt: new Date(),
-        reviewExpiresAt: null,
-      })
+    const agent = (
+      await store.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId))
+    ).at(0);
+    const pending = await store
+      .select()
+      .from(actionIntents)
       .where(and(eq(actionIntents.agentId, agentId), eq(actionIntents.reviewStatus, 'pending')));
+    if (agent)
+      await recordApprovalReviews(store, pending, {
+        actor: 'system:lifecycle-stop',
+        agentName: agent.name,
+        status: 'rejected',
+        reason: 'Agent stopped; pending approval cancelled.',
+        now: new Date(),
+      });
   }
   return cancelledIds;
 }

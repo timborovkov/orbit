@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { MissingOpenRouterCredentialError } from '@/lib/runtime/errors';
 import { decryptCredential } from '@/lib/runtime/secrets';
 
 const environmentKeySchema = z.preprocess(
@@ -46,5 +47,5 @@ export function resolveOpenRouterApiKey(
   }
   const apiKey = environmentOpenRouterKey();
   if (apiKey) return { apiKey, source: 'environment' };
-  throw new Error('Missing OpenRouter credential');
+  throw new MissingOpenRouterCredentialError();
 }

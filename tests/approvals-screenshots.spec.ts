@@ -3,29 +3,31 @@ import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
-const sql = postgres('postgres://orbit:orbit_dev@127.0.0.1:5432/orbit_test');
+import { closeDb } from '@/lib/db';
+import { startJobWorker } from '@/lib/queue/worker';
+import { processSimulationJob, SIMULATION_JOB_TYPE } from '@/lib/runtime/execute';
 
-/**
- * Turbopack is rooted at the monorepo (`next.config.ts`), so writing under the
- * repo (e.g. test-results/) during a live `next dev` remounts the app. Capture
- * outside the repo first, then mirror after the suite finishes.
- */
-const LIVE_ARTIFACT_DIR = (() => {
-  const preferred = process.env.CURSOR_ARTIFACTS_DIR ?? '/opt/cursor/artifacts';
+import { openAccessSection, openWorkspaceTab } from './workspace-nav';
+
+const databaseUrl = 'postgres://orbit:orbit_dev@127.0.0.1:5432/orbit_test';
+const sql = postgres(databaseUrl);
+
+/** Runner-writable output; also mirror into Cursor artifacts when that path exists. */
+const ARTIFACT_DIRS = (() => {
+  const dirs = [path.resolve('test-results/approvals-artifacts')];
+  const cursor = process.env.CURSOR_ARTIFACTS_DIR ?? '/opt/cursor/artifacts';
   try {
-    mkdirSync(preferred, { recursive: true });
-    return preferred;
+    mkdirSync(cursor, { recursive: true });
+    dirs.push(cursor);
   } catch {
-    const fallback = '/tmp/approvals-artifacts';
-    mkdirSync(fallback, { recursive: true });
-    return fallback;
+    // GitHub runners cannot write under /opt; keep the repo-relative dir only.
   }
+  for (const dir of dirs) mkdirSync(dir, { recursive: true });
+  return dirs;
 })();
-const POST_RUN_ARTIFACT_DIR = path.resolve('test-results/approvals-artifacts');
-const capturedNames: string[] = [];
 
 function artifactPath(name: string) {
-  return path.join(LIVE_ARTIFACT_DIR, name);
+  return path.join(ARTIFACT_DIRS[0], name);
 }
 
 async function screenshotToArtifacts(
@@ -35,36 +37,25 @@ async function screenshotToArtifacts(
 ) {
   const primary = artifactPath(name);
   await page.screenshot({ ...options, path: primary });
-  capturedNames.push(name);
+  for (const dir of ARTIFACT_DIRS.slice(1)) {
+    copyFileSync(primary, path.join(dir, name));
+  }
 }
 
-test.afterAll(async () => {
-  try {
-    mkdirSync(POST_RUN_ARTIFACT_DIR, { recursive: true });
-    for (const name of capturedNames) {
-      copyFileSync(path.join(LIVE_ARTIFACT_DIR, name), path.join(POST_RUN_ARTIFACT_DIR, name));
-    }
-  } catch {
-    // CI without /opt still keeps /tmp captures; ignore mirror failures.
-  }
-  await sql.end();
-});
-
-test.beforeEach(async () => {
+test.beforeEach(async ({ page }) => {
   await sql`TRUNCATE recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
+  await page.goto('/login');
+  await page.getByLabel(/^Email/).fill('admin@example.com');
+  await page.getByLabel(/^Password/).fill('test-only-password-123456');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 });
 
-async function hideDevChrome(page: Page) {
-  try {
-    await page.addStyleTag({
-      content:
-        'nextjs-portal, [data-next-badge-root], [data-nextjs-toast], [data-nextjs-dev-overlay], #__next-build-watcher { display: none !important; }',
-    });
-  } catch {
-    // Ignore when Turbopack remounts mid-injection.
-  }
-}
+test.afterAll(async () => {
+  await closeDb();
+  await sql.end();
+});
 
 async function setTheme(page: Page, theme: 'light' | 'dark') {
   await page.evaluate((mode) => {
@@ -75,44 +66,8 @@ async function setTheme(page: Page, theme: 'light' | 'dark') {
 }
 
 async function preparePage(page: Page, theme: 'light' | 'dark') {
-  await page.waitForLoadState('domcontentloaded');
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      await setTheme(page, theme);
-      await hideDevChrome(page);
-      return;
-    } catch {
-      await page.waitForLoadState('load');
-    }
-  }
+  await expect(page.locator('body')).toBeVisible();
   await setTheme(page, theme);
-  await hideDevChrome(page);
-}
-
-/** Open Access → Approvals in the #24 AccessWorkbench (left nav or compact Select). */
-async function openAccessApprovals(page: Page) {
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30000 });
-  const accessTab = page.getByRole('tab', { name: 'Access' });
-  const compactWorkspace = page.getByLabel('Agent workspace section');
-  // Wait for hydration: either desktop tabs or the ≤600px Select.
-  await expect(accessTab.or(compactWorkspace)).toBeVisible({ timeout: 30000 });
-  if (await accessTab.isVisible()) {
-    await accessTab.click();
-  } else {
-    await compactWorkspace.click();
-    await page.getByRole('option', { name: /^Access/ }).click();
-  }
-  const navButton = page.locator('.access-sections button', { hasText: 'Approvals' });
-  const compactAccess = page.getByLabel('Access section', { exact: true });
-  await expect(navButton.or(compactAccess).first()).toBeVisible({ timeout: 15000 });
-  if (await navButton.isVisible()) {
-    await navButton.click();
-  } else {
-    // ≤900px: AccessWorkbench collapses section nav to a Select.
-    await compactAccess.click();
-    await page.getByRole('option', { name: 'Approvals' }).click();
-  }
-  await expect(page.getByTestId('approval-settings')).toBeVisible({ timeout: 15000 });
 }
 
 async function seedApprovals() {
@@ -153,6 +108,12 @@ async function seedApprovals() {
   return agents[0];
 }
 
+async function openAccessApprovals(page: Page) {
+  await openWorkspaceTab(page, 'Access');
+  await openAccessSection(page, 'Approvals');
+  await expect(page.getByTestId('approval-settings')).toBeVisible();
+}
+
 test('Approvals page and agent approval settings screenshots', async ({ page }) => {
   test.setTimeout(240000);
   const agent = await seedApprovals();
@@ -168,7 +129,6 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
     });
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await hideDevChrome(page);
     await screenshotToArtifacts(page, `approvals-pending-${theme}-mobile-390x844.png`, {
       fullPage: true,
     });
@@ -178,13 +138,11 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
     await expect(page.getByText(/selected$/)).toBeVisible();
     // Scroll so the last pending card clears the fixed bulk bar, then shoot the viewport.
     await page.locator('.approvals-bulk-spacer').scrollIntoViewIfNeeded();
-    await hideDevChrome(page);
     await screenshotToArtifacts(page, `approvals-bulk-${theme}-desktop-1440x900.png`, {
       fullPage: false,
     });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('.approvals-bulk-spacer').scrollIntoViewIfNeeded();
-    await hideDevChrome(page);
     await screenshotToArtifacts(page, `approvals-bulk-${theme}-mobile-390x844.png`, {
       fullPage: false,
     });
@@ -239,7 +197,6 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
       fullPage: true,
     });
     await page.setViewportSize({ width: 390, height: 844 });
-    await hideDevChrome(page);
     await screenshotToArtifacts(page, `approvals-empty-${theme}-mobile-390x844.png`, {
       fullPage: true,
     });
@@ -257,7 +214,6 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
   await preparePage(page, 'light');
   await screenshotToArtifacts(page, 'approvals-page-desktop-1440x900.png', { fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await hideDevChrome(page);
   await screenshotToArtifacts(page, 'approvals-page-mobile-390x844.png', { fullPage: true });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/agents/${agent.id}`, { waitUntil: 'load' });
@@ -271,4 +227,139 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
   await screenshotToArtifacts(page, 'agent-approval-settings-mobile-390x844.png', {
     fullPage: false,
   });
+});
+
+test('Playground sends a suspended run to Approvals and resumes with no repeat inference', async ({
+  page,
+}) => {
+  const agent = await seedApprovals();
+  await sql`DELETE FROM action_intents`;
+  await sql`UPDATE controls SET paused=false`;
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+  const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
+  process.env.DATABASE_URL = databaseUrl;
+  process.env.OPENROUTER_API_KEY = 'playwright-approval-fixture';
+  let modelCalls = 0;
+  const workerId = 'playwright-approval-worker';
+  const startWorker = () =>
+    startJobWorker({
+      workerId,
+      pollMs: 40,
+      leaseMs: 5000,
+      handlers: {
+        [SIMULATION_JOB_TYPE]: async (job, signal) => {
+          await processSimulationJob(
+            job.payload,
+            () => async () => {
+              modelCalls++;
+              return {
+                decision: {
+                  relevant: true,
+                  priority: 0.6,
+                  reason: 'Playwright review fixture',
+                  actions: [
+                    { type: 'reply', reason: 'Review this reply', draft: 'Original draft' },
+                  ],
+                },
+                inputTokens: 3,
+                outputTokens: 2,
+              };
+            },
+            signal,
+            { jobId: job.id, workerId },
+          );
+        },
+      },
+    });
+
+  let worker = startWorker();
+
+  try {
+    await page.goto(`/agents/${agent.id}`);
+    await openWorkspaceTab(page, 'Playground');
+    await page.getByRole('button', { name: 'Recipients for consent checks' }).click();
+    await page.getByLabel('Recipient ID', { exact: true }).fill('browser-recipient');
+    await page.getByRole('textbox', { name: 'Post or question' }).fill('Please review my reply');
+    await page.getByRole('button', { name: 'Submit' }).click();
+    await expect(
+      page.getByText('Awaiting approval', { exact: false }).filter({ visible: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Stop', exact: true })).not.toBeVisible();
+    const [waiting] = await sql`
+      SELECT r.id, r.job_id, j.status AS job_status, j.claim_expires_at
+      FROM simulation_runs r JOIN jobs j ON j.id=r.job_id
+      WHERE r.agent_id=${agent.id} AND r.status='awaiting_approval'
+    `;
+    expect(waiting.job_status).toBe('completed');
+    expect(waiting.claim_expires_at).toBeNull();
+    expect(modelCalls).toBe(2);
+    await worker.stop();
+
+    await page.getByRole('link', { name: 'Review proposals' }).click();
+    await expect(page).toHaveURL(new RegExp(`run=${waiting.id}$`));
+    const pending = page.getByRole('list', { name: 'Pending approvals' });
+    await expect(pending).toContainText('browser-recipient');
+    await pending.getByRole('button', { name: 'Edit', exact: true }).click();
+    await pending.getByRole('textbox', { name: 'Draft' }).fill('Approved in the browser');
+    await pending.getByRole('button', { name: 'Save & approve' }).click();
+
+    const history = page.getByRole('list', { name: 'Resolved approvals' });
+    await expect(history).toContainText('Approved in the browser');
+    const [queued] = await sql`SELECT status FROM simulation_runs WHERE id=${waiting.id}`;
+    expect(queued.status).toBe('queued');
+    worker = startWorker();
+    await history.getByRole('link', { name: 'View originating run' }).click();
+    const run = page.locator(`#run-${waiting.id}`);
+    await expect(run.locator('.state-label').first()).toHaveText('completed');
+    await expect(run).toContainText('Approved in the browser');
+    const [completed] =
+      await sql`SELECT job_id, result FROM simulation_runs WHERE id=${waiting.id}`;
+    expect(completed.job_id).not.toBe(waiting.job_id);
+    expect(completed.result.steps).toHaveLength(2);
+    expect(modelCalls).toBe(2);
+  } finally {
+    await worker.stop();
+    if (originalOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalOpenRouterKey;
+    if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = originalDatabaseUrl;
+  }
+});
+
+test('bulk limits and agent filters clear discarded edits without a hydration error', async ({
+  page,
+}) => {
+  const agent = await seedApprovals();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.clock.setFixedTime(new Date(Date.now() + 3 * 86_400_000));
+  await page.goto('/approvals');
+  const reply = page
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('checkbox', { name: 'Select Reply for Approval Screens' }) });
+  await reply.getByRole('checkbox').check();
+  await reply.getByRole('button', { name: 'Edit', exact: true }).click();
+  await reply.getByRole('textbox', { name: 'Draft' }).fill('Unsaved text');
+  await expect(page.getByRole('button', { name: 'Bulk approve' })).toBeDisabled();
+
+  const filters = page.getByRole('combobox', { name: 'Filter by agent' });
+  await filters.click();
+  await page.getByRole('option', { name: 'Second Agent' }).click();
+  await expect(reply).toHaveCount(0);
+  await filters.click();
+  await page.getByRole('option', { name: 'All agents' }).click();
+  await reply.getByRole('checkbox').check();
+  await expect(page.getByRole('button', { name: 'Bulk approve' })).toBeEnabled();
+
+  await sql`
+    INSERT INTO action_intents(agent_id, action_type, payload, idempotency_key, decision, review_status)
+    SELECT ${agent.id}, 'reply', '{}', 'batch-fixture-' || n, 'needs-approval', 'pending'
+    FROM generate_series(1,51) AS s(n)
+  `;
+  await page.reload();
+  await page.getByRole('checkbox', { name: 'Select up to 50 pending approvals' }).check();
+  await expect(page.getByText('50 selected')).toBeVisible();
+  await page.getByRole('button', { name: 'Bulk reject' }).click();
+  await expect(page.getByText('50 proposals rejected.')).toBeVisible();
+  expect(errors).toEqual([]);
 });

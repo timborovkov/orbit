@@ -1,13 +1,20 @@
 import 'server-only';
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
-import { reviewProposedAction, reviewProposedActionsBulk } from '@/lib/approvals/review';
+import { approvalReviewLimit } from '@/lib/approvals/rules';
 import { db } from '@/lib/db';
+import { missingRecipientConsent } from '@/lib/policy/consent';
+import { evaluateCandidate, loadPolicyContext } from '@/lib/policy/gateway';
 import type { ConsentScope } from '@/lib/policy/scopes';
-import { agents, audit, recipientConsents } from '@/lib/schema';
-
-export { reviewProposedAction, reviewProposedActionsBulk };
+import {
+  expireApproval,
+  lockApprovalAgent,
+  recordApprovalReviews,
+  settleApprovalRun,
+} from '@/lib/runtime/approval-work';
+import { recordApprovalDecision } from '@/lib/runtime/telemetry';
+import { actionIntents, agents, audit, policyDecisions, recipientConsents } from '@/lib/schema';
 
 /** Administrator consent grant/revoke — web mutation path only. */
 export async function recordConsent(input: {
@@ -41,4 +48,142 @@ export async function recordConsent(input: {
     });
     return { message: granted ? 'Consent recorded.' : 'Consent revoked.' };
   });
+}
+
+type ReviewDecision = 'approved' | 'rejected';
+type ReviewResult = { error: string } | { message: string };
+
+export async function reviewProposedAction(
+  actor: string,
+  agentId: string,
+  intentId: string,
+  reviewStatus: ReviewDecision,
+  options: { editedPayload?: Record<string, unknown>; note?: string | null } = {},
+): Promise<ReviewResult> {
+  const result = await db().transaction(async (tx) => {
+    const agent = await lockApprovalAgent(tx, agentId);
+    if (!agent) return { error: 'Agent not found.' };
+    const intent = (
+      await tx
+        .select()
+        .from(actionIntents)
+        .where(and(eq(actionIntents.id, intentId), eq(actionIntents.agentId, agentId)))
+        .for('update')
+    ).at(0);
+    if (intent?.reviewStatus !== 'pending') {
+      return { error: 'This proposal is no longer awaiting review.' };
+    }
+
+    const now = new Date();
+    if (intent.reviewExpiresAt && intent.reviewExpiresAt <= now) {
+      await expireApproval(tx, agent, intent, now);
+      return {
+        outcome: { error: 'This proposal expired and was rejected.' },
+        runId: intent.runId,
+        decision: 'rejected' as const,
+      };
+    }
+
+    const approved = reviewStatus === 'approved';
+    const payload =
+      approved && options.editedPayload
+        ? { ...intent.payload, ...options.editedPayload }
+        : intent.payload;
+    if (approved) {
+      const ctx = await loadPolicyContext(agentId, actor, intent.runId, tx);
+      if (!ctx) return { error: 'Agent not found.' };
+      const consent = await missingRecipientConsent(
+        tx,
+        agentId,
+        intent.actionType,
+        intent.recipients,
+      );
+      const policy = evaluateCandidate(
+        ctx,
+        {
+          type: intent.actionType,
+          idempotencyKey: intent.idempotencyKey,
+          payload,
+        },
+        consent,
+      );
+      if (policy.decision === 'deny') {
+        await tx.insert(policyDecisions).values({
+          agentId,
+          runId: intent.runId,
+          actionType: intent.actionType,
+          decision: 'deny',
+          reasons: policy.reasons,
+          intentId,
+          actor,
+        });
+        return { error: policy.reasons.join(' ') };
+      }
+    }
+
+    const reason = approved
+      ? options.editedPayload
+        ? 'Administrator approved this proposal with edits.'
+        : 'Administrator approved this proposal.'
+      : 'Administrator rejected this proposal.';
+    await recordApprovalReviews(tx, [intent], {
+      actor,
+      agentName: agent.name,
+      status: reviewStatus,
+      reason,
+      now,
+      payload,
+      note: options.note,
+    });
+    const settled = intent.runId && (await settleApprovalRun(tx, agent, intent.runId, actor));
+    return {
+      outcome: {
+        message: approved
+          ? 'Proposal approved.'
+          : settled === 'ended'
+            ? 'Proposal rejected; run ended.'
+            : 'Proposal rejected.',
+      },
+      runId: intent.runId,
+      decision: reviewStatus,
+    };
+  });
+
+  if (result.error) return { error: result.error };
+  if (!result.outcome) throw new Error('Review returned no outcome.');
+  recordApprovalDecision({ intentId, agentId, runId: result.runId, decision: result.decision });
+  return result.outcome;
+}
+
+export async function reviewProposedActionsBulk(
+  actor: string,
+  items: { agentId: string; intentId: string }[],
+  reviewStatus: ReviewDecision,
+) {
+  if (items.length === 0) return { error: 'Select at least one proposal.' as const };
+  if (items.length > approvalReviewLimit) {
+    return { error: `Review at most ${approvalReviewLimit} proposals at once.` };
+  }
+
+  const settled = await Promise.allSettled(
+    items.map(({ agentId, intentId }) =>
+      reviewProposedAction(actor, agentId, intentId, reviewStatus),
+    ),
+  );
+  const outcomes = settled.map((result, index) => {
+    const intentId = items[index].intentId;
+    if (result.status === 'rejected') {
+      return { intentId, ok: false, message: 'Review could not be saved. Please retry.' };
+    }
+    if ('error' in result.value) return { intentId, ok: false, message: result.value.error };
+    return { intentId, ok: true, message: result.value.message };
+  });
+  const succeeded = outcomes.filter((row) => row.ok).length;
+  const failed = outcomes.length - succeeded;
+  return {
+    message: failed
+      ? `${succeeded} succeeded, ${failed} failed. ${outcomes.find((row) => !row.ok)?.message ?? ''}`
+      : `${succeeded} proposal${succeeded === 1 ? '' : 's'} ${reviewStatus}.`,
+    outcomes,
+  };
 }

@@ -47,12 +47,14 @@ const actionHints = {
 
 export function ApprovalToolsForm({
   agentId,
+  configurationVersion,
   approvalTools,
   approvalExpiresAfterHours,
   approvalOnReject,
   approvalSpendCents,
 }: {
   agentId: string;
+  configurationVersion: number;
   approvalTools: string[];
   approvalExpiresAfterHours: number | null;
   approvalOnReject: 'continue' | 'end';
@@ -69,6 +71,7 @@ export function ApprovalToolsForm({
   return (
     <WorkspaceForm action={saveApprovalTools} label="Save approval requirements">
       <input type="hidden" name="agentId" value={agentId} />
+      <input type="hidden" name="configurationVersion" value={configurationVersion} />
       <input
         ref={onRejectRef}
         type="hidden"

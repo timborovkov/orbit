@@ -28,12 +28,14 @@ const actionLabels = {
 
 export function ReviewSettings({
   agentId,
+  configurationVersion,
   approvalTools,
   approvalExpiresAfterHours,
   approvalOnReject,
   approvalSpendCents,
 }: {
   agentId: string;
+  configurationVersion: number;
   approvalTools: string[];
   approvalExpiresAfterHours: number | null;
   approvalOnReject: 'continue' | 'end';
@@ -50,6 +52,7 @@ export function ReviewSettings({
       </div>
       <ApprovalToolsForm
         agentId={agentId}
+        configurationVersion={configurationVersion}
         approvalTools={approvalTools}
         approvalExpiresAfterHours={approvalExpiresAfterHours}
         approvalOnReject={approvalOnReject}

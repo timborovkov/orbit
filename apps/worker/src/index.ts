@@ -1,11 +1,11 @@
 import { hostname } from 'node:os';
 import * as Sentry from '@sentry/bun';
 
-import { expireStaleApprovals } from '@/lib/approvals/review';
 import { closeDb } from '@/lib/db';
 import { registerErrorCapture } from '@/lib/observability/errors';
 import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import { startJobWorker } from '@/lib/queue/worker';
+import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
 import {
   finalizeExhaustedSimulationJob,
   processSimulationJob,
@@ -74,6 +74,7 @@ const worker = startJobWorker({
   reconcileDeadLetters: async () => {
     await reconcileOrphanedSimulationRuns();
     await expireStaleApprovals();
+    await reconcileSuspendedApprovals();
   },
   onError: (error) => {
     console.error('Worker queue operation failed.');

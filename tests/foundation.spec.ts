@@ -62,9 +62,13 @@ test('private login, persisted workspace, keyboard dialog, themes and screenshot
   await page.getByLabel(/^Email/).fill(email);
   await page.getByLabel(/^Password/).fill('wrong');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.locator('p[role=alert]')).toContainText('Check your credentials');
+  await expect(page.getByRole('alert').filter({ hasText: 'Check your credentials' })).toBeVisible();
   await signIn(page);
-  await expect(page.getByRole('heading', { name: 'No agents yet' })).toBeVisible();
+  await expect(
+    page
+      .getByRole('region', { name: 'Agents', exact: true })
+      .getByText('No agents yet', { exact: true }),
+  ).toBeVisible();
   await page.screenshot({ path: 'test-results/empty-workspace.png', fullPage: true });
   await accessible(page);
   const trigger = page.getByRole('button', { name: 'Create agent', exact: true });
@@ -265,7 +269,9 @@ test('expired and revoked sessions, forged cookies, and durable login limits', a
   await page.getByLabel(/^Email/).fill(email);
   await page.getByLabel(/^Password/).fill(password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.locator('p[role=alert]')).toContainText('Try again in 15 minutes');
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'Try again in 15 minutes' }),
+  ).toBeVisible();
 });
 
 test('login layout, password visibility and errors across themes and screen sizes', async ({

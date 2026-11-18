@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/empty';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { approvalReviewLimit } from '@/lib/approvals/rules';
 import { formatAge, formatUtcTimestamp } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -36,12 +37,15 @@ export interface ApprovalItem {
   agentId: string;
   agentName: string;
   actionType: string;
+  runId: string | null;
+  recipients: string[];
   draft: string | null;
   reason: string | null;
   status: 'pending' | 'approved' | 'rejected' | 'expired' | null;
   createdAt: Date | string;
   reviewedBy: string | null;
   reviewedAt: Date | string | null;
+  reviewNote: string | null;
 }
 
 function statusBadge(status: ApprovalItem['status']) {
@@ -61,8 +65,8 @@ function statusBadge(status: ApprovalItem['status']) {
   return <Badge variant="outline">Pending</Badge>;
 }
 
-function AgeWithTooltip({ value }: { value: Date | string }) {
-  const label = `${formatAge(value)} ago`;
+function AgeWithTooltip({ value, renderedAt }: { value: Date | string; renderedAt: string }) {
+  const label = `${formatAge(value, new Date(renderedAt))} ago`;
   const full = formatUtcTimestamp(value);
   return (
     <Tooltip>
@@ -76,9 +80,25 @@ function AgeWithTooltip({ value }: { value: Date | string }) {
   );
 }
 
+function ProposalContext({ item }: { item: ApprovalItem }) {
+  if (!item.recipients.length && !item.runId) return null;
+  return (
+    <div className="approvals-proposal-context">
+      {item.recipients.length > 0 && <span>Recipients {item.recipients.join(' · ')}</span>}
+      {item.runId && (
+        <Link href={`/agents/${item.agentId}?run=${item.runId}#run-${item.runId}`}>
+          View originating run
+        </Link>
+      )}
+    </div>
+  );
+}
+
 function PendingCard({
   item,
   selected,
+  disableSelection,
+  renderedAt,
   pendingUi,
   onToggle,
   onEditingChange,
@@ -86,6 +106,8 @@ function PendingCard({
 }: {
   item: ApprovalItem;
   selected: boolean;
+  disableSelection: boolean;
+  renderedAt: string;
   pendingUi: boolean;
   onToggle: (checked: boolean) => void;
   onEditingChange: (editing: boolean) => void;
@@ -109,6 +131,7 @@ function PendingCard({
         <Checkbox
           id={selectId}
           checked={selected}
+          disabled={disableSelection}
           onCheckedChange={(value) => {
             onToggle(value === true);
           }}
@@ -123,7 +146,7 @@ function PendingCard({
             <Link href={`/agents/${item.agentId}`} className="approvals-agent-link">
               {item.agentName}
             </Link>
-            <AgeWithTooltip value={item.createdAt} />
+            <AgeWithTooltip value={item.createdAt} renderedAt={renderedAt} />
           </div>
           <div className="approvals-card-actions">
             <Button
@@ -131,7 +154,7 @@ function PendingCard({
               size="sm"
               disabled={pendingUi}
               onClick={() => {
-                onReview('approved', editing ? draft : (item.draft ?? undefined));
+                onReview('approved', editing ? draft : undefined);
               }}
             >
               Approve
@@ -150,6 +173,7 @@ function PendingCard({
             </Button>
           </div>
         </div>
+        <ProposalContext item={item} />
         {item.reason && <p className="approvals-reason">{item.reason}</p>}
         <div className="approvals-draft-block">
           {editing ? (
@@ -213,31 +237,32 @@ function PendingCard({
   );
 }
 
-function HistoryCard({ item }: { item: ApprovalItem }) {
+function HistoryCard({ item, renderedAt }: { item: ApprovalItem; renderedAt: string }) {
   return (
     <li className="approvals-card approvals-history-card">
       <div className="approvals-card-body">
         <div className="approvals-history-primary">
           <Badge variant="secondary">{actionLabels[item.actionType] ?? item.actionType}</Badge>
-          {statusBadge(item.status)}
+          {statusBadge(item.reviewNote === 'expired' ? 'expired' : item.status)}
           <Link href={`/agents/${item.agentId}`} className="approvals-agent-link">
             {item.agentName}
           </Link>
         </div>
         <div className="approvals-history-secondary">
-          <AgeWithTooltip value={item.createdAt} />
+          <AgeWithTooltip value={item.createdAt} renderedAt={renderedAt} />
           {item.reviewedBy ? (
             <span className="approvals-reviewed-by">
               Reviewed by {item.reviewedBy}
               {item.reviewedAt ? (
                 <>
                   {' · '}
-                  <AgeWithTooltip value={item.reviewedAt} />
+                  <AgeWithTooltip value={item.reviewedAt} renderedAt={renderedAt} />
                 </>
               ) : null}
             </span>
           ) : null}
         </div>
+        <ProposalContext item={item} />
         {item.draft ? <blockquote className="approvals-preview">{item.draft}</blockquote> : null}
       </div>
     </li>
@@ -295,9 +320,11 @@ function BulkActionBar({
 export function ApprovalsInbox({
   pending,
   resolved,
+  renderedAt,
 }: {
   pending: ApprovalItem[];
   resolved: ApprovalItem[];
+  renderedAt: string;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState(() => new Set<string>());
@@ -319,8 +346,12 @@ export function ApprovalsInbox({
     [editingKeys, pendingKeySet],
   );
 
-  const allSelected =
-    pendingKeys.length > 0 && pendingKeys.every((key) => visibleSelected.has(key));
+  const selectionLimit = Math.min(approvalReviewLimit, pendingKeys.length);
+  const allSelected = selectionLimit > 0 && visibleSelected.size === selectionLimit;
+  const selectionLabel =
+    pendingKeys.length > approvalReviewLimit
+      ? `Select up to ${approvalReviewLimit} pending approvals`
+      : 'Select all pending approvals';
   const someSelected = pendingKeys.some((key) => visibleSelected.has(key));
   const selectedHasUnsavedEdits = [...visibleSelected].some((key) => visibleEditing.has(key));
 
@@ -337,10 +368,14 @@ export function ApprovalsInbox({
     form.set('decision', decision);
     for (const value of visibleSelected) form.append('selection', value);
     startTransition(async () => {
-      const result = await reviewProposalsBulk(form);
-      setMessage('error' in result ? (result.error ?? 'Review failed.') : result.message);
-      setSelected(new Set());
-      router.refresh();
+      try {
+        const result = await reviewProposalsBulk(form);
+        setMessage('error' in result ? (result.error ?? 'Review failed.') : result.message);
+        setSelected(new Set());
+        router.refresh();
+      } catch {
+        setMessage('Review could not be saved. Try again.');
+      }
     });
   };
 
@@ -351,9 +386,13 @@ export function ApprovalsInbox({
     form.set('decision', decision);
     if (decision === 'approved' && draft !== undefined) form.set('draft', draft);
     startTransition(async () => {
-      const result = await reviewProposal(form);
-      setMessage('error' in result ? result.error : result.message);
-      router.refresh();
+      try {
+        const result = await reviewProposal(form);
+        setMessage('error' in result ? result.error : result.message);
+        router.refresh();
+      } catch {
+        setMessage('Review could not be saved. Try again.');
+      }
     });
   };
 
@@ -374,10 +413,11 @@ export function ApprovalsInbox({
                   id={selectAllId}
                   checked={allSelected ? true : someSelected ? 'indeterminate' : false}
                   onCheckedChange={(value) => {
-                    if (value === true) setSelected(new Set(pendingKeys));
+                    if (value === true) setSelected(new Set(pendingKeys.slice(0, selectionLimit)));
                     else setSelected(new Set());
                   }}
-                  aria-label="Select all pending approvals"
+                  disabled={pendingUi}
+                  aria-label={selectionLabel}
                 />
                 <h2 id="pending-approvals-title">Pending</h2>
                 <span className="count">{pending.length}</span>
@@ -391,12 +431,14 @@ export function ApprovalsInbox({
                     key={item.id}
                     item={item}
                     selected={visibleSelected.has(key)}
+                    disableSelection={pendingUi || (allSelected && !visibleSelected.has(key))}
+                    renderedAt={renderedAt}
                     pendingUi={pendingUi}
                     onToggle={(checked) => {
                       setSelected((current) => {
                         const next = new Set(current);
-                        if (checked) next.add(key);
-                        else next.delete(key);
+                        if (!checked) next.delete(key);
+                        else if (next.size < selectionLimit) next.add(key);
                         return next;
                       });
                     }}
@@ -441,7 +483,7 @@ export function ApprovalsInbox({
             </div>
             <ul className="approvals-card-list" aria-label="Resolved approvals">
               {resolved.map((item) => (
-                <HistoryCard key={item.id} item={item} />
+                <HistoryCard key={item.id} item={item} renderedAt={renderedAt} />
               ))}
             </ul>
           </section>

@@ -12,11 +12,13 @@ import {
 
 export function WorkspaceTabs({
   items,
+  initialTab,
 }: {
+  initialTab?: string;
   items: { id: string; label: string; count?: number; content: React.ReactNode }[];
 }) {
   const prefix = useId();
-  const [selected, setSelected] = useState(items[0]?.id);
+  const [selected, setSelected] = useState(initialTab ?? items[0]?.id);
   const [compact, setCompact] = useState(false);
 
   useEffect(() => {

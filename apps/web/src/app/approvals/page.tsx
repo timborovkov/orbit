@@ -13,14 +13,19 @@ export const dynamic = 'force-dynamic';
 export default async function ApprovalsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ agent?: string }>;
+  searchParams: Promise<{ agent?: string; run?: string }>;
 }) {
   await requireAdmin();
   const params = await searchParams;
   const filter = z.uuid().safeParse(params.agent);
-  const { team, items, pendingCount, filterAgentId } = await getApprovalsInbox(
-    filter.success ? filter.data : null,
+  const run = z.uuid().safeParse(params.run);
+  const filterAgentId = filter.success ? filter.data : undefined;
+  const filterRunId = run.success ? run.data : undefined;
+  const { team, items, pendingCount, totalPendingCount } = await getApprovalsInbox(
+    filterAgentId,
+    filterRunId,
   );
+  const renderedAt = new Date().toISOString();
   const pending = items.filter((item) => item.status === 'pending');
   const resolved = items.filter((item) => item.status !== 'pending');
 
@@ -50,7 +55,7 @@ export default async function ApprovalsPage({
             <Link href="/#agents">Agents</Link>
             <Link href="/approvals" aria-current="page">
               Approvals
-              {pendingCount > 0 && <span className="tab-count">{pendingCount}</span>}
+              {totalPendingCount > 0 && <span className="tab-count">{totalPendingCount}</span>}
             </Link>
             <Link href="/templates">Templates</Link>
           </div>
@@ -69,8 +74,21 @@ export default async function ApprovalsPage({
           </span>
         </div>
 
-        <ApprovalsFilter agents={team} filterAgentId={filterAgentId} />
-        <ApprovalsInbox pending={pending} resolved={resolved} />
+        <ApprovalsFilter agents={team} filterAgentId={filterAgentId ?? null} />
+        {filterRunId && (
+          <p className="muted">
+            Showing proposals for one run.{' '}
+            <Link href={filterAgentId ? `/approvals?agent=${filterAgentId}` : '/approvals'}>
+              Clear run filter
+            </Link>
+          </p>
+        )}
+        <ApprovalsInbox
+          key={`${filterAgentId ?? ''}:${filterRunId ?? ''}`}
+          pending={pending}
+          resolved={resolved}
+          renderedAt={renderedAt}
+        />
       </main>
     </div>
   );

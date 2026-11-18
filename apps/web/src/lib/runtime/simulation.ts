@@ -8,8 +8,11 @@ import {
   isPaidStepUnpersistedError,
   isPreDispatchInfrastructureError,
   isRetryableInfrastructureError,
+  MissingOpenRouterCredentialError,
   PAID_STEP_BURN_MESSAGE,
 } from '@/lib/runtime/errors';
+
+export const SIMULATION_JOB_TYPE = 'simulation.run';
 
 const action = z.object({
   type: z.enum(proposalTypes),
@@ -302,6 +305,9 @@ export async function simulate(
           error.name === 'AbortError');
       if (isBudgetError(error)) {
         result.error = error.message;
+      } else if (error instanceof MissingOpenRouterCredentialError) {
+        result.error =
+          'No OpenRouter credential available. Save an agent key under Access or set OPENROUTER_API_KEY on the server.';
       } else if (cancelled) {
         result.error = 'Run deadline reached or the worker cancelled this simulation.';
       } else {

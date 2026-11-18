@@ -1,4 +1,8 @@
+import type { UIMessage } from 'ai';
+
 import type { SimulationResult } from '@/lib/runtime/simulation';
+
+export type PlaygroundUIMessage = UIMessage<unknown, { approval: { runId: string } }>;
 
 /** Chunks the UI message stream protocol can emit for a playground reply. */
 export type PlaygroundStreamChunk =

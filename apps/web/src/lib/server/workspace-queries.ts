@@ -42,11 +42,11 @@ export async function getOverview() {
   };
 }
 
-export async function getApprovalsInbox(filterAgentId?: string | null) {
-  const email = await requireAdmin();
-  const agentFilter =
-    filterAgentId && zUuid(filterAgentId) ? eq(actionIntents.agentId, filterAgentId) : undefined;
-  const [team, items, pending] = await Promise.all([
+export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: string) {
+  await requireAdmin();
+  const agentFilter = filterAgentId ? eq(actionIntents.agentId, filterAgentId) : undefined;
+  const runFilter = filterRunId ? eq(actionIntents.runId, filterRunId) : undefined;
+  const [team, items, pending, pendingTotal] = await Promise.all([
     db().select({ id: agents.id, name: agents.name }).from(agents).orderBy(asc(agents.name)),
     db()
       .select({
@@ -67,34 +67,26 @@ export async function getApprovalsInbox(filterAgentId?: string | null) {
       })
       .from(actionIntents)
       .innerJoin(agents, eq(agents.id, actionIntents.agentId))
-      .where(
-        agentFilter
-          ? and(isNotNull(actionIntents.reviewStatus), agentFilter)
-          : isNotNull(actionIntents.reviewStatus),
-      )
+      .where(and(isNotNull(actionIntents.reviewStatus), agentFilter, runFilter))
       .orderBy(sql`(${actionIntents.reviewStatus} = 'pending') DESC`, desc(actionIntents.createdAt))
       .limit(100),
     db()
       .select({ count: sql<number>`count(*)::int` })
       .from(actionIntents)
-      .where(
-        agentFilter
-          ? and(eq(actionIntents.reviewStatus, 'pending'), agentFilter)
-          : eq(actionIntents.reviewStatus, 'pending'),
-      ),
+      .where(and(eq(actionIntents.reviewStatus, 'pending'), agentFilter, runFilter)),
+    db()
+      .select({ count: sql<number>`count(*)::int` })
+      .from(actionIntents)
+      .where(eq(actionIntents.reviewStatus, 'pending')),
   ]);
   return {
-    email,
     team,
     items,
     pendingCount: pending[0]?.count ?? 0,
-    filterAgentId: filterAgentId && zUuid(filterAgentId) ? filterAgentId : null,
+    totalPendingCount: pendingTotal[0]?.count ?? 0,
   };
 }
 
-function zUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
 export async function getTemplates() {
   const email = await requireAdmin();
   const items = await db().select().from(templates).orderBy(asc(templates.title));
@@ -107,11 +99,11 @@ export async function getAgentPictureKey(id: string) {
       ?.key ?? null
   );
 }
-export async function getAgentWorkspace(id: string) {
+export async function getAgentWorkspace(id: string, focusRunId?: string) {
   await requireAdmin();
   const agent = (await db().select().from(agents).where(eq(agents.id, id))).at(0);
   if (!agent) return null;
-  const [versions, keys, history, reviews, consents, counters, pendingApprovals] =
+  const [versions, keys, history, reviews, consents, counters, pendingApprovals, activeRuns] =
     await Promise.all([
       db()
         .select()
@@ -122,7 +114,15 @@ export async function getAgentWorkspace(id: string) {
         .select({ agentId: credentials.agentId })
         .from(credentials)
         .where(eq(credentials.agentId, id)),
-      db().select().from(runs).where(eq(runs.agentId, id)).orderBy(desc(runs.createdAt)).limit(50),
+      db()
+        .select()
+        .from(runs)
+        .where(eq(runs.agentId, id))
+        .orderBy(
+          ...(focusRunId ? [desc(sql`${runs.id} = ${focusRunId}::uuid`)] : []),
+          desc(runs.createdAt),
+        )
+        .limit(50),
       db()
         .select({
           id: actionIntents.id,
@@ -157,6 +157,15 @@ export async function getAgentWorkspace(id: string) {
         .select({ count: sql<number>`count(*)::int` })
         .from(actionIntents)
         .where(eq(actionIntents.reviewStatus, 'pending')),
+      db()
+        .select({ count: sql<number>`count(*)::int` })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.agentId, id),
+            inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
+          ),
+        ),
     ]);
   const current = versions.at(0);
   if (!current) return null;
@@ -188,10 +197,6 @@ export async function getAgentWorkspace(id: string) {
     counters.find((row) => row.period === 'day' && row.periodStart === today) ?? emptyUsage;
   const month =
     counters.find((row) => row.period === 'month' && row.periodStart === monthStart) ?? emptyUsage;
-  const activeRuns = history.filter(
-    (run) =>
-      run.status === 'queued' || run.status === 'running' || run.status === 'awaiting_approval',
-  ).length;
   const hasAgentCredential = keys.length > 0;
   return {
     agent: { ...agent, budgets: parseBudgets(agent.budgets) },
@@ -214,7 +219,7 @@ export async function getAgentWorkspace(id: string) {
         requests: month.requests,
         outboundActions: month.outboundActions,
       },
-      activeRuns,
+      activeRuns: activeRuns[0]?.count ?? 0,
     },
   };
 }

@@ -210,7 +210,9 @@ desktop grid, with No cap Switches on the same heading row as spend labels (`spa
 gap, switch never overlapping the label) and inline unit suffixes. Per-field copy is only
 the short usage line; longer explanations stay in the card description. Approval
 requirements in Access use Switch rows (label, description, control) plus optional spend
-(InputGroup `$`), expiry and reject Select fields — off by default. Consent and Playground
+(InputGroup `$`), expiry and rejection behaviour. Saving per-agent approval settings creates
+a configuration version. Pause, consent and tool availability are checked live. Queued, running
+and awaiting-approval runs share the per-agent concurrency limit. Consent and Playground
 version pickers use shadcn Select. Lifecycle uses radio-card rows with consistent actions.
 Playground is a single chat column: toolbar settings (version Select, recipients Collapsible),
 AI Elements Conversation with status/Loader messages, and PromptInput (text-only for now —
@@ -219,19 +221,22 @@ composer, PromptInputSubmit with ArrowUp). The version Select keeps normal foreg
 contrast while selectable (not greyed as disabled). Task tabs switch to a Select at ≤600px;
 Access section nav switches to a Select at ≤900px (wider screens keep scrollable tablist/sub-nav
 with fade edges). Access panels stay mounted so drafts survive section switches. On narrow
-Budgets, each No cap Switch sits on its own row under the field label. Skip links stay
-off-screen until `:focus-visible`; screenshot helpers blur focus so captures never show them.
+Budgets, each No cap Switch sits on its own row under the field label. Skip links are visually hidden
+until `:focus-visible`; screenshot helpers blur focus so captures never show them.
 Consent records pair a recipient ID with a scope, choice and evidence reference. Playground
 accepts the same IDs for consent checks in an optional disclosure. The global Approvals page
-lists pending items newest first (agent, action, payload preview, age) with bulk approve/reject,
-agent filter and resolved history; the nav badge shows the pending count. Approvals actions use
+lists pending items newest first with the agent, action, recipients, link to the originating
+run, draft and age. The inbox filters by agent or run, groups resolved entries under History,
+and caps bulk selection at 50. Relative ages share the same initial timestamp on the server
+and in the browser. The tooltip shows UTC. The nav badge shows the global pending count. Approvals actions use
 the shared `Button` component. Draft fields must not sit inside the global flex `label` rule.
 Lifecycle clearly labels Live as simulation-only until adapters are configured. Access also shows
 which OpenRouter key source is active—agent key, environment default or none—by label only, never
 by value or prefix. It accepts a password input for an agent override, clears it after submission
 and never reads the secret back. Removing an agent key falls back to the environment default when
 configured; otherwise it retains a visible missing-key state. History shows
-queued/running/awaiting_approval/completed/failed/interrupted run states and linked job status.
+queued, running, awaiting approval, completed, failed and interrupted runs with linked job status.
+When a run suspends, the chat stream ends with an Awaiting approval status and a link to its review.
 Playground refreshes the workspace when the stream acknowledges a queued simulation so History and
 PendingRunRefresh see the new run immediately; while any run is queued, running or awaiting
 approval, the workspace soft-refreshes every two seconds so Playground and History pick up worker

@@ -1,5 +1,12 @@
 import { isBudgetError } from '@/lib/budgets';
 
+export class MissingOpenRouterCredentialError extends Error {
+  constructor() {
+    super('Missing OpenRouter credential');
+    this.name = 'MissingOpenRouterCredentialError';
+  }
+}
+
 /**
  * Transient store/network failures that should return the job to the queue for retry
  * instead of being persisted as a terminal simulation failure.

@@ -201,12 +201,12 @@ h3 {
 .skip-link {
   position: absolute;
   z-index: 10;
-  top: 0;
-  left: -10000px;
+  inset-block-start: 0;
+  inset-inline-start: 0;
   width: 1px;
   height: 1px;
   overflow: hidden;
-  padding: 10px 16px;
+  clip-path: inset(50%);
   border-radius: 6px;
   background: var(--button);
   color: var(--button-ink);
@@ -214,11 +214,13 @@ h3 {
 }
 .skip-link:focus-visible {
   position: fixed;
-  top: 8px;
-  left: 16px;
+  inset-block-start: 8px;
+  inset-inline-start: 16px;
   width: auto;
   height: auto;
   overflow: visible;
+  clip-path: none;
+  padding: 10px 16px;
 }
 .button {
   display: inline-flex;
@@ -1711,6 +1713,7 @@ fieldset[aria-disabled='true'] textarea {
   outline: none !important;
 }
 .workspace-form .approval-spend-field [data-slot='input-group-addon'] {
+  padding-inline-end: 0.375rem;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -3096,6 +3099,22 @@ details[open] > summary > .disclosure-chevron {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.approvals-proposal-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.approvals-proposal-context a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .approvals-history-secondary {
