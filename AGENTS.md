@@ -34,7 +34,7 @@ Before building or changing UI, read [design.md](design.md). Follow its current 
 
 ## Demo seed
 
-Local browser testing and screenshots use `bun run db:seed:demo` (optional `--reset` wipes only demo-owned rows marked by fixed IDs / `orbit-demo-seed`). The command refuses `NODE_ENV=production` and non-loopback `DATABASE_URL` unless `--allow-non-local` is passed. Seed modules live in `apps/web/src/lib/seed/modules` and are registered in `apps/web/src/lib/seed/registry.ts` — add one small module per feature area (skills/MCP, knowledge base, approvals extensions, and so on) when that feature lands. Do not expand unrelated modules.
+Local browser testing and screenshots use `bun run db:seed:demo` (optional `--reset` wipes only demo-owned rows marked by fixed IDs / `orbit-demo-seed`). The command refuses `NODE_ENV=production` and non-loopback `DATABASE_URL` unless `--allow-non-local` is passed. It never changes the workspace-wide global outbound pause unless `--release-global-pause` is passed. Seed modules live in `apps/web/src/lib/seed/modules` and are registered in `apps/web/src/lib/seed/registry.ts` — add one small module per feature area (skills/MCP, knowledge base, approvals extensions, and so on) when that feature lands. Do not expand unrelated modules.
 
 ## Repository work
 

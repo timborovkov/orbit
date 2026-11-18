@@ -6,6 +6,8 @@ export interface SeedContext {
   now: Date;
   reset: boolean;
   encryptionKeyConfigured: boolean;
+  /** Explicit opt-in: release the workspace-wide global outbound pause. */
+  releaseGlobalPause: boolean;
 }
 
 export interface SeedModule {

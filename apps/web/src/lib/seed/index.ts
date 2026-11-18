@@ -7,6 +7,8 @@ import type { SeedContext } from '@/lib/seed/types';
 export interface RunDemoSeedOptions {
   reset?: boolean;
   allowNonLocal?: boolean;
+  /** Opt-in: release the workspace-wide global outbound pause. Off by default. */
+  releaseGlobalPause?: boolean;
   now?: Date;
   /** When set, skip env/process lookup (tests). */
   env?: {
@@ -19,6 +21,7 @@ export interface RunDemoSeedOptions {
 export interface RunDemoSeedResult {
   modules: string[];
   reset: boolean;
+  releaseGlobalPause: boolean;
   agentCount: number;
 }
 
@@ -35,6 +38,7 @@ export async function runDemoSeed(options: RunDemoSeedOptions = {}): Promise<Run
   const encryptionKeyConfigured = Boolean(
     env.ORBIT_ENCRYPTION_KEY && /^[a-fA-F0-9]{64}$/.test(env.ORBIT_ENCRYPTION_KEY),
   );
+  const releaseGlobalPause = options.releaseGlobalPause === true;
 
   const database = db();
   try {
@@ -45,6 +49,7 @@ export async function runDemoSeed(options: RunDemoSeedOptions = {}): Promise<Run
         now,
         reset: options.reset === true,
         encryptionKeyConfigured,
+        releaseGlobalPause,
       };
       if (ctx.reset) await resetDemoData(ctx);
       for (const module of seedModules) {
@@ -58,6 +63,7 @@ export async function runDemoSeed(options: RunDemoSeedOptions = {}): Promise<Run
   return {
     modules: seedModules.map((module) => module.name),
     reset: options.reset === true,
+    releaseGlobalPause,
     agentCount: 3,
   };
 }

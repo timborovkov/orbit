@@ -126,5 +126,42 @@ describe('demo seed idempotency and markers', () => {
     expect(names).toContain('approvals');
     expect(names).toContain('usage');
     expect(names).toContain('credentials');
+    expect(names).toContain('controls');
+  });
+});
+
+describe('demo seed global pause', () => {
+  test('controls module leaves pause untouched without explicit opt-in', async () => {
+    const updates: Array<{ paused: boolean }> = [];
+    const tx = {
+      update: () => ({
+        set: (values: { paused: boolean }) => {
+          updates.push(values);
+          return {
+            where: async () => undefined,
+          };
+        },
+      }),
+    };
+    const { controlsModule } = await import('@/lib/seed/modules/controls');
+    await controlsModule.apply({
+      db: {} as never,
+      tx: tx as never,
+      now: new Date(),
+      reset: false,
+      encryptionKeyConfigured: false,
+      releaseGlobalPause: false,
+    });
+    expect(updates).toEqual([]);
+
+    await controlsModule.apply({
+      db: {} as never,
+      tx: tx as never,
+      now: new Date(),
+      reset: false,
+      encryptionKeyConfigured: false,
+      releaseGlobalPause: true,
+    });
+    expect(updates).toEqual([{ paused: false }]);
   });
 });
