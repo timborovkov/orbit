@@ -41,6 +41,9 @@ services:
     build:
       context: .
       dockerfile: docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+        NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-}
     ports:
       - '3000:3000'
     environment:
