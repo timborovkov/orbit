@@ -141,7 +141,7 @@ test('saved Skills and authenticated MCP grants reach the worker and run history
 
     await page.reload();
     await openWorkspaceTab(page, /^History/);
-    await page.locator('.run-detail > summary').click();
+    await page.locator('#history .run-detail > summary').click();
     const history = page.getByRole('region', { name: 'Skills and tools' });
     await expect(history).toContainText('release-check · v1 · loaded');
     await expect(history).toContainText('mcp:http-fixture:http_lookup · allow');
