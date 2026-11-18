@@ -1640,28 +1640,28 @@ fieldset[aria-disabled='true'] textarea {
   font-size: 0.875rem;
   line-height: 1.6;
 }
-/* One bordered control; $ sits inside as an overlay prefix. */
+/* InputGroup: one shared outer border; kill workspace-form chrome on the inner input. */
 .approval-spend-field {
-  position: relative;
   width: 100%;
   max-width: 240px;
 }
-.approval-spend-prefix {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  z-index: 1;
-  transform: translateY(-50%);
-  color: var(--muted);
-  font-size: 0.875rem;
-  line-height: 1;
-  pointer-events: none;
-}
-.approval-spend-field .approval-spend-input,
-.workspace-form .approval-spend-field input.approval-spend-input {
-  width: 100% !important;
+.workspace-form .approval-spend-field input,
+.workspace-form .approval-spend-field [data-slot='input'],
+.workspace-form .approval-spend-field [data-slot='input-group-control'] {
+  width: auto !important;
+  flex: 1 1 auto !important;
   margin: 0 !important;
-  padding-left: 28px !important;
+  padding: 0.375rem 0.75rem 0.375rem 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+.workspace-form .approval-spend-field [data-slot='input-group-addon'] {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 .create-dialog select {
   margin: 8px 0 16px;
@@ -2669,12 +2669,13 @@ details[open] > summary > .disclosure-chevron {
   width: 100%;
 }
 
+/* Clear the fixed bulk bar: inbox padding + in-list spacer after Pending. */
 .approvals-inbox-has-bulk {
-  padding-bottom: 0;
+  padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
 }
 
 .approvals-bulk-spacer {
-  height: 96px;
+  height: calc(88px + env(safe-area-inset-bottom, 0px));
   flex-shrink: 0;
   pointer-events: none;
 }

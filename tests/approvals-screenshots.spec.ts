@@ -1,7 +1,39 @@
+import { copyFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
 const sql = postgres('postgres://orbit:orbit_dev@127.0.0.1:5432/orbit_test');
+
+/** Runner-writable output; also mirror into Cursor artifacts when that path exists. */
+const ARTIFACT_DIRS = (() => {
+  const dirs = [path.resolve('test-results/approvals-artifacts')];
+  const cursor = process.env.CURSOR_ARTIFACTS_DIR ?? '/opt/cursor/artifacts';
+  try {
+    mkdirSync(cursor, { recursive: true });
+    dirs.push(cursor);
+  } catch {
+    // GitHub runners cannot write under /opt; keep the repo-relative dir only.
+  }
+  for (const dir of dirs) mkdirSync(dir, { recursive: true });
+  return dirs;
+})();
+
+function artifactPath(name: string) {
+  return path.join(ARTIFACT_DIRS[0], name);
+}
+
+async function screenshotToArtifacts(
+  page: Page,
+  name: string,
+  options?: Parameters<Page['screenshot']>[0],
+) {
+  const primary = artifactPath(name);
+  await page.screenshot({ ...options, path: primary });
+  for (const dir of ARTIFACT_DIRS.slice(1)) {
+    copyFileSync(primary, path.join(dir, name));
+  }
+}
 
 test.beforeEach(async () => {
   await sql`TRUNCATE recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
@@ -23,7 +55,21 @@ async function setTheme(page: Page, theme: 'light' | 'dark') {
   await page.evaluate((mode) => {
     localStorage.setItem('orbit-theme', mode);
     document.documentElement.dataset.theme = mode;
+    window.dispatchEvent(new Event('orbit-theme-change'));
   }, theme);
+}
+
+async function preparePage(page: Page, theme: 'light' | 'dark') {
+  await expect(page.locator('body')).toBeVisible();
+  await setTheme(page, theme);
+  // Dev HMR can remount between evaluate and style injection; retry once.
+  try {
+    await hideDevChrome(page);
+  } catch {
+    await page.waitForLoadState('load');
+    await setTheme(page, theme);
+    await hideDevChrome(page);
+  }
 }
 
 async function seedApprovals() {
@@ -71,47 +117,67 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
   for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/approvals', { waitUntil: 'load' });
-    await setTheme(page, theme);
-    await hideDevChrome(page);
+    await preparePage(page, theme);
     await expect(page.getByTestId('approvals-page')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Approvals', exact: true })).toBeVisible();
-    await page.screenshot({
-      path: `/opt/cursor/artifacts/approvals-pending-${theme}-desktop-1440x900.png`,
+    await screenshotToArtifacts(page, `approvals-pending-${theme}-desktop-1440x900.png`, {
       fullPage: true,
     });
 
     await page.setViewportSize({ width: 390, height: 844 });
     await hideDevChrome(page);
-    await page.screenshot({
-      path: `/opt/cursor/artifacts/approvals-pending-${theme}-mobile-390x844.png`,
+    await screenshotToArtifacts(page, `approvals-pending-${theme}-mobile-390x844.png`, {
       fullPage: true,
     });
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByRole('checkbox', { name: 'Select all pending approvals' }).click();
     await expect(page.getByText(/selected$/)).toBeVisible();
-    // Viewport shot so the fixed bulk bar is pinned to the bottom of the frame.
-    await page.screenshot({
-      path: `/opt/cursor/artifacts/approvals-bulk-${theme}-desktop-1440x900.png`,
+    // Scroll so the last pending card clears the fixed bulk bar, then shoot the viewport.
+    await page.locator('.approvals-bulk-spacer').scrollIntoViewIfNeeded();
+    await hideDevChrome(page);
+    await screenshotToArtifacts(page, `approvals-bulk-${theme}-desktop-1440x900.png`, {
       fullPage: false,
     });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.screenshot({
-      path: `/opt/cursor/artifacts/approvals-bulk-${theme}-mobile-390x844.png`,
+    await page.locator('.approvals-bulk-spacer').scrollIntoViewIfNeeded();
+    await hideDevChrome(page);
+    await screenshotToArtifacts(page, `approvals-bulk-${theme}-mobile-390x844.png`, {
       fullPage: false,
     });
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`/agents/${agent.id}`, { waitUntil: 'load' });
-    await setTheme(page, theme);
-    await hideDevChrome(page);
+    await preparePage(page, theme);
     await page.getByRole('tab', { name: 'Access' }).click();
     const approvalSettings = page.getByTestId('approval-settings');
     await expect(approvalSettings).toBeVisible();
     await approvalSettings.scrollIntoViewIfNeeded();
+    const spend = page.locator('.approval-spend-field');
+    await spend.scrollIntoViewIfNeeded();
+    const spendBox = await spend.boundingBox();
+    if (spendBox) {
+      await screenshotToArtifacts(page, `spend-field-only-${theme}.png`, {
+        clip: {
+          x: Math.max(0, spendBox.x - 12),
+          y: Math.max(0, spendBox.y - 40),
+          width: Math.min(420, spendBox.width + 24),
+          height: spendBox.height + 64,
+        },
+      });
+      if (theme === 'light') {
+        await screenshotToArtifacts(page, 'spend-field-only.png', {
+          clip: {
+            x: Math.max(0, spendBox.x - 12),
+            y: Math.max(0, spendBox.y - 40),
+            width: Math.min(420, spendBox.width + 24),
+            height: spendBox.height + 64,
+          },
+        });
+      }
+    }
     const box = await approvalSettings.boundingBox();
-    await page.screenshot({
-      path: `/opt/cursor/artifacts/agent-approval-settings-${theme}-desktop-1440x900.png`,
+    await screenshotToArtifacts(page, `agent-approval-settings-${theme}-desktop-1440x900.png`, {
       clip: box
         ? {
             x: Math.max(0, box.x - 32),
@@ -124,8 +190,7 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
     await page.setViewportSize({ width: 390, height: 844 });
     await approvalSettings.scrollIntoViewIfNeeded();
     const mobileBox = await approvalSettings.boundingBox();
-    await page.screenshot({
-      path: `/opt/cursor/artifacts/agent-approval-settings-${theme}-mobile-390x844.png`,
+    await screenshotToArtifacts(page, `agent-approval-settings-${theme}-mobile-390x844.png`, {
       clip: mobileBox
         ? {
             x: Math.max(0, mobileBox.x - 8),
@@ -140,51 +205,39 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
   await sql`DELETE FROM action_intents WHERE review_status = 'pending'`;
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/approvals', { waitUntil: 'load' });
-  await setTheme(page, 'light');
-  await hideDevChrome(page);
+  await preparePage(page, 'light');
   await expect(page.getByTestId('approvals-empty')).toBeVisible();
-  await page.screenshot({
-    path: '/opt/cursor/artifacts/approvals-empty-light-desktop-1440x900.png',
+  await screenshotToArtifacts(page, 'approvals-empty-light-desktop-1440x900.png', {
     fullPage: true,
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({
-    path: '/opt/cursor/artifacts/approvals-empty-light-mobile-390x844.png',
+  await hideDevChrome(page);
+  await screenshotToArtifacts(page, 'approvals-empty-light-mobile-390x844.png', {
     fullPage: true,
   });
 
   // Keep canonical artifact names for the PR summary.
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/approvals', { waitUntil: 'load' });
-  await setTheme(page, 'light');
-  await hideDevChrome(page);
   // Restore pending items for the canonical pending shot.
   await sql`
     INSERT INTO action_intents(agent_id, action_type, payload, idempotency_key, decision, review_status)
     VALUES
       (${agent.id}, 'reply', '{"draft": "Desktop draft", "reason": "Screenshot fixture"}', 'shot-canonical', 'needs-approval', 'pending')
   `;
-  await page.reload({ waitUntil: 'load' });
-  await hideDevChrome(page);
-  await page.screenshot({
-    path: '/opt/cursor/artifacts/approvals-page-desktop-1440x900.png',
-    fullPage: true,
-  });
+  await page.goto('/approvals', { waitUntil: 'load' });
+  await preparePage(page, 'light');
+  await screenshotToArtifacts(page, 'approvals-page-desktop-1440x900.png', { fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({
-    path: '/opt/cursor/artifacts/approvals-page-mobile-390x844.png',
-    fullPage: true,
-  });
+  await hideDevChrome(page);
+  await screenshotToArtifacts(page, 'approvals-page-mobile-390x844.png', { fullPage: true });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/agents/${agent.id}`, { waitUntil: 'load' });
-  await setTheme(page, 'light');
-  await hideDevChrome(page);
+  await preparePage(page, 'light');
   await page.getByRole('tab', { name: 'Access' }).click();
   const settings = page.getByTestId('approval-settings');
   await settings.scrollIntoViewIfNeeded();
   const settingsBox = await settings.boundingBox();
-  await page.screenshot({
-    path: '/opt/cursor/artifacts/agent-approval-settings-desktop-1440x900.png',
+  await screenshotToArtifacts(page, 'agent-approval-settings-desktop-1440x900.png', {
     clip: settingsBox
       ? {
           x: Math.max(0, settingsBox.x - 32),
@@ -197,8 +250,7 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
   await page.setViewportSize({ width: 390, height: 844 });
   await settings.scrollIntoViewIfNeeded();
   const settingsMobile = await settings.boundingBox();
-  await page.screenshot({
-    path: '/opt/cursor/artifacts/agent-approval-settings-mobile-390x844.png',
+  await screenshotToArtifacts(page, 'agent-approval-settings-mobile-390x844.png', {
     clip: settingsMobile
       ? {
           x: Math.max(0, settingsMobile.x - 8),

@@ -16,7 +16,7 @@ import {
 import { db } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
-import { deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
+import { completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
 import {
   isRetryableInfrastructureError,
   isUnrecoverablePaidStepFinalizationError,
@@ -800,7 +800,7 @@ async function processSimulationRun(
     if (result.error && isTrustedBudgetMessage(result.error)) statusMessage = result.error;
     else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
     try {
-      await retryableStore(() =>
+      const owned = await retryableStore(() =>
         updateIfOwned(run.id, executionToken, {
           status: terminalStatus,
           finishedAt: needsApproval ? null : new Date(),
@@ -812,9 +812,15 @@ async function processSimulationRun(
               : null,
         }),
       );
+      if (owned.length === 0) {
+        // Another worker reclaimed the run; do not complete or release its job claim.
+        return;
+      }
       if (needsApproval) {
-        // Ensure the linked job is finished so no worker lease or pending reclaim remains.
-        if (run.jobId) {
+        // Finish the lease only after the ownership-checked suspend succeeded.
+        if (run.jobId && claim) {
+          await completeJob(run.jobId, claim.workerId);
+        } else if (run.jobId) {
           await db()
             .update(jobs)
             .set({

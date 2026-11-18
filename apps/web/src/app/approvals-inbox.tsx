@@ -196,7 +196,7 @@ function PendingCard({
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
+                variant="ghost"
                 className="approvals-edit-button"
                 onClick={() => {
                   setEditingState(true);
@@ -308,22 +308,34 @@ export function ApprovalsInbox({
 
   const keyFor = (item: ApprovalItem) => `${item.agentId}:${item.id}`;
   const pendingKeys = useMemo(() => pending.map(keyFor), [pending]);
-  const allSelected = pendingKeys.length > 0 && pendingKeys.every((key) => selected.has(key));
-  const someSelected = pendingKeys.some((key) => selected.has(key));
-  const selectedHasUnsavedEdits = [...selected].some((key) => editingKeys.has(key));
+  const pendingKeySet = useMemo(() => new Set(pendingKeys), [pendingKeys]);
+  // Derive against the current filter so stale keys from a previous agent filter are ignored.
+  const visibleSelected = useMemo(
+    () => new Set([...selected].filter((key) => pendingKeySet.has(key))),
+    [selected, pendingKeySet],
+  );
+  const visibleEditing = useMemo(
+    () => new Set([...editingKeys].filter((key) => pendingKeySet.has(key))),
+    [editingKeys, pendingKeySet],
+  );
+
+  const allSelected =
+    pendingKeys.length > 0 && pendingKeys.every((key) => visibleSelected.has(key));
+  const someSelected = pendingKeys.some((key) => visibleSelected.has(key));
+  const selectedHasUnsavedEdits = [...visibleSelected].some((key) => visibleEditing.has(key));
 
   const runBulk = (decision: 'approved' | 'rejected') => {
-    if (selected.size === 0) {
+    if (visibleSelected.size === 0) {
       setMessage('Select at least one proposal.');
       return;
     }
-    if ([...selected].some((key) => editingKeys.has(key))) {
+    if ([...visibleSelected].some((key) => visibleEditing.has(key))) {
       setMessage('Finish or cancel draft edits before bulk approve.');
       return;
     }
     const form = new FormData();
     form.set('decision', decision);
-    for (const value of selected) form.append('selection', value);
+    for (const value of visibleSelected) form.append('selection', value);
     startTransition(async () => {
       const result = await reviewProposalsBulk(form);
       setMessage('error' in result ? (result.error ?? 'Review failed.') : result.message);
@@ -378,7 +390,7 @@ export function ApprovalsInbox({
                   <PendingCard
                     key={item.id}
                     item={item}
-                    selected={selected.has(key)}
+                    selected={visibleSelected.has(key)}
                     pendingUi={pendingUi}
                     onToggle={(checked) => {
                       setSelected((current) => {
@@ -403,6 +415,7 @@ export function ApprovalsInbox({
                 );
               })}
             </ul>
+            {someSelected ? <div className="approvals-bulk-spacer" aria-hidden="true" /> : null}
           </section>
         ) : (
           <Empty className="border border-border py-10 md:py-12" data-testid="approvals-empty">
@@ -434,11 +447,9 @@ export function ApprovalsInbox({
           </section>
         ) : null}
 
-        {someSelected ? <div className="approvals-bulk-spacer" aria-hidden="true" /> : null}
-
         {someSelected ? (
           <BulkActionBar
-            selectedCount={selected.size}
+            selectedCount={visibleSelected.size}
             pendingUi={pendingUi}
             blockedByEdits={selectedHasUnsavedEdits}
             onApprove={() => {
