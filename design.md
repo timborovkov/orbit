@@ -198,9 +198,12 @@ viewports wider than 600px they use a horizontal tablist with Left/Right/Home/En
 keyboard navigation; at 600px and below they collapse to a full-width Select (same
 pattern as the UI redesign branch). Hidden panels remain mounted, preserving
 unsaved configuration and pasted input when changing tasks. Configuration presents
-one editor and one save bar. Playground places a composer beside the latest persisted
-result and explicitly names paid inference and suppressed external actions. Empty
-results explain what will appear; failures and interrupted runs show actual state.
+one editor and one save bar. Playground is an AI SDK chat surface (`useChat` + AI Elements
+Conversation/Message/PromptInput/Reasoning/Tool/Loader) with a streaming route that still
+enqueues the durable simulation job, watches run checkpoints, and streams evaluation,
+proposed actions and drafts. Empty conversation state explains what will appear; failures
+and interrupted runs show actual state. Paid inference and simulation-only actions remain
+explicit.
 Knowledge is list-first: the document library leads with a header Upload control and,
 when empty, a dashed dropzone (“Drop files or browse”, accepted types, 10 MB limit).
 Rows show title + status Badge, then a muted sans meta line (type, size, chunk count,
@@ -213,22 +216,38 @@ and vector/text score Badges, with raw offsets/reasons behind a Details collapsi
 Wide layouts place the inspector beside the list; below 900px they stack.
 History uses native details/summary for run content and exact configuration snapshots.
 History shows the provider’s recorded cost and labels missing cost explicitly.
-Access stacks lifecycle, budget, approval requirements, recipient consent and
-OpenRouter connection settings in one column. Daily and monthly spend limits use
-numeric fields paired with independently labelled No cap checkboxes. Consent
-records pair a recipient ID with a scope, choice and evidence reference. Playground
-accepts the same IDs for consent checks in an optional disclosure. Approvals shows
-the pending queue first, with the draft and explicit approve and reject controls.
-Lifecycle options show the current state and clearly label Live as simulation-only
-until adapters are configured. Access also shows which OpenRouter key source is active—agent key, environment
-default or none—by label only, never by value or prefix. It accepts a password input
-for an agent override, clears it after submission and never reads the secret back.
-Removing an agent key falls back to the environment default when configured; otherwise
-it retains a visible missing-key state. History shows queued/running/completed/failed/
-interrupted run states and linked job status. While any run is queued or running, or any
-knowledge document is pending/processing, the workspace soft-refreshes every two seconds
-so Playground, History and Knowledge pick up worker results without a manual reload.
-No loading skeletons on Access.
+Access uses a Configuration-style left nav (Lifecycle, Budgets, Approvals, Consent,
+OpenRouter) with one section visible at a time. Budgets use card groups and a two-column
+desktop grid, with No cap Switches on the same heading row as spend labels (`space-between`
+
+- gap, switch never overlapping the label) and inline unit suffixes. Per-field copy is only
+  the short usage line; longer explanations stay in the card description. Approval
+  requirements use shadcn Checkbox rows (label, description, control). Consent and Playground
+  version pickers use shadcn Select. Lifecycle uses radio-card rows with consistent actions.
+  Playground is a single chat column: toolbar settings (version Select, recipients Collapsible),
+  AI Elements Conversation with status/Loader messages, and PromptInput (text-only for now —
+  file attachments stay off until the simulation runtime can consume them — one bordered
+  composer, PromptInputSubmit with ArrowUp). The version Select keeps normal foreground/background
+  contrast while selectable (not greyed as disabled). Task tabs switch to a Select at ≤600px;
+  Access section nav switches to a Select at ≤900px (wider screens keep scrollable tablist/sub-nav
+  with fade edges). Access panels stay mounted so drafts survive section switches. On narrow
+  Budgets, each No cap Switch sits on its own row under the field label. Skip links stay
+  off-screen until `:focus-visible`; screenshot helpers blur focus so captures never show them.
+  Consent records pair a recipient ID with a scope, choice and evidence reference. Approvals shows
+  the pending queue first, with the draft and explicit approve and reject controls. Lifecycle
+  clearly labels Live as simulation-only until adapters are configured. Access also shows which
+  OpenRouter key source is active—agent key, environment default or none—by label only, never by
+  value or prefix. It accepts a password input for an agent override, clears it after submission
+  and never reads the secret back.
+  Removing an agent key falls back to the environment default when configured; otherwise
+  it retains a visible missing-key state. History shows queued/running/completed/failed/
+  interrupted run states and linked job status. Playground refreshes the workspace when the
+  stream acknowledges a queued simulation so History and PendingRunRefresh see the new run
+  immediately; while any run is queued or running, the workspace soft-refreshes every two
+  seconds so Playground and History pick up worker results without a manual reload. The chat
+  route polls runs through an authorized `lib/server` watch helper; PromptInput rejects
+  attachments until the runtime can consume them; tool cards emit only on terminal results so
+  evaluator candidates cannot outlive the final plan. No loading skeletons on Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents
@@ -396,6 +415,18 @@ The source detector returned `[]`. No real provider call was made: no administra
 key was available. Mocked inference does not establish real provider response quality.
 Automated checks do not establish complete WCAG conformance, physical-device behavior
 or screen-reader speech output.
+
+### Form field components — 18 November 2026
+
+Shared workspace and auth forms now compose the installed shadcn `Field`,
+`FieldLabel`, `FieldDescription`, `FieldError`, `Input` and `Textarea` primitives
+alongside existing Orbit `.workspace-form` styles. Native `<select>` and native
+`<dialog>` remain for create-agent and version pickers so form posts and modal
+focus/Escape behaviour stay unchanged. Optional `error` / `description` props on
+`WorkspaceField` and `WorkspaceSelect` surface inline validation without changing
+server-action contracts. Consent records render as a dedicated list above the
+consent form; proposal and overview empty states use the `Empty` primitive.
+Overview workspace nav scrolls horizontally on narrow viewports instead of wrapping.
 
 ### Agent profile pictures — 16 November 2026
 

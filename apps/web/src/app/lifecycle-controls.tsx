@@ -1,11 +1,15 @@
+'use client';
+
 import { setAgentLifecycle } from '@/actions/lifecycle';
 import { WorkspaceForm } from '@/app/workspace-form';
+import { Button } from '@/components/ui/button';
 import {
   lifecycleDescriptions,
   lifecycleLabels,
   lifecycleStates,
   type LifecycleState,
 } from '@/lib/lifecycle';
+import { cn } from '@/lib/utils';
 
 export function LifecycleControls({
   agentId,
@@ -24,27 +28,37 @@ export function LifecycleControls({
           suppressed.
         </p>
       </div>
-      <ul className="lifecycle-grid">
+      <div className="lifecycle-cards" role="radiogroup" aria-label="Agent lifecycle">
         {lifecycleStates.map((state) => {
           const selected = lifecycle === state;
           return (
-            <li key={state} className={`lifecycle-option${selected ? ' selected' : ''}`}>
-              <div>
-                <h3>{lifecycleLabels[state]}</h3>
+            <div
+              key={state}
+              role="radio"
+              aria-checked={selected}
+              className={cn('lifecycle-card', selected && 'is-selected')}
+            >
+              <div className="lifecycle-card-copy">
+                <div className="lifecycle-card-title">
+                  <h3>{lifecycleLabels[state]}</h3>
+                  {selected ? <span className="state-label">Current</span> : null}
+                </div>
                 <p className="muted">{lifecycleDescriptions[state]}</p>
               </div>
               {selected ? (
-                <span className="state-label">Current</span>
+                <Button type="button" variant="outline" disabled>
+                  Selected
+                </Button>
               ) : (
                 <WorkspaceForm action={setAgentLifecycle} label={`Set ${lifecycleLabels[state]}`}>
                   <input type="hidden" name="agentId" value={agentId} />
                   <input type="hidden" name="lifecycle" value={state} />
                 </WorkspaceForm>
               )}
-            </li>
+            </div>
           );
         })}
-      </ul>
+      </div>
     </section>
   );
 }
