@@ -190,13 +190,15 @@ export async function simulate(
     ? cloneSimulationResult(options.initial)
     : { steps: [], actions: [], error: null };
   result.error = null;
-  // Resume must keep checkpointed skill/MCP attribution — a later catalogue edit must
-  // not rewrite versions for an already-paid main decision. Share the live array on a
-  // fresh run so load_skill can flip `loaded` on the recorded result.
-  if (options.skillVersions && !result.skillVersions?.length) {
+  // Keep checkpointed skill/MCP attribution only when main already ran (paid decision).
+  // If only the evaluator is checkpointed, sync to the live catalogue so a skill edit
+  // between attempts attributes the new main inference correctly. Share the live array
+  // so load_skill can flip `loaded` on the recorded result.
+  const mainCheckpointed = result.steps.some((step) => step.stage === 'main');
+  if (options.skillVersions && (!mainCheckpointed || !result.skillVersions?.length)) {
     result.skillVersions = options.skillVersions;
   }
-  if (options.mcpConnections && !result.mcpConnections?.length) {
+  if (options.mcpConnections && (!mainCheckpointed || !result.mcpConnections?.length)) {
     result.mcpConnections = options.mcpConnections.map((entry) => ({
       ...entry,
       tools: [...entry.tools],

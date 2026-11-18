@@ -789,9 +789,10 @@ async function processSimulationRun(
         ),
       );
 
-      // Prefer checkpointed version numbers when present; still OR in `loaded` from the
-      // live resource records so successful load_skill calls are reflected in history.
-      if (result.skillVersions?.length) {
+      // Preserve checkpointed attribution only when main was already paid; otherwise use
+      // the resources that actually fed this attempt's main inference.
+      const mainWasCheckpointed = checkpointed?.steps.some((step) => step.stage === 'main');
+      if (mainWasCheckpointed && result.skillVersions?.length) {
         for (const entry of result.skillVersions) {
           const live = resources.skillVersions.find(
             (row) => row.skillId === entry.skillId && row.version === entry.version,
@@ -801,9 +802,10 @@ async function processSimulationRun(
       } else {
         result.skillVersions = resources.skillVersions;
       }
-      result.mcpConnections = result.mcpConnections?.length
-        ? result.mcpConnections
-        : resources.mcpConnections;
+      result.mcpConnections =
+        mainWasCheckpointed && result.mcpConnections?.length
+          ? result.mcpConnections
+          : resources.mcpConnections;
       result.toolCalls = resources.toolCalls;
 
       const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);

@@ -321,6 +321,49 @@ describe('bounded manual simulation', () => {
       },
     ]);
   });
+  test('evaluator-only resume adopts the live skill catalogue for main', async () => {
+    const checkpointed: SimulationResult = {
+      steps: [
+        {
+          stage: 'evaluator',
+          model: 'test/evaluator',
+          decision,
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+      ],
+      actions: [],
+      skillVersions: [
+        {
+          skillId: '00000000-0000-4000-8000-000000000099',
+          name: 'research-brief',
+          version: 3,
+          loaded: false,
+        },
+      ],
+      error: null,
+    };
+    const live = [
+      {
+        skillId: '00000000-0000-4000-8000-000000000099',
+        name: 'research-brief',
+        version: 4,
+        loaded: false,
+      },
+    ];
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        expect(request.stage).toBe('main');
+        return { decision, inputTokens: 2, outputTokens: 2 };
+      },
+      async () => {},
+      { maxSteps: 2, initial: checkpointed, skillVersions: live },
+    );
+    expect(resumed.skillVersions).toBe(live);
+    expect(resumed.skillVersions?.[0]?.version).toBe(4);
+  });
   test('pre-dispatch infrastructure faults release the reservation for retry', async () => {
     const { PreDispatchInfrastructureError } = await import('@/lib/runtime/errors');
     const models: string[] = [];
