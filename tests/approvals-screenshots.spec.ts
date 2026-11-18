@@ -70,7 +70,7 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
 
   for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/approvals', { waitUntil: 'networkidle' });
+    await page.goto('/approvals', { waitUntil: 'load' });
     await setTheme(page, theme);
     await hideDevChrome(page);
     await expect(page.getByTestId('approvals-page')).toBeVisible();
@@ -88,27 +88,21 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
     });
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.evaluate(() => {
-      const boxes = document.querySelectorAll<HTMLButtonElement>(
-        '[aria-label^="Select "][data-slot="checkbox"], .approvals-card-select button[role="checkbox"]',
-      );
-      for (const box of boxes) {
-        if (box.getAttribute('aria-checked') !== 'true') box.click();
-      }
-    });
+    await page.getByRole('checkbox', { name: 'Select all pending approvals' }).click();
     await expect(page.getByText(/selected$/)).toBeVisible();
+    // Viewport shot so the fixed bulk bar is pinned to the bottom of the frame.
     await page.screenshot({
       path: `/opt/cursor/artifacts/approvals-bulk-${theme}-desktop-1440x900.png`,
-      fullPage: true,
+      fullPage: false,
     });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({
       path: `/opt/cursor/artifacts/approvals-bulk-${theme}-mobile-390x844.png`,
-      fullPage: true,
+      fullPage: false,
     });
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`/agents/${agent.id}`, { waitUntil: 'networkidle' });
+    await page.goto(`/agents/${agent.id}`, { waitUntil: 'load' });
     await setTheme(page, theme);
     await hideDevChrome(page);
     await page.getByRole('tab', { name: 'Access' }).click();
@@ -145,7 +139,7 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
 
   await sql`DELETE FROM action_intents WHERE review_status = 'pending'`;
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/approvals', { waitUntil: 'networkidle' });
+  await page.goto('/approvals', { waitUntil: 'load' });
   await setTheme(page, 'light');
   await hideDevChrome(page);
   await expect(page.getByTestId('approvals-empty')).toBeVisible();
@@ -161,7 +155,7 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
 
   // Keep canonical artifact names for the PR summary.
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/approvals', { waitUntil: 'networkidle' });
+  await page.goto('/approvals', { waitUntil: 'load' });
   await setTheme(page, 'light');
   await hideDevChrome(page);
   // Restore pending items for the canonical pending shot.
@@ -170,7 +164,7 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
     VALUES
       (${agent.id}, 'reply', '{"draft": "Desktop draft", "reason": "Screenshot fixture"}', 'shot-canonical', 'needs-approval', 'pending')
   `;
-  await page.reload({ waitUntil: 'networkidle' });
+  await page.reload({ waitUntil: 'load' });
   await hideDevChrome(page);
   await page.screenshot({
     path: '/opt/cursor/artifacts/approvals-page-desktop-1440x900.png',
@@ -182,7 +176,7 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(`/agents/${agent.id}`, { waitUntil: 'networkidle' });
+  await page.goto(`/agents/${agent.id}`, { waitUntil: 'load' });
   await setTheme(page, 'light');
   await hideDevChrome(page);
   await page.getByRole('tab', { name: 'Access' }).click();

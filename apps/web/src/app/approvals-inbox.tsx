@@ -3,7 +3,7 @@
 import { useId, useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Inbox } from 'lucide-react';
+import { Inbox, Pencil } from 'lucide-react';
 
 import { reviewProposal, reviewProposalsBulk } from '@/actions/policy';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +19,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatAge, formatUtcTimestamp } from '@/lib/format';
+import { cn } from '@/lib/utils';
 
 const actionLabels = {
   reply: 'Reply',
@@ -61,14 +62,16 @@ function statusBadge(status: ApprovalItem['status']) {
 }
 
 function AgeWithTooltip({ value }: { value: Date | string }) {
+  const label = `${formatAge(value)} ago`;
+  const full = formatUtcTimestamp(value);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <time className="muted approvals-age" dateTime={new Date(value).toISOString()}>
-          {formatAge(value)} ago
+        <time className="muted approvals-age" dateTime={new Date(value).toISOString()} title={full}>
+          {label}
         </time>
       </TooltipTrigger>
-      <TooltipContent>{formatUtcTimestamp(value)}</TooltipContent>
+      <TooltipContent>{full}</TooltipContent>
     </Tooltip>
   );
 }
@@ -78,12 +81,14 @@ function PendingCard({
   selected,
   pendingUi,
   onToggle,
+  onEditingChange,
   onReview,
 }: {
   item: ApprovalItem;
   selected: boolean;
   pendingUi: boolean;
   onToggle: (checked: boolean) => void;
+  onEditingChange: (editing: boolean) => void;
   onReview: (decision: 'approved' | 'rejected', draft?: string) => void;
 }) {
   const draftId = useId();
@@ -92,6 +97,11 @@ function PendingCard({
   const [draft, setDraft] = useState(item.draft ?? '');
   const label = actionLabels[item.actionType] ?? item.actionType;
   const preview = (item.draft ?? '').trim() || 'No draft text.';
+
+  const setEditingState = (next: boolean) => {
+    setEditing(next);
+    onEditingChange(next);
+  };
 
   return (
     <li className="approvals-card">
@@ -162,7 +172,7 @@ function PendingCard({
                   size="sm"
                   variant="ghost"
                   onClick={() => {
-                    setEditing(false);
+                    setEditingState(false);
                     setDraft(item.draft ?? '');
                   }}
                 >
@@ -186,11 +196,13 @@ function PendingCard({
               <Button
                 type="button"
                 size="sm"
-                variant="ghost"
+                variant="outline"
+                className="approvals-edit-button"
                 onClick={() => {
-                  setEditing(true);
+                  setEditingState(true);
                 }}
               >
+                <Pencil aria-hidden="true" />
                 Edit
               </Button>
             </>
@@ -198,6 +210,85 @@ function PendingCard({
         </div>
       </div>
     </li>
+  );
+}
+
+function HistoryCard({ item }: { item: ApprovalItem }) {
+  return (
+    <li className="approvals-card approvals-history-card">
+      <div className="approvals-card-body">
+        <div className="approvals-history-primary">
+          <Badge variant="secondary">{actionLabels[item.actionType] ?? item.actionType}</Badge>
+          {statusBadge(item.status)}
+          <Link href={`/agents/${item.agentId}`} className="approvals-agent-link">
+            {item.agentName}
+          </Link>
+        </div>
+        <div className="approvals-history-secondary">
+          <AgeWithTooltip value={item.createdAt} />
+          {item.reviewedBy ? (
+            <span className="approvals-reviewed-by">
+              Reviewed by {item.reviewedBy}
+              {item.reviewedAt ? (
+                <>
+                  {' · '}
+                  <AgeWithTooltip value={item.reviewedAt} />
+                </>
+              ) : null}
+            </span>
+          ) : null}
+        </div>
+        {item.draft ? <blockquote className="approvals-preview">{item.draft}</blockquote> : null}
+      </div>
+    </li>
+  );
+}
+
+function BulkActionBar({
+  selectedCount,
+  pendingUi,
+  blockedByEdits,
+  onApprove,
+  onReject,
+  onClear,
+}: {
+  selectedCount: number;
+  pendingUi: boolean;
+  blockedByEdits: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  onClear: () => void;
+}) {
+  const editHint = 'Finish or cancel draft edits before bulk review';
+  return (
+    <div className="approvals-bulk-bar" role="region" aria-label="Bulk approval actions">
+      <span className="approvals-bulk-count">{selectedCount} selected</span>
+      <div className="approvals-bulk-actions">
+        <Button
+          type="button"
+          size="sm"
+          disabled={pendingUi || blockedByEdits}
+          title={blockedByEdits ? editHint : undefined}
+          onClick={onApprove}
+        >
+          Bulk approve
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="text-destructive hover:bg-destructive/10"
+          disabled={pendingUi || blockedByEdits}
+          title={blockedByEdits ? editHint : undefined}
+          onClick={onReject}
+        >
+          Bulk reject
+        </Button>
+        <Button type="button" size="sm" variant="ghost" disabled={pendingUi} onClick={onClear}>
+          Clear
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -210,6 +301,7 @@ export function ApprovalsInbox({
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState(() => new Set<string>());
+  const [editingKeys, setEditingKeys] = useState(() => new Set<string>());
   const [message, setMessage] = useState<string | null>(null);
   const [pendingUi, startTransition] = useTransition();
   const selectAllId = useId();
@@ -218,10 +310,15 @@ export function ApprovalsInbox({
   const pendingKeys = useMemo(() => pending.map(keyFor), [pending]);
   const allSelected = pendingKeys.length > 0 && pendingKeys.every((key) => selected.has(key));
   const someSelected = pendingKeys.some((key) => selected.has(key));
+  const selectedHasUnsavedEdits = [...selected].some((key) => editingKeys.has(key));
 
   const runBulk = (decision: 'approved' | 'rejected') => {
     if (selected.size === 0) {
       setMessage('Select at least one proposal.');
+      return;
+    }
+    if ([...selected].some((key) => editingKeys.has(key))) {
+      setMessage('Finish or cancel draft edits before bulk approve.');
       return;
     }
     const form = new FormData();
@@ -250,12 +347,12 @@ export function ApprovalsInbox({
 
   return (
     <TooltipProvider>
-      <div className="approvals-inbox">
-        {message && (
+      <div className={cn('approvals-inbox', someSelected && 'approvals-inbox-has-bulk')}>
+        {message ? (
           <p className="field-hint" role="status">
             {message}
           </p>
-        )}
+        ) : null}
 
         {pending.length > 0 ? (
           <section className="surface" aria-labelledby="pending-approvals-title">
@@ -291,6 +388,14 @@ export function ApprovalsInbox({
                         return next;
                       });
                     }}
+                    onEditingChange={(editing) => {
+                      setEditingKeys((current) => {
+                        const next = new Set(current);
+                        if (editing) next.add(key);
+                        else next.delete(key);
+                        return next;
+                      });
+                    }}
                     onReview={(decision, draft) => {
                       runOne(item, decision, draft);
                     }}
@@ -313,7 +418,7 @@ export function ApprovalsInbox({
           </Empty>
         )}
 
-        {resolved.length > 0 && (
+        {resolved.length > 0 ? (
           <section className="surface" aria-labelledby="approval-history-title">
             <div className="section-heading">
               <div className="section-label">
@@ -323,81 +428,30 @@ export function ApprovalsInbox({
             </div>
             <ul className="approvals-card-list" aria-label="Resolved approvals">
               {resolved.map((item) => (
-                <li key={item.id} className="approvals-card approvals-history-card">
-                  <div className="approvals-card-body">
-                    <div className="approvals-card-top">
-                      <div className="approvals-row-meta">
-                        <Badge variant="secondary">
-                          {actionLabels[item.actionType] ?? item.actionType}
-                        </Badge>
-                        {statusBadge(item.status)}
-                        <Link href={`/agents/${item.agentId}`} className="approvals-agent-link">
-                          {item.agentName}
-                        </Link>
-                        <AgeWithTooltip value={item.createdAt} />
-                      </div>
-                    </div>
-                    {item.draft && (
-                      <blockquote className="approvals-preview">{item.draft}</blockquote>
-                    )}
-                    {item.reviewedBy && (
-                      <p className="field-hint approvals-reviewed-by">
-                        Reviewed by {item.reviewedBy}
-                        {item.reviewedAt ? (
-                          <>
-                            {' · '}
-                            <AgeWithTooltip value={item.reviewedAt} />
-                          </>
-                        ) : null}
-                      </p>
-                    )}
-                  </div>
-                </li>
+                <HistoryCard key={item.id} item={item} />
               ))}
             </ul>
           </section>
-        )}
+        ) : null}
 
-        {someSelected && (
-          <div className="approvals-bulk-bar" role="region" aria-label="Bulk approval actions">
-            <span className="approvals-bulk-count">{selected.size} selected</span>
-            <div className="approvals-bulk-actions">
-              <Button
-                type="button"
-                size="sm"
-                disabled={pendingUi}
-                onClick={() => {
-                  runBulk('approved');
-                }}
-              >
-                Bulk approve
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="text-destructive hover:bg-destructive/10"
-                disabled={pendingUi}
-                onClick={() => {
-                  runBulk('rejected');
-                }}
-              >
-                Bulk reject
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={pendingUi}
-                onClick={() => {
-                  setSelected(new Set());
-                }}
-              >
-                Clear
-              </Button>
-            </div>
-          </div>
-        )}
+        {someSelected ? <div className="approvals-bulk-spacer" aria-hidden="true" /> : null}
+
+        {someSelected ? (
+          <BulkActionBar
+            selectedCount={selected.size}
+            pendingUi={pendingUi}
+            blockedByEdits={selectedHasUnsavedEdits}
+            onApprove={() => {
+              runBulk('approved');
+            }}
+            onReject={() => {
+              runBulk('rejected');
+            }}
+            onClear={() => {
+              setSelected(new Set());
+            }}
+          />
+        ) : null}
       </div>
     </TooltipProvider>
   );

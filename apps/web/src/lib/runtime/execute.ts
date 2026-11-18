@@ -437,7 +437,9 @@ async function processSimulationRun(
       // awaiting_approval is only resumed after review flips the run back to queued.
       return { skip: true as const, run };
     }
-    if (run.expiresAt < new Date()) {
+    // Queued claims (first start and post-approval resumes) refresh the deadline below.
+    // Only interrupt mid-flight running work whose wall clock already expired.
+    if (run.status !== 'queued' && run.expiresAt < new Date()) {
       await tx
         .update(runs)
         .set({ status: 'interrupted', finishedAt: new Date() })
@@ -456,7 +458,7 @@ async function processSimulationRun(
     ).at(0);
     if (!config) return null;
     const executionToken = randomUUID();
-    // First claim starts the wall-clock deadline; retries and approval resumes keep it.
+    // First claim and approval resumes (queued) start a fresh deadline; running retries keep it.
     const expiresAt =
       run.status === 'queued'
         ? new Date(Date.now() + budgets.runDeadlineSeconds * 1000)

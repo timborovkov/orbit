@@ -271,6 +271,12 @@ h3 {
   height: 32px;
   padding: 0 10px;
   font-size: 0.75rem;
+  gap: 6px;
+}
+.button-small svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 .button-icon {
   width: 32px;
@@ -1634,6 +1640,29 @@ fieldset[aria-disabled='true'] textarea {
   font-size: 0.875rem;
   line-height: 1.6;
 }
+/* One bordered control; $ sits inside as an overlay prefix. */
+.approval-spend-field {
+  position: relative;
+  width: 100%;
+  max-width: 240px;
+}
+.approval-spend-prefix {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1;
+  pointer-events: none;
+}
+.approval-spend-field .approval-spend-input,
+.workspace-form .approval-spend-field input.approval-spend-input {
+  width: 100% !important;
+  margin: 0 !important;
+  padding-left: 28px !important;
+}
 .create-dialog select {
   margin: 8px 0 16px;
 }
@@ -2516,7 +2545,7 @@ details[open] > summary > .disclosure-chevron {
   border-top: 1px solid var(--border);
 }
 
-.approvals-history-card {
+.approvals-card.approvals-history-card {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -2546,6 +2575,38 @@ details[open] > summary > .disclosure-chevron {
   min-width: 0;
 }
 
+.approvals-history-primary {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+}
+
+.approvals-history-primary .approvals-agent-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approvals-history-secondary {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 6px 10px;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.approvals-history-secondary .approvals-age,
+.approvals-history-secondary .approvals-reviewed-by {
+  color: inherit;
+}
+
 .approvals-agent-link {
   font-weight: 500;
 }
@@ -2553,6 +2614,15 @@ details[open] > summary > .disclosure-chevron {
 .approvals-age {
   cursor: help;
   border-bottom: 1px dotted var(--strong-border);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.approvals-reviewed-by {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .approvals-reason {
@@ -2566,6 +2636,11 @@ details[open] > summary > .disclosure-chevron {
   gap: 8px;
   justify-items: start;
   min-width: 0;
+}
+
+.approvals-edit-button {
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .approvals-draft-label {
@@ -2594,15 +2669,29 @@ details[open] > summary > .disclosure-chevron {
   width: 100%;
 }
 
+.approvals-inbox-has-bulk {
+  padding-bottom: 0;
+}
+
+.approvals-bulk-spacer {
+  height: 96px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 .approvals-bulk-bar {
-  position: sticky;
-  bottom: 16px;
-  z-index: 20;
+  position: fixed;
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  left: max(16px, calc(50vw - 600px));
+  right: max(16px, calc(50vw - 600px));
+  z-index: 40;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
   justify-content: space-between;
+  max-width: 1200px;
+  margin-inline: auto;
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -2690,6 +2779,10 @@ details[open] > summary > .disclosure-chevron {
     gap: 10px;
   }
 
+  .approvals-card.approvals-history-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .approvals-card-top {
     flex-direction: column;
   }
@@ -2714,8 +2807,13 @@ details[open] > summary > .disclosure-chevron {
     flex: none;
   }
 
+  .approvals-history-primary {
+    gap: 6px;
+  }
+
   .approvals-bulk-bar {
-    bottom: 8px;
-    inset-inline: 0;
+    bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    right: 12px;
   }
 }

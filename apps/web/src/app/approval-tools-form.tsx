@@ -14,12 +14,6 @@ import {
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  InputGroupText,
-} from '@/components/ui/input-group';
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -113,11 +107,11 @@ export function ApprovalToolsForm({
       <FieldGroup className="gap-5 pt-2">
         <Field>
           <FieldLabel htmlFor="approval-spend">Spend threshold</FieldLabel>
-          <InputGroup className="max-w-[240px]">
-            <InputGroupAddon align="inline-start">
-              <InputGroupText>$</InputGroupText>
-            </InputGroupAddon>
-            <InputGroupInput
+          <div className="approval-spend-field">
+            <span className="approval-spend-prefix" aria-hidden="true">
+              $
+            </span>
+            <Input
               id="approval-spend"
               name="approvalSpendDollars"
               type="number"
@@ -126,8 +120,9 @@ export function ApprovalToolsForm({
               step={0.01}
               defaultValue={spendDollars}
               placeholder="Optional"
+              className="approval-spend-input m-0"
             />
-          </InputGroup>
+          </div>
           <FieldDescription>
             When set, write actions need approval once today’s recorded spend reaches this amount.
           </FieldDescription>
