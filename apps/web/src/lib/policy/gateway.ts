@@ -215,11 +215,11 @@ export function evaluateCandidate(
     return { decision: 'suppressed', reasons };
   }
 
-  // load_skill and authorized MCP tools do not open another inference request —
-  // the run's model reservation already covers quota. Do not require a spare slot.
+  // load_skill and authorized MCP tools add neither inference requests nor spend —
+  // the stage reservation already covers them (and may exactly fill the spend cap).
   const inRunTool = action.type === 'load_skill' || action.type.startsWith('mcp:');
   const requestLimit = inRunTool
-    ? checkRequestBudgets(snapshot, BigInt(0), 0)
+    ? checkRequestBudgets(snapshot, BigInt(0), 0, { checkSpend: false })
     : checkRequestBudgets(snapshot);
   if (requestLimit) {
     reasons.push(budgetViolationMessage(requestLimit));

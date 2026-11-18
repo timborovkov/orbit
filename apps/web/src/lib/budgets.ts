@@ -112,11 +112,20 @@ export function checkRequestBudgets(
   snapshot: BudgetSnapshot,
   reserveMicros = BigInt(0),
   reserveRequests = 1,
+  options?: {
+    /**
+     * When false, skip spend checks. Used for in-run tools (`load_skill`, MCP) that
+     * add no inference spend — the stage reservation may already fill the cap and is
+     * still counted in spendMicros until settlement.
+     */
+    checkSpend?: boolean;
+  },
 ): BudgetViolation | null {
   const { budgets, day, month, activeRuns } = snapshot;
   if (activeRuns >= budgets.maxConcurrentRuns) return 'concurrency';
   if (day.requests + reserveRequests > budgets.dailyRequests) return 'daily-requests';
   if (month.requests + reserveRequests > budgets.monthlyRequests) return 'monthly-requests';
+  if (options?.checkSpend === false) return null;
   for (const [reached, reservation, used, cap] of [
     ['daily-spend', 'daily-spend-reservation', day.spendMicros, budgets.dailySpendCents],
     ['monthly-spend', 'monthly-spend-reservation', month.spendMicros, budgets.monthlySpendCents],
