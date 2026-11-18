@@ -107,32 +107,44 @@ export function openRouterInference(apiKey: string): ModelCall {
       abortSignal: signal,
       telemetry: telemetry ?? { isEnabled: false },
     });
-    // Sum every generation step's OpenRouter cost — tool loops issue multiple paid requests.
-    const costSchema = z.object({
-      usage: z.object({
-        cost: z
-          .number()
-          .nonnegative()
-          .max(Number.MAX_SAFE_INTEGER / microsPerDollar),
-      }),
-    });
-    let costDollars = 0;
-    let sawCost = false;
-    for (const step of response.steps) {
-      const parsed = costSchema.safeParse(step.providerMetadata?.openrouter);
-      if (parsed.success) {
-        costDollars += parsed.data.usage.cost;
-        sawCost = true;
-      }
-    }
     return {
       decision: response.output,
       inputTokens: response.usage.inputTokens ?? 0,
       outputTokens: response.usage.outputTokens ?? 0,
-      costMicros: sawCost ? Math.ceil(costDollars * microsPerDollar) : undefined,
+      // Only bill a complete sum — partial metadata would release reserved spend for unpriced steps.
+      costMicros: costMicrosFromSteps(response.steps),
       providerCalls: Math.max(1, response.steps.length),
     };
   };
   call.quote = quoteOpenRouter;
   return call;
+}
+
+const stepCostSchema = z.object({
+  usage: z.object({
+    cost: z
+      .number()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER / microsPerDollar),
+  }),
+});
+
+/** Sum OpenRouter step costs only when every step has valid cost metadata. */
+export function costMicrosFromSteps(
+  steps: readonly { providerMetadata?: unknown }[],
+): number | undefined {
+  if (!steps.length) return undefined;
+  let costDollars = 0;
+  for (const step of steps) {
+    const metadata =
+      step.providerMetadata &&
+      typeof step.providerMetadata === 'object' &&
+      'openrouter' in step.providerMetadata
+        ? (step.providerMetadata as { openrouter?: unknown }).openrouter
+        : undefined;
+    const parsed = stepCostSchema.safeParse(metadata);
+    if (!parsed.success) return undefined;
+    costDollars += parsed.data.usage.cost;
+  }
+  return Math.ceil(costDollars * microsPerDollar);
 }

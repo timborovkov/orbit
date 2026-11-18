@@ -733,6 +733,29 @@ test('OpenRouter adapter sends credentials only as authorization and parses stru
   }
 });
 
+test('OpenRouter costMicros stays unknown unless every step has cost metadata', async () => {
+  const { costMicrosFromSteps } = await import('@/lib/runtime/openrouter');
+  expect(
+    costMicrosFromSteps([
+      { providerMetadata: { openrouter: { usage: { cost: 0.01 } } } },
+      { providerMetadata: { openrouter: { usage: { cost: 0.02 } } } },
+    ]),
+  ).toBe(30_000);
+  expect(
+    costMicrosFromSteps([
+      { providerMetadata: { openrouter: { usage: { cost: 0.01 } } } },
+      { providerMetadata: { openrouter: { usage: {} } } },
+    ]),
+  ).toBeUndefined();
+  expect(
+    costMicrosFromSteps([
+      { providerMetadata: { openrouter: { usage: { cost: 0.01 } } } },
+      { providerMetadata: {} },
+    ]),
+  ).toBeUndefined();
+  expect(costMicrosFromSteps([])).toBeUndefined();
+});
+
 test('OpenRouter pricing needs an exact model and a compatible priced endpoint', async () => {
   const { spyOn } = await import('bun:test');
   const { openRouterInference } = await import('@/lib/runtime/openrouter');
