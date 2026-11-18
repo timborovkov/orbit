@@ -757,6 +757,10 @@ async function processSimulationRun(
         );
     } catch {
       void reportFailure('worker.settlement', { runId: run.id, traceId: telemetry.traceId });
+      // Do not return successfully — that would complete the job while the run stays running.
+      throw new RetryableInfrastructureError(
+        'Failed to persist terminal simulation failure; will retry finalization.',
+      );
     }
   } finally {
     telemetry.finish(!didComplete);
@@ -826,4 +830,37 @@ export async function finalizeOrphanedDeadSimulationRuns() {
       AND j.type = ${SIMULATION_JOB_TYPE}
       AND r.status IN ('queued', 'running')
   `);
+}
+
+/**
+ * Repair runs left `running` after their job was marked completed (e.g. terminal persistence
+ * failed but the worker still acknowledged the claim). Idempotent.
+ */
+export async function finalizeOrphanedCompletedSimulationRuns() {
+  const inspectable = exhaustedJobMessage(
+    'reconciled after job completed without run finalization',
+  );
+  await db().execute(sql`
+    UPDATE simulation_runs AS r
+    SET
+      status = 'failed',
+      finished_at = now(),
+      defer_reason = ${inspectable},
+      result = jsonb_set(
+        coalesce(r.result, '{"steps":[],"actions":[],"error":null}'::jsonb),
+        '{error}',
+        to_jsonb(${inspectable}::text)
+      )
+    FROM jobs AS j
+    WHERE r.job_id = j.id
+      AND j.status = 'completed'
+      AND j.type = ${SIMULATION_JOB_TYPE}
+      AND r.status IN ('queued', 'running')
+  `);
+}
+
+/** Periodic reconcile for orphaned simulation runs linked to finished jobs. */
+export async function reconcileOrphanedSimulationRuns() {
+  await finalizeOrphanedDeadSimulationRuns();
+  await finalizeOrphanedCompletedSimulationRuns();
 }

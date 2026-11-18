@@ -4,8 +4,8 @@ import { closeDb } from '@/lib/db';
 import { startJobWorker } from '@/lib/queue/worker';
 import {
   finalizeExhaustedSimulationJob,
-  finalizeOrphanedDeadSimulationRuns,
   processSimulationJob,
+  reconcileOrphanedSimulationRuns,
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
 import { flushTelemetry, reportFailure } from '@/lib/runtime/telemetry';
@@ -47,7 +47,7 @@ const worker = startJobWorker({
     await finalizeExhaustedSimulationJob(job.payload, error);
   },
   reconcileDeadLetters: async () => {
-    await finalizeOrphanedDeadSimulationRuns();
+    await reconcileOrphanedSimulationRuns();
   },
   onError: () => {
     console.error('Worker queue operation failed.');

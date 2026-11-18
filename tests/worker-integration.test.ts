@@ -8,6 +8,7 @@ import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/p
 import {
   enqueueSimulation,
   finalizeExhaustedSimulationJob,
+  finalizeOrphanedCompletedSimulationRuns,
   finalizeOrphanedDeadSimulationRuns,
   processSimulationJob,
   SIMULATION_JOB_TYPE,
@@ -940,6 +941,54 @@ test('finalizeOrphanedDeadSimulationRuns clears runs linked to dead jobs', async
   expect(done.status).toBe('failed');
   expect(done.defer_reason).toContain('retries exhausted');
   expect(done.result.error).toContain('reconciled');
+});
+
+test('finalizeOrphanedCompletedSimulationRuns clears runs linked to completed jobs', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const config = { ...preset.config, name: 'OrphanCompleted' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'OrphanCompleted',${config.mission},'shadow',${sql.json(uncapped)},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
+  const [job] = await sql`
+    INSERT INTO jobs(type,payload,status,attempts,max_attempts,available_at,finished_at)
+    VALUES (
+      ${SIMULATION_JOB_TYPE},
+      ${sql.json({ runId: 'pending' })},
+      'completed',
+      1,
+      5,
+      now(),
+      now()
+    )
+    RETURNING id
+  `;
+  const [run] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token,job_id)
+    VALUES (
+      ${id},
+      ${version.id},
+      'orphan-completed',
+      'running',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      'test',
+      now() + interval '1 hour',
+      ${randomUUID()},
+      ${job.id}
+    )
+    RETURNING id
+  `;
+  await sql`UPDATE jobs SET payload = ${sql.json({ runId: run.id })} WHERE id = ${job.id}`;
+  await finalizeOrphanedCompletedSimulationRuns();
+  const [done] =
+    await sql`SELECT status, defer_reason, result FROM simulation_runs WHERE id=${run.id}`;
+  expect(done.status).toBe('failed');
+  expect(done.defer_reason).toContain('retries exhausted');
+  expect(done.result.error).toContain('reconciled after job completed');
 });
 
 test('OpenRouter spend reservations serialize and missing prices require both caps off', async () => {
