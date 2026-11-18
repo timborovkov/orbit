@@ -22,6 +22,7 @@ import {
   PAID_STEP_BURN_MESSAGE,
   PaidStepUnpersistedError,
   PreDispatchInfrastructureError,
+  RetryableInfrastructureError,
   retryableStore,
 } from '@/lib/runtime/errors';
 import { openRouterInference } from '@/lib/runtime/openrouter';
@@ -502,6 +503,18 @@ async function processSimulationRun(
 
     // Include reservation-only progress so a failed post-call checkpoint cannot free the step slot.
     const checkpointed = hasSimulationProgress(run.result) ? run.result : undefined;
+    // A prior attempt already burned a paid step but failed to mark the run terminal — finalize
+    // without calling the provider again.
+    if (checkpointed?.error === PAID_STEP_BURN_MESSAGE) {
+      await retryableStore(() =>
+        updateIfOwned(run.id, executionToken, {
+          status: 'failed',
+          finishedAt: new Date(),
+          result: { ...checkpointed, traceId: telemetry.traceId },
+        }),
+      );
+      return;
+    }
     let settle!: (billedMicros: number) => Promise<void>;
     let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
     const result = await simulate(
@@ -654,15 +667,22 @@ async function processSimulationRun(
         }),
       );
     } catch (error) {
-      // A paid-step burn must not requeue even if the terminal write blips.
+      // Paid-step burn: never complete the job while the run is still running. Persist the burn
+      // markers when possible, then Retryable so the queue retries finalization only (simulate
+      // will refuse to redispatch once dispatchedStages/error are durable).
       if (isRetryableInfrastructureError(error) && result.error === PAID_STEP_BURN_MESSAGE) {
+        const burned: SimulationResult = {
+          ...result,
+          traceId: telemetry.traceId,
+          error: PAID_STEP_BURN_MESSAGE,
+        };
         try {
           await db()
             .update(runs)
             .set({
               status: 'failed',
               finishedAt: new Date(),
-              result: { ...result, traceId: telemetry.traceId },
+              result: burned,
             })
             .where(
               and(
@@ -671,13 +691,29 @@ async function processSimulationRun(
                 eq(runs.executionToken, executionToken),
               ),
             );
+          return;
         } catch {
-          void reportFailure('worker.settlement', {
-            runId: run.id,
-            traceId: telemetry.traceId,
-          });
+          try {
+            await db()
+              .update(runs)
+              .set({ result: burned })
+              .where(
+                and(
+                  eq(runs.id, run.id),
+                  eq(runs.status, 'running'),
+                  eq(runs.executionToken, executionToken),
+                ),
+              );
+          } catch {
+            void reportFailure('worker.settlement', {
+              runId: run.id,
+              traceId: telemetry.traceId,
+            });
+          }
+          throw new RetryableInfrastructureError(
+            'Paid step burn finalization pending; will retry without redistributing the call.',
+          );
         }
-        return;
       }
       throw error;
     }
