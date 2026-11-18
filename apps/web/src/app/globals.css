@@ -2136,16 +2136,23 @@ fieldset[aria-disabled='true'] textarea {
     height: 44px;
   }
   .agent-tabs {
-    gap: 16px;
+    gap: 12px;
     margin: 0 -16px 20px;
-    padding: 0 16px;
+    padding: 0 16px 2px;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
+    scroll-padding-inline: 16px;
   }
   .agent-tabs button {
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     flex: 0 0 auto;
+    padding: 10px 4px;
+  }
+  .agent-tabs .tab-count {
+    padding: 0 4px;
+    font-size: 0.6875rem;
   }
   .config-editor {
     grid-template-columns: minmax(0, 1fr);

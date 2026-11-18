@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 export function WorkspaceTabs({
   items,
@@ -9,6 +9,12 @@ export function WorkspaceTabs({
 }) {
   const prefix = useId();
   const [selected, setSelected] = useState(items[0]?.id);
+  useEffect(() => {
+    if (!selected) return;
+    document
+      .getElementById(`${prefix}-${selected}-tab`)
+      ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [prefix, selected]);
   return (
     <>
       <div className="agent-tabs" role="tablist" aria-label="Agent workspace">
