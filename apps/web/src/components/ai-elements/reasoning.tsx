@@ -5,12 +5,11 @@ import { useControllableState } from '@radix-ui/react-use-controllable-state';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import { Streamdown } from 'streamdown';
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { cn } from '@/lib/utils';
-
 import { ReasoningContext } from '@/components/ai-elements/reasoning-context';
 import { useReasoning } from '@/components/ai-elements/reasoning-hooks';
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { cn } from '@/lib/utils';
 
 export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   isStreaming?: boolean;
@@ -50,7 +49,9 @@ export const Reasoning = memo(
           setHasAutoClosed(true);
         }, AUTO_CLOSE_DELAY);
 
-        return () => { clearTimeout(timer); };
+        return () => {
+          clearTimeout(timer);
+        };
       }
     }, [isStreaming, isOpen, defaultOpen, setIsOpen, hasAutoClosed]);
 

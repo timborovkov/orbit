@@ -2,9 +2,8 @@ import * as React from 'react';
 import type { VariantProps } from 'class-variance-authority';
 import { Slot } from 'radix-ui';
 
-import { cn } from '@/lib/utils';
-
 import { badgeVariants } from '@/components/ui/badge-variants';
+import { cn } from '@/lib/utils';
 
 function Badge({
   className,

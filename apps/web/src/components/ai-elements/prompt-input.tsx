@@ -27,6 +27,16 @@ import {
   SquareIcon,
   XIcon,
 } from 'lucide-react';
+
+import {
+  PromptInputForm,
+  type PromptInputFormProps,
+} from '@/components/ai-elements/prompt-input-form';
+import { LocalAttachmentsContext } from '@/components/ai-elements/prompt-input-local-context';
+import {
+  useOptionalPromptInputController,
+  useOptionalProviderAttachments,
+} from '@/components/ai-elements/prompt-input-provider';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -44,11 +54,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
-import {
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-} from '@/components/ui/input-group';
+import { InputGroupAddon, InputGroupButton, InputGroupTextarea } from '@/components/ui/input-group';
 import {
   Select,
   SelectContent,
@@ -57,14 +63,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-
-import { PromptInputForm, type PromptInputFormProps } from '@/components/ai-elements/prompt-input-form';
-import { LocalAttachmentsContext } from '@/components/ai-elements/prompt-input-local-context';
-import type { PromptInputMessage } from '@/components/ai-elements/prompt-input-types';
-import {
-  useOptionalPromptInputController,
-  useOptionalProviderAttachments,
-} from '@/components/ai-elements/prompt-input-provider';
 
 export {
   PromptInputProvider,
@@ -227,7 +225,6 @@ export const PromptInputActionAddAttachments = ({
 export type { PromptInputMessage } from '@/components/ai-elements/prompt-input-types';
 export type PromptInputProps = PromptInputFormProps;
 export const PromptInput = PromptInputForm;
-
 
 export type PromptInputBodyProps = HTMLAttributes<HTMLDivElement>;
 

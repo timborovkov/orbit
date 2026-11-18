@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 import type { FileUIPart } from 'ai';
 import { nanoid } from 'nanoid';
 
-import { readFileAsDataUrl } from './file-data-url';
+import { readFileAsDataUrl } from '@/components/ai-elements/file-data-url';
 
 interface PromptInputError {
   code: 'max_files' | 'max_file_size' | 'accept';

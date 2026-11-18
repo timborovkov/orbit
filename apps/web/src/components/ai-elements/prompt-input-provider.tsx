@@ -4,7 +4,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -14,7 +13,7 @@ import {
 import type { FileUIPart } from 'ai';
 import { nanoid } from 'nanoid';
 
-import { readFileAsDataUrl } from './file-data-url';
+import { readFileAsDataUrl } from '@/components/ai-elements/file-data-url';
 
 export interface AttachmentsContext {
   files: (FileUIPart & { id: string })[];

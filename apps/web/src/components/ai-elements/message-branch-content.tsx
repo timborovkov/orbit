@@ -2,9 +2,8 @@
 
 import { Children, isValidElement, useMemo, type HTMLAttributes, type ReactElement } from 'react';
 
+import { useMessageBranch } from '@/components/ai-elements/message-branch-context';
 import { cn } from '@/lib/utils';
-
-import { useMessageBranch } from './message-branch-context';
 
 type MessageBranchContentProps = HTMLAttributes<HTMLDivElement>;
 

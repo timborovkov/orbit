@@ -60,3 +60,21 @@ export function shouldRefreshWorkspaceForQueuedRun(options: {
 export function accessSectionPanelHidden(activeId: string, sectionId: string) {
   return activeId !== sectionId;
 }
+
+export interface PlaygroundVersionSelection {
+  /** `currentConfigurationId` when the user last picked an override. */
+  baseId: string;
+  overrideId: string | null;
+}
+
+/**
+ * Effective Playground configuration id. When the workspace current id moves
+ * (for example after a save), any prior historical override is ignored.
+ */
+export function playgroundEffectiveConfigurationId(
+  selection: PlaygroundVersionSelection,
+  currentConfigurationId: string,
+) {
+  if (selection.baseId !== currentConfigurationId) return currentConfigurationId;
+  return selection.overrideId ?? currentConfigurationId;
+}

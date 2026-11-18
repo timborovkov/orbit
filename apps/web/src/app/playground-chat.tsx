@@ -52,7 +52,9 @@ import {
 import {
   PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
   playgroundAttachmentRejection,
+  playgroundEffectiveConfigurationId,
   shouldRefreshWorkspaceForQueuedRun,
+  type PlaygroundVersionSelection,
 } from '@/lib/runtime/playground-ui';
 import { cn } from '@/lib/utils';
 
@@ -92,8 +94,14 @@ export function PlaygroundChat({
   currentConfigurationId: string;
 }) {
   const router = useRouter();
-  const [configurationOverride, setConfigurationOverride] = useState<string | null>(null);
-  const configurationId = configurationOverride ?? currentConfigurationId;
+  const [versionSelection, setVersionSelection] = useState<PlaygroundVersionSelection>({
+    baseId: currentConfigurationId,
+    overrideId: null,
+  });
+  const configurationId = playgroundEffectiveConfigurationId(
+    versionSelection,
+    currentConfigurationId,
+  );
   const [recipient, setRecipient] = useState('');
   const [otherRecipient, setOtherRecipient] = useState('');
   const [recipientsOpen, setRecipientsOpen] = useState(false);
@@ -206,7 +214,12 @@ export function PlaygroundChat({
       <div className="playground-toolbar">
         <Field className="playground-version-field gap-2">
           <FieldLabel htmlFor="run-version">Configuration version</FieldLabel>
-          <Select value={configurationId} onValueChange={setConfigurationOverride}>
+          <Select
+            value={configurationId}
+            onValueChange={(value) => {
+              setVersionSelection({ baseId: currentConfigurationId, overrideId: value });
+            }}
+          >
             <SelectTrigger
               id="run-version"
               className="w-full min-w-0 bg-background text-foreground"

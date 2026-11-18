@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useMemo, type CSSProperties, type ElementType, type JSX } from 'react';
-import { LazyMotion, domAnimation, m, type HTMLMotionProps } from 'motion/react';
+import { domAnimation, LazyMotion, m, type HTMLMotionProps } from 'motion/react';
 
 import { cn } from '@/lib/utils';
 

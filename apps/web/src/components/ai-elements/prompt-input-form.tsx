@@ -6,27 +6,25 @@ import {
   useMemo,
   useRef,
   type ChangeEventHandler,
-  type SubmitEventHandler,
-  type SyntheticEvent,
   type HTMLAttributes,
   type RefObject,
+  type SubmitEventHandler,
+  type SyntheticEvent,
 } from 'react';
 import type { FileUIPart } from 'ai';
 
-import { InputGroup } from '@/components/ui/input-group';
-import { cn } from '@/lib/utils';
-
+import { LocalAttachmentsContext } from '@/components/ai-elements/prompt-input-local-context';
 import {
   useOptionalPromptInputController,
   type AttachmentsContext,
 } from '@/components/ai-elements/prompt-input-provider';
-import { LocalAttachmentsContext } from '@/components/ai-elements/prompt-input-local-context';
 import type { PromptInputMessage } from '@/components/ai-elements/prompt-input-types';
 import {
   convertBlobUrlToDataUrl,
   usePromptInputLocalFiles,
 } from '@/components/ai-elements/use-prompt-input-local-files';
-
+import { InputGroup } from '@/components/ui/input-group';
+import { cn } from '@/lib/utils';
 
 export type PromptInputFormProps = Omit<HTMLAttributes<HTMLFormElement>, 'onSubmit' | 'onError'> & {
   accept?: string;
@@ -53,15 +51,15 @@ function usePromptInputDropTargets(
     if (globalDrop) return;
 
     const onDragOver = (e: DragEvent) => {
-      if (e.dataTransfer.types.includes('Files')) {
+      if (e.dataTransfer?.types.includes('Files')) {
         e.preventDefault();
       }
     };
     const onDrop = (e: DragEvent) => {
-      if (e.dataTransfer.types.includes('Files')) {
+      if (e.dataTransfer?.types.includes('Files')) {
         e.preventDefault();
       }
-      if (e.dataTransfer.files.length > 0) {
+      if (e.dataTransfer && e.dataTransfer.files.length > 0) {
         add(e.dataTransfer.files);
       }
     };
@@ -77,15 +75,15 @@ function usePromptInputDropTargets(
     if (!globalDrop) return;
 
     const onDragOver = (e: DragEvent) => {
-      if (e.dataTransfer.types.includes('Files')) {
+      if (e.dataTransfer?.types.includes('Files')) {
         e.preventDefault();
       }
     };
     const onDrop = (e: DragEvent) => {
-      if (e.dataTransfer.types.includes('Files')) {
+      if (e.dataTransfer?.types.includes('Files')) {
         e.preventDefault();
       }
-      if (e.dataTransfer.files.length > 0) {
+      if (e.dataTransfer && e.dataTransfer.files.length > 0) {
         add(e.dataTransfer.files);
       }
     };

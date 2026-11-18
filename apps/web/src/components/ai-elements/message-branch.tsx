@@ -1,18 +1,24 @@
 'use client';
 
-import { useCallback, useMemo, useState, type ComponentProps, type HTMLAttributes, type ReactElement } from 'react';
+import {
+  useCallback,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type HTMLAttributes,
+  type ReactElement,
+} from 'react';
 import type { UIMessage } from 'ai';
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 
+import {
+  MessageBranchContext,
+  useMessageBranch,
+  type MessageBranchContextType,
+} from '@/components/ai-elements/message-branch-context';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup, ButtonGroupText } from '@/components/ui/button-group';
 import { cn } from '@/lib/utils';
-
-import {
-  MessageBranchContext,
-  type MessageBranchContextType,
-  useMessageBranch,
-} from './message-branch-context';
 
 type MessageBranchProps = HTMLAttributes<HTMLDivElement> & {
   defaultBranch?: number;
@@ -105,7 +111,11 @@ export function MessageBranchPrevious({ children, ...props }: MessageBranchPrevi
 
 type MessageBranchNextProps = ComponentProps<typeof Button>;
 
-export function MessageBranchNext({ children, className: _className, ...props }: MessageBranchNextProps) {
+export function MessageBranchNext({
+  children,
+  className: _className,
+  ...props
+}: MessageBranchNextProps) {
   const { goToNext, totalBranches } = useMessageBranch();
 
   return (

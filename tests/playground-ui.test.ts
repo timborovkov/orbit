@@ -4,6 +4,7 @@ import {
   accessSectionPanelHidden,
   PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
   playgroundAttachmentRejection,
+  playgroundEffectiveConfigurationId,
   playgroundMessagesAcknowledgeQueue,
   shouldRefreshWorkspaceForQueuedRun,
 } from '../apps/web/src/lib/runtime/playground-ui';
@@ -81,6 +82,26 @@ describe('access section panel visibility', () => {
   test('keeps inactive panels mounted via hidden rather than unmounting', () => {
     expect(accessSectionPanelHidden('budgets', 'budgets')).toBe(false);
     expect(accessSectionPanelHidden('budgets', 'consent')).toBe(true);
+  });
+});
+
+describe('playground configuration selection', () => {
+  test('uses an explicit override until the current configuration changes', () => {
+    expect(
+      playgroundEffectiveConfigurationId(
+        { baseId: 'current-v1', overrideId: 'old-version' },
+        'current-v1',
+      ),
+    ).toBe('old-version');
+    expect(
+      playgroundEffectiveConfigurationId(
+        { baseId: 'current-v1', overrideId: 'old-version' },
+        'current-v2',
+      ),
+    ).toBe('current-v2');
+    expect(
+      playgroundEffectiveConfigurationId({ baseId: 'current-v2', overrideId: null }, 'current-v2'),
+    ).toBe('current-v2');
   });
 });
 

@@ -13,10 +13,9 @@ import {
 import { CheckIcon, CopyIcon } from 'lucide-react';
 import type { BundledLanguage } from 'shiki';
 
+import { highlightCode } from '@/components/ai-elements/code-block-highlight';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-
-import { highlightCode } from '@/components/ai-elements/code-block-highlight';
 
 type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string;
@@ -111,7 +110,9 @@ export const CodeBlockCopyButton = ({
       await navigator.clipboard.writeText(code);
       setIsCopied(true);
       onCopy?.();
-      setTimeout(() => { setIsCopied(false); }, timeout);
+      setTimeout(() => {
+        setIsCopied(false);
+      }, timeout);
     } catch (error) {
       onError?.(error as Error);
     }
