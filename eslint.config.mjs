@@ -4,7 +4,9 @@ import unusedImports from 'eslint-plugin-unused-imports';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/.next/**', '**/node_modules/**', '**/next-env.d.ts'] },
+  {
+    ignores: ['**/.next/**', '**/node_modules/**', '**/next-env.d.ts'],
+  },
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
   {

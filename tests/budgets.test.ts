@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   budgetDefaults,
   BudgetError,
+  budgetNoCapAriaLabel,
   budgetsSchema,
   checkOutboundBudgets,
   checkRequestBudgets,
@@ -95,4 +96,12 @@ test('BudgetError messages are exact trusted allowlist entries', () => {
     false,
   );
   expect(isBudgetError(new Error(error.message))).toBe(false);
+});
+
+test('spend-cap No cap switches keep distinct accessible names', () => {
+  expect(budgetNoCapAriaLabel('dailySpendCents')).toBe('No cap for daily spend');
+  expect(budgetNoCapAriaLabel('monthlySpendCents')).toBe('No cap for monthly spend');
+  expect(budgetNoCapAriaLabel('dailySpendCents')).not.toBe(
+    budgetNoCapAriaLabel('monthlySpendCents'),
+  );
 });

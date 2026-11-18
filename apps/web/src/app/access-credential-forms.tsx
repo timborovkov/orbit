@@ -3,6 +3,8 @@
 import { useRef, useState, useTransition } from 'react';
 
 import { saveCredential } from '@/actions/workspace';
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 
 export function AccessCredentialForms({
@@ -42,16 +44,22 @@ export function AccessCredentialForms({
       <form ref={saveForm} action={submit} className="workspace-form">
         <fieldset disabled={pending}>
           <input type="hidden" name="agentId" value={agentId} />
-          <label htmlFor="credential-key">Agent API key</label>
-          <input
-            id="credential-key"
-            type="password"
-            name="credential"
-            autoComplete="new-password"
-            required
-            maxLength={512}
-            placeholder="Enter an OpenRouter key for this agent"
-          />
+          <Field>
+            <FieldLabel htmlFor="credential-key">Agent API key</FieldLabel>
+            <Input
+              id="credential-key"
+              type="password"
+              name="credential"
+              autoComplete="new-password"
+              required
+              maxLength={512}
+              placeholder="Enter an OpenRouter key for this agent"
+              className="m-0"
+            />
+            <FieldDescription>
+              Stored encrypted for this agent only. The value is never shown again after you save.
+            </FieldDescription>
+          </Field>
         </fieldset>
         <div className="workspace-form-footer">
           <SubmitButton disabled={pending} pendingLabel="Working…">
@@ -64,19 +72,18 @@ export function AccessCredentialForms({
           <fieldset disabled={pending}>
             <input type="hidden" name="agentId" value={agentId} />
             <input type="hidden" name="revoke" value="true" />
+            <FieldDescription>
+              Removing the agent key falls back to the environment default when one is configured.
+            </FieldDescription>
           </fieldset>
           <div className="workspace-form-footer">
-            <SubmitButton disabled={pending} pendingLabel="Working…">
+            <SubmitButton variant="destructive" disabled={pending} pendingLabel="Working…">
               {pending ? 'Working…' : 'Remove agent key'}
             </SubmitButton>
           </div>
         </form>
       )}
-      {error ? (
-        <p role="alert" className="form-error">
-          {error}
-        </p>
-      ) : null}
+      {error ? <FieldError className="form-error">{error}</FieldError> : null}
       {message ? <p role="status">{message}</p> : null}
     </div>
   );

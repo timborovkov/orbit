@@ -1,18 +1,16 @@
 import { notFound } from 'next/navigation';
-import { ChevronDown, FlaskConical, History, ShieldCheck } from 'lucide-react';
+import { ChevronDown, History } from 'lucide-react';
 import { z } from 'zod';
 
-import { runSimulation, saveConfiguration } from '@/actions/workspace';
-import { AccessPanel } from '@/app/access-panel';
+import { saveConfiguration } from '@/actions/workspace';
+import { AccessWorkbench } from '@/app/access-workbench';
 import { AgentAvatar } from '@/app/agent-avatar';
-import { BudgetSettings } from '@/app/budget-settings';
 import { ConfigFields } from '@/app/config-fields';
-import { LifecycleControls } from '@/app/lifecycle-controls';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
-import { ConsentSettings, ProposalReview, ReviewSettings } from '@/app/policy-settings';
+import { PlaygroundChat } from '@/app/playground-chat';
+import { ProposalReview } from '@/app/policy-settings';
 import { ProfilePictureEditor } from '@/app/profile-picture-editor';
 import { RunContent } from '@/app/run-content';
-import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { WorkspaceHeader } from '@/app/workspace-header';
 import { WorkspaceTabs } from '@/app/workspace-tabs';
@@ -45,7 +43,6 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   const lifecycle = agent.lifecycle;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const viewedHistory = history;
-  const latest = history.at(0);
   const hasPendingRuns = history.some(
     (run) => run.displayStatus === 'queued' || run.displayStatus === 'running',
   );
@@ -77,107 +74,30 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     </section>
   );
   const access = (
-    <div className="access-stack">
-      <LifecycleControls agentId={id} lifecycle={lifecycle} />
-      <BudgetSettings agentId={id} budgets={agent.budgets} usage={usage} />
-      <ReviewSettings agentId={id} approvalTools={agent.approvalTools} />
-      <ConsentSettings agentId={id} consents={consents} />
-      <AccessPanel
-        agentId={id}
-        agentName={agent.name}
-        hasAgentCredential={hasAgentCredential}
-        keySource={keySource}
-      />
-    </div>
+    <AccessWorkbench
+      agentId={id}
+      agentName={agent.name}
+      lifecycle={lifecycle}
+      budgets={agent.budgets}
+      usage={usage}
+      approvalTools={agent.approvalTools}
+      consents={consents}
+      hasAgentCredential={hasAgentCredential}
+      keySource={keySource}
+    />
   );
   const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;
   const playground = (
-    <div className="playground-grid">
-      <section id="simulation" className="simulation-composer">
-        <div className="editor-section-heading">
-          <h2>Test a conversation</h2>
-          <p className="muted">See how {agent.name} would respond to a post or question.</p>
-        </div>
-        {!canSimulate && (
-          <div className="run-notice">
-            <ShieldCheck size={18} aria-hidden="true" />
-            <p>
-              {lifecycle === 'paused'
-                ? 'This agent is paused. Resume it under Access before queueing simulations.'
-                : 'This agent is stopped. Change its lifecycle under Access before queueing simulations.'}
-            </p>
-          </div>
-        )}
-        <WorkspaceForm action={runSimulation} label="Queue simulation" disabled={!canSimulate}>
-          <input type="hidden" name="agentId" value={id} />
-          <WorkspaceSelect
-            key={current.id}
-            id="run-version"
-            name="configurationId"
-            label="Configuration version"
-            initialValue={current.id}
-            options={versions.map((version) => ({
-              value: version.id,
-              label: `Version ${version.version} · ${version.config.name}`,
-            }))}
-          />
-          <WorkspaceField
-            id="run-input"
-            name="input"
-            label="Post or question"
-            required
-            multiline
-            maxLength={16000}
-            rows={9}
-          />
-          <details className="policy-recipients">
-            <summary>Recipients for consent checks</summary>
-            <WorkspaceField
-              id="run-recipient"
-              name="recipient"
-              label="Recipient ID"
-              maxLength={120}
-            />
-            <WorkspaceField
-              id="run-other-recipient"
-              name="otherRecipient"
-              label="Second recipient ID (introductions)"
-              maxLength={120}
-            />
-            <p className="field-hint">Use the same IDs as the consent records in Access.</p>
-          </details>
-        </WorkspaceForm>
-        <p className="simulation-note">
-          <ShieldCheck size={15} aria-hidden="true" />
-          <span>
-            Paid model inference runs on the Bun worker. Nothing is posted or sent. Save your
-            configuration before testing.
-          </span>
-        </p>
-      </section>
-      <section className="simulation-result" aria-labelledby="latest-result-title">
-        <div className="result-heading">
-          <h2 id="latest-result-title">Latest result</h2>
-          {latest && (
-            <span className="state-label">
-              v{versionFor(latest.configurationId)} · {latest.displayStatus}
-            </span>
-          )}
-        </div>
-        {latest ? (
-          <RunContent run={latest} interrupted={latest.interrupted} />
-        ) : (
-          <div className="simulation-empty">
-            <FlaskConical size={30} strokeWidth={1.25} aria-hidden="true" />
-            <h3>A safe place to try things</h3>
-            <p>
-              Paste an input and queue a simulation. Evaluation, proposed actions and drafts will
-              appear here once the worker finishes.
-            </p>
-          </div>
-        )}
-      </section>
-    </div>
+    <section id="simulation" className="playground-panel">
+      <PlaygroundChat
+        agentId={id}
+        agentName={agent.name}
+        canSimulate={canSimulate}
+        lifecycle={lifecycle}
+        versions={versions}
+        currentConfigurationId={current.id}
+      />
+    </section>
   );
   const historyPanel = (
     <div className="history-workbench">
