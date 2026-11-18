@@ -7,7 +7,12 @@ import {
   resolveOpenRouterApiKey,
 } from '@/lib/runtime/openrouter-key';
 import { decryptCredential, encryptCredential } from '@/lib/runtime/secrets';
-import { simulate, type ModelCall, type SimulationResult } from '@/lib/runtime/simulation';
+import {
+  hasSimulationProgress,
+  simulate,
+  type ModelCall,
+  type SimulationResult,
+} from '@/lib/runtime/simulation';
 
 const config: AgentConfig = {
   name: 'John',
@@ -88,6 +93,40 @@ describe('OpenRouter key resolution', () => {
   });
 });
 describe('bounded manual simulation', () => {
+  test('hasSimulationProgress includes reservation-only checkpoints', () => {
+    expect(hasSimulationProgress({ steps: [], actions: [], error: null })).toBe(false);
+    expect(
+      hasSimulationProgress({
+        reservedStages: ['evaluator'],
+        steps: [],
+        actions: [],
+        error: null,
+      }),
+    ).toBe(true);
+    expect(
+      hasSimulationProgress({
+        dispatchedStages: ['evaluator'],
+        steps: [],
+        actions: [],
+        error: null,
+      }),
+    ).toBe(true);
+    expect(
+      hasSimulationProgress({
+        steps: [
+          {
+            stage: 'evaluator',
+            model: 'test/evaluator',
+            decision,
+            inputTokens: 1,
+            outputTokens: 1,
+          },
+        ],
+        actions: [],
+        error: null,
+      }),
+    ).toBe(true);
+  });
   test('evaluates multiple actions, drafts them and suppresses every effect', async () => {
     const requests: Parameters<ModelCall>[0][] = [];
     const checkpoints: SimulationResult[] = [];
@@ -107,7 +146,10 @@ describe('bounded manual simulation', () => {
     expect(requests[0].input).toContain('untrustedInput');
     expect(result.actions).toHaveLength(2);
     expect(result.actions.every((a) => a.policy === 'suppressed')).toBe(true);
-    expect(checkpoints[0].steps).toHaveLength(1);
+    // First durable write reserves the evaluator slot before the model returns.
+    expect(checkpoints[0].reservedStages).toEqual(['evaluator']);
+    expect(checkpoints[0].steps).toHaveLength(0);
+    expect(checkpoints.some((partial) => partial.steps.length === 1)).toBe(true);
     expect(result.steps.reduce((sum, s) => sum + s.inputTokens + s.outputTokens, 0)).toBe(60);
   });
   test('irrelevant input skips main inference even if evaluator proposes actions', async () => {
@@ -156,6 +198,357 @@ describe('bounded manual simulation', () => {
     expect(result.error).not.toBeNull();
     expect(result.actions).toEqual([]);
   });
+  test('retries resume checkpointed stages without reusing the step allowance', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let checkpointed: SimulationResult | undefined;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        checkpointed = structuredClone(partial);
+      },
+      {
+        maxSteps: 2,
+        onActions: async () => {
+          throw new RetryableInfrastructureError('policy persistence blip');
+        },
+      },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(RetryableInfrastructureError);
+    expect(models).toEqual(['test/evaluator']);
+    expect(checkpointed?.steps).toHaveLength(1);
+    if (!checkpointed) throw new Error('expected evaluator checkpoint');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return {
+          decision: { ...decision, reason: 'refined' },
+          inputTokens: 2,
+          outputTokens: 2,
+        };
+      },
+      async () => {},
+      { maxSteps: 2, initial: checkpointed },
+    );
+    // Evaluator once, then main — policy failure must not redo the paid evaluator call.
+    expect(models).toEqual(['test/evaluator', 'test/main']);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.steps[0].stage).toBe('evaluator');
+    expect(resumed.steps[1].stage).toBe('main');
+  });
+  test('pre-dispatch infrastructure faults release the reservation for retry', async () => {
+    const { PreDispatchInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      {
+        maxSteps: 2,
+        prepare: async () => {
+          throw new PreDispatchInfrastructureError('quota reservation db blip');
+        },
+      },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(PreDispatchInfrastructureError);
+    expect(models).toEqual([]);
+    expect(durable?.reservedStages).toBeUndefined();
+    expect(durable?.dispatchedStages).toBeUndefined();
+    expect(durable?.steps).toHaveLength(0);
+    if (!durable) throw new Error('expected release checkpoint');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2, initial: durable },
+    );
+    expect(models).toEqual(['test/evaluator', 'test/main']);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.error).toBeNull();
+  });
+  test('provider faults before a returned response stay retryable', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        throw new RetryableInfrastructureError('provider transport blip');
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(RetryableInfrastructureError);
+    expect(models).toEqual(['test/evaluator']);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.dispatchedStages).toBeUndefined();
+    expect(durable?.steps).toHaveLength(0);
+    if (!durable) throw new Error('expected reservation checkpoint');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2, initial: durable },
+    );
+    expect(models).toEqual(['test/evaluator', 'test/evaluator', 'test/main']);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.error).toBeNull();
+  });
+  test('pre-dispatch cleanup write failures remain retryable', async () => {
+    const { PreDispatchInfrastructureError, RetryableInfrastructureError } =
+      await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    let releaseAttempts = 0;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        // First write reserves; cleanup tries to clear and fails — pending reservation remains.
+        if (
+          durable?.reservedStages?.includes('evaluator') &&
+          !(partial.reservedStages?.includes('evaluator') ?? false)
+        ) {
+          releaseAttempts += 1;
+          throw new RetryableInfrastructureError('cleanup checkpoint blip');
+        }
+        durable = structuredClone(partial);
+      },
+      {
+        maxSteps: 2,
+        prepare: async () => {
+          throw new PreDispatchInfrastructureError('quota reservation db blip');
+        },
+      },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(PreDispatchInfrastructureError);
+    expect(releaseAttempts).toBe(1);
+    expect(models).toEqual([]);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.dispatchedStages).toBeUndefined();
+    if (!durable) throw new Error('expected pending reservation');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2, initial: durable },
+    );
+    expect(models).toEqual(['test/evaluator', 'test/main']);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.error).toBeNull();
+  });
+  test('failed post-inference checkpoint keeps the dispatched step across retries', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    let failStepCheckpoint = false;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        failStepCheckpoint = true;
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        // Dispatch is marked after the provider returns. The later step-body write fails —
+        // retry must still see dispatchedStages and refuse a redo.
+        if (failStepCheckpoint && partial.steps.some((step) => step.stage === 'evaluator')) {
+          failStepCheckpoint = false;
+          throw new RetryableInfrastructureError('post-call checkpoint blip');
+        }
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    ).catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(RetryableInfrastructureError);
+    expect(models).toEqual(['test/evaluator']);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.steps).toHaveLength(0);
+    if (!durable) throw new Error('expected dispatch checkpoint');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2, initial: durable },
+    );
+    // Must not re-dispatch evaluator or continue to main — dispatch already burned the slot.
+    expect(models).toEqual(['test/evaluator']);
+    expect(resumed.steps).toHaveLength(0);
+    expect(resumed.reservedStages).toEqual(['evaluator']);
+    expect(resumed.dispatchedStages).toEqual(['evaluator']);
+    expect(resumed.error).toContain('already used this model step');
+  });
+  test('failed dispatch checkpoint after a returned response burns the stage without queue redo', async () => {
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    let failDispatchOnce = false;
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        failDispatchOnce = true;
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        if (
+          failDispatchOnce &&
+          (partial.dispatchedStages?.includes('evaluator') ?? false) &&
+          !partial.steps.some((step) => step.stage === 'evaluator')
+        ) {
+          failDispatchOnce = false;
+          // First post-return dispatch write fails — simulate converts to a terminal burn.
+          throw new RetryableInfrastructureError('dispatch checkpoint store outage');
+        }
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    );
+    expect(models).toEqual(['test/evaluator']);
+    expect(first.error).toContain('already used this model step');
+    expect(first.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.error).toContain('already used this model step');
+  });
+  test('paid-step unpersisted errors survive a failing final checkpoint without rethrow', async () => {
+    const { PaidStepUnpersistedError, RetryableInfrastructureError } =
+      await import('@/lib/runtime/errors');
+    const models: string[] = [];
+    let durable: SimulationResult | undefined;
+    let burnSeen = false;
+    const first = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        throw new PaidStepUnpersistedError('evaluator');
+      },
+      async (partial) => {
+        if (partial.error?.includes('already used this model step')) {
+          burnSeen = true;
+          // Final burn checkpoint fails — must return without Retryable escape.
+          throw new RetryableInfrastructureError('final checkpoint store outage');
+        }
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2 },
+    );
+    expect(models).toEqual(['test/evaluator']);
+    expect(burnSeen).toBe(true);
+    expect(first.error).toContain('already used this model step');
+    expect(first.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+  });
+  test('ownership loss at checkpoint stops before the next model stage', async () => {
+    const { BudgetError } = await import('@/lib/budgets');
+    let calls = 0;
+    let checkpoints = 0;
+    const result = await simulate(
+      config,
+      'question',
+      async () => {
+        calls += 1;
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async () => {
+        checkpoints += 1;
+        // Allow reservation + post-return dispatch mark; revoke once the paid step is written.
+        if (checkpoints >= 3) throw new BudgetError('cancelled');
+      },
+    );
+    expect(calls).toBe(1);
+    expect(result.error).toBe(new BudgetError('cancelled').message);
+  });
+  test('retryable infrastructure errors propagate for queue retry', async () => {
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    await expect(
+      simulate(
+        config,
+        'question',
+        async () => {
+          throw new RetryableInfrastructureError('quota reservation db blip');
+        },
+        async () => {},
+      ),
+    ).rejects.toBeInstanceOf(RetryableInfrastructureError);
+  });
+  test('retryableStore wraps unexpected failures for policy persistence', async () => {
+    const { retryableStore, RetryableInfrastructureError, isRetryableInfrastructureError } =
+      await import('@/lib/runtime/errors');
+    const { BudgetError } = await import('@/lib/budgets');
+    await expect(
+      retryableStore(async () => {
+        throw new Error('connection reset');
+      }),
+    ).rejects.toBeInstanceOf(RetryableInfrastructureError);
+    await expect(
+      retryableStore(async () => {
+        throw new BudgetError('daily-requests');
+      }),
+    ).rejects.toBeInstanceOf(BudgetError);
+    try {
+      await retryableStore(async () => {
+        throw new Error('connection reset');
+      });
+    } catch (error) {
+      expect(isRetryableInfrastructureError(error)).toBe(true);
+    }
+  });
 });
 
 test('OpenRouter adapter sends credentials only as authorization and parses structured usage', async () => {
@@ -181,7 +574,7 @@ test('OpenRouter adapter sends credentials only as authorization and parses stru
                 finish_reason: 'stop',
               },
             ],
-            usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 },
+            usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30, cost: 0.1001 },
           }),
           { headers: { 'content-type': 'application/json' } },
         );
@@ -195,14 +588,73 @@ test('OpenRouter adapter sends credentials only as authorization and parses stru
       system: 'Instructions',
       input: 'Quoted input',
       signal: AbortSignal.timeout(1000),
+      quote: {
+        endpoint: 'test/variant',
+        upperBoundMicros: 200_000,
+        maxPrice: { prompt: 1, completion: 2, request: 0 },
+      },
     });
+    const routed = JSON.parse(body);
+    expect(routed.provider).toMatchObject({
+      only: ['test/variant'],
+      allow_fallbacks: false,
+      max_price: { prompt: 1, completion: 2, request: 0 },
+    });
+    expect(routed.usage).toEqual({ include: true });
     expect(authorization).toBe('Bearer test-secret-key');
     expect(body).not.toContain('test-secret-key');
     expect(result.inputTokens).toBe(20);
     expect(result.outputTokens).toBe(10);
+    expect(result.costMicros).toBe(100100);
     expect(result.decision.actions).toHaveLength(2);
     expect(transport).toHaveBeenCalledTimes(1);
   } finally {
     transport.mockRestore();
+  }
+});
+
+test('OpenRouter pricing needs an exact model and a compatible priced endpoint', async () => {
+  const { spyOn } = await import('bun:test');
+  const { openRouterInference } = await import('@/lib/runtime/openrouter');
+  const fetchMock = spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(
+      Response.json({
+        data: {
+          endpoints: [
+            {
+              tag: 'unsupported',
+              context_length: 1000,
+              pricing: { prompt: '0', completion: '0' },
+              supported_parameters: ['max_tokens'],
+            },
+            {
+              tag: 'missing-rate',
+              context_length: 1000,
+              pricing: { prompt: '0' },
+              supported_parameters: ['max_tokens', 'structured_outputs'],
+            },
+            {
+              tag: 'known/fp8',
+              context_length: 10_000,
+              pricing: { prompt: '0.000001', completion: '0.000002', request: '0.004' },
+              supported_parameters: ['max_tokens', 'structured_outputs'],
+            },
+          ],
+        },
+      }),
+    )
+    .mockResolvedValueOnce(Response.json({ data: { endpoints: [] } }));
+  try {
+    const call = openRouterInference('test-secret');
+    const signal = AbortSignal.timeout(1000);
+    expect(await call.quote?.('openrouter/auto:free', signal)).toBeUndefined();
+    expect(await call.quote?.('test/main', signal)).toMatchObject({
+      endpoint: 'known/fp8',
+      upperBoundMicros: 20_000,
+    });
+    expect(await call.quote?.('test/no-price', signal)).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    fetchMock.mockRestore();
   }
 });

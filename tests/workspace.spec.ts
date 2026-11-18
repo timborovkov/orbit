@@ -10,7 +10,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
   page,
 }) => {
   test.setTimeout(120000);
-  await sql`TRUNCATE simulation_runs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
   await page.goto('/login');
   await page.getByLabel(/^Email/).fill('admin@example.com');
   await page.getByLabel(/^Password/).fill('test-only-password-123456');
@@ -23,7 +23,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
     await page.getByLabel('Template', { exact: true }).selectOption({ label: template });
     await page.getByLabel(/^Name/).fill(name);
     await expect(page.getByLabel(/^Mission/)).not.toHaveValue('');
-    await page.getByRole('button', { name: 'Create paused agent' }).click();
+    await page.getByRole('button', { name: 'Create shadow agent' }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
   }
   await page.getByRole('link', { name: 'John', exact: true }).click();
@@ -108,15 +108,20 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await page.getByLabel('Configuration version').selectOption({ label: 'Version 1 · John' });
   await page.getByRole('tab', { name: 'Playground', exact: true }).click();
   await page.getByLabel(/^Post or question/).fill(input);
-  await page.getByRole('button', { name: 'Run simulation', exact: true }).click();
-  await expect(page.getByText('Run saved.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Queue simulation', exact: true }).click();
+  await expect(page.getByText('Simulation queued.', { exact: false })).toBeVisible();
   await expect(page.getByLabel('Configuration version').locator('option:checked')).toHaveText(
     'Version 1 · John',
   );
   await page.getByRole('tab', { name: /^History/ }).click();
+  await expect
+    .poll(async () => page.locator('#history .state-label').first().textContent(), {
+      timeout: 30000,
+    })
+    .toMatch(/failed|completed|interrupted/);
   await page.locator('.run-detail > summary').click();
   await expect(
-    page.locator('#history').getByText('Unable to complete inference.', { exact: false }),
+    page.locator('#history').getByText('No OpenRouter credential available.', { exact: false }),
   ).toBeVisible();
   await page.reload();
   await page.getByRole('tab', { name: /^History/ }).click();
@@ -184,15 +189,18 @@ test('template copies, independent versions, encrypted keys and durable manual r
   );
   await page.getByRole('tab', { name: 'Playground', exact: true }).click();
   await page.getByLabel(/^Post or question/).fill(input);
-  await page.getByRole('button', { name: 'Run simulation', exact: true }).click();
-  await expect(page.getByText('Run saved.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Queue simulation', exact: true }).click();
+  await expect(page.getByText('Simulation queued.', { exact: false })).toBeVisible();
   const versions =
     await sql`SELECT a.name,c.version,c.config FROM agents a JOIN agent_configurations c ON c.agent_id=a.id ORDER BY a.name,c.version`;
   expect(versions.map((v) => `${v.name}:${v.version}`)).toEqual(['John:1', 'John:2', 'Sarah:1']);
-  const saved =
-    await sql`SELECT r.input,r.status,c.version FROM simulation_runs r JOIN agent_configurations c ON c.id=r.configuration_id`;
-  expect(saved).toHaveLength(2);
-  expect(saved.every((r) => r.input === input && r.status === 'failed')).toBe(true);
+  await expect
+    .poll(async () => {
+      const rows =
+        await sql`SELECT r.input,r.status,c.version FROM simulation_runs r JOIN agent_configurations c ON c.id=r.configuration_id`;
+      return rows.length === 2 && rows.every((r) => r.input === input && r.status === 'failed');
+    })
+    .toBe(true);
   await page.getByRole('link', { name: 'All agents', exact: false }).click();
   await page.getByRole('link', { name: 'Templates', exact: true }).click();
   const support = page

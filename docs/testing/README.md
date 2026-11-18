@@ -51,8 +51,9 @@ workflow_dispatch E2E: Playwright E2E (any branch)
 - `production` is the protected release branch. Release through a PR from `main` to
   `production`, where the heavy CI runs. Those PRs require `Static checks`,
   `Full validation` (Docker image builds and container smoke tests),
-  `PostgreSQL integration` (migrated `orbit_test` and simulation persistence), and
-  `Playwright E2E`, with an up-to-date branch and resolved review threads.
+  `PostgreSQL integration` (migrated `orbit_test`: queue, simulation persistence and
+  worker/web integration), and `Playwright E2E`, with an up-to-date branch and
+  resolved review threads.
 - Heavy CI jobs also run on production pushes and on manual `CI` workflow
   dispatch. Superseded PR runs are cancelled.
 - Browser E2E runs on production PRs/pushes and on manual `E2E` workflow dispatch.
@@ -101,7 +102,9 @@ docker build -f docker/worker.Dockerfile -t orbit-worker:ci .
 # PostgreSQL integration
 docker compose exec postgres createdb -U orbit orbit_test
 DATABASE_URL=postgres://orbit:orbit_dev@localhost:5432/orbit_test bun run db:migrate
+bun run test:queue
 bun run test:simulation
+bun run test:integration
 
 # Playwright E2E (see docs/development.md for RustFS and disposable DB setup)
 bunx playwright install chromium
@@ -119,7 +122,11 @@ These checks apply when the named behavior changes, not to unrelated docs or CI
 routing edits.
 
 - Run `bun run test:unit` when auth/env parsing, simulation runtime logic without
-  persistence, or picture helpers change.
+  persistence, picture helpers, budgets, lifecycle, policy gateway or in-memory
+  queue logic change.
+- Run `bun run test:queue` / `bun run test:integration` when the durable job queue,
+  worker claim/lease path or web→worker enqueue path changes (requires migrated
+  `orbit_test`).
 - Run `bun run test:simulation` when simulation persistence, isolation, or shared
   runtime execution changes (requires migrated `orbit_test`).
 - Run `bun run test:e2e` after a production build when UI flows, auth sessions,

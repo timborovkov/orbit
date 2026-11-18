@@ -12,7 +12,7 @@ Set these variables on the web service:
 | `OPENROUTER_API_KEY`   | Optional. Default OpenRouter key for agents without a per-agent override.          |
 | `ORBIT_ENCRYPTION_KEY` | Optional until you save per-agent keys. Random 64-character hex master key.        |
 
-Set `OPENROUTER_API_KEY` when you want a deployment-wide OpenRouter default; agents may still store an encrypted override under **Access**. Set `ORBIT_ENCRYPTION_KEY` before saving those per-agent credentials. The environment default works without an encryption key because it is never written to PostgreSQL. No channel credentials are needed for manual simulation. OAuth and magic links are deferred. Password sessions expire after eight hours; rotating the password invalidates existing sessions. Login allows ten account-wide attempts per fifteen minutes.
+Set `OPENROUTER_API_KEY` when you want a deployment-wide OpenRouter default; agents may still store an encrypted override under **Access**. Set `ORBIT_ENCRYPTION_KEY` before saving those per-agent credentials. The environment default works without an encryption key because it is never written to PostgreSQL. Apply all pending migrations before deploying the web and worker together. No channel credentials are needed for manual simulation. OAuth and magic links are deferred. Password sessions expire after eight hours; rotating the password invalidates existing sessions. Login allows ten account-wide attempts per fifteen minutes.
 
 Before starting the web service, run `bun run db:migrate` from a source checkout against the target database. Migrations are transactional, advisory-locked and tracked in `orbit_migrations`; the standalone web image does not run them automatically.
 
@@ -23,7 +23,7 @@ docker build -f docker/web.Dockerfile -t orbit-web .
 docker build -f docker/worker.Dockerfile -t orbit-worker .
 ```
 
-The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker currently starts and waits for shutdown; it has no agent execution loop yet.
+The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker claims durable PostgreSQL jobs (simulation runs today), heartbeats leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
 
 If your package registry uses a private CA, pass its PEM file with `--secret id=npm_ca,src=/path/to/ca.pem` when building. The CA is mounted only for dependency installation and is not copied into the image. TLS verification remains enabled.
 
@@ -62,3 +62,16 @@ reference. Failed deletions produce an audit entry containing the object key for
 manual cleanup. A process crash between object upload and database commit can leave
 an unreferenced object; reconcile `agents/*/pictures/*` against `agents.picture_key`
 before deleting orphans. No storage cleanup worker is scheduled in this milestone.
+
+## Runtime telemetry
+
+Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` on the worker. Set
+`LANGFUSE_BASE_URL` to the project’s host if it differs from
+`https://cloud.langfuse.com`. The worker sends OpenTelemetry generation spans for
+the evaluator and main model to that project.
+
+Set `SENTRY_DSN` on both services to report server and worker failures. Worker
+inference events carry the Orbit run ID, the Langfuse trace ID when configured,
+and the failed stage’s duration. Both telemetry paths use an explicit metadata
+allowlist. Prompts, drafts, provider errors, headers and credentials stay in the
+application boundary. Set retention and access controls in the telemetry projects.

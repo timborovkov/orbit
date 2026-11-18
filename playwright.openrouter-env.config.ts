@@ -16,6 +16,7 @@ export default defineConfig({
     url: 'http://localhost:3003/login',
     reuseExistingServer: false,
     env: {
+      PORT: '3003',
       DATABASE_URL: 'postgres://orbit:orbit_dev@localhost:5432/orbit_test',
       APP_URL: 'http://localhost:3003',
       AUTH_DISABLED: 'false',

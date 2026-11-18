@@ -2,7 +2,12 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['foundation.spec.ts', 'workspace.spec.ts', 'pictures.spec.ts'],
+  testMatch: [
+    'foundation.spec.ts',
+    'workspace.spec.ts',
+    'pictures.spec.ts',
+    'runtime-safety.spec.ts',
+  ],
   workers: 1,
   use: {
     baseURL: 'http://localhost:3000',
@@ -11,7 +16,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'bun run --filter @orbit/web start',
+    command: 'bun scripts/playwright-stack.ts',
     url: 'http://localhost:3000/login',
     reuseExistingServer: false,
     env: {
@@ -28,6 +33,7 @@ export default defineConfig({
       OPENROUTER_API_KEY: '',
       ORBIT_ADMIN_EMAIL: 'admin@example.com',
       ORBIT_ADMIN_PASSWORD: 'test-only-password-123456',
+      ORBIT_WORKER_ID: 'playwright-worker',
     },
   },
 });

@@ -59,9 +59,20 @@ describe('local authentication configuration', () => {
   });
 });
 
-test('production server rejects bypass at startup before serving health', async () => {
+test('production boot rejects AUTH_DISABLED before serving', async () => {
+  // Exercise the same instrumentation guard Next runs at boot, without needing `next build`.
+  const instrumentation = new URL('../apps/web/src/instrumentation.ts', import.meta.url).pathname;
   const child = Bun.spawn(
-    [process.execPath, 'run', '--filter', '@orbit/web', 'start', '--port', '3002'],
+    [
+      process.execPath,
+      '--eval',
+      `
+        process.env.NEXT_RUNTIME = 'nodejs';
+        const { register } = await import(${JSON.stringify(instrumentation)});
+        await register();
+        console.log('UNEXPECTED_STILL_RUNNING');
+      `,
+    ],
     {
       cwd: new URL('../', import.meta.url).pathname,
       env: { ...process.env, ...local, NODE_ENV: 'production' },
@@ -69,7 +80,7 @@ test('production server rejects bypass at startup before serving health', async 
       stderr: 'pipe',
     },
   );
-  const timer = setTimeout(() => child.kill(), 15000);
+  const timer = setTimeout(() => child.kill(), 10000);
   try {
     const [status, stdout, stderr] = await Promise.all([
       child.exited,
@@ -78,14 +89,12 @@ test('production server rejects bypass at startup before serving health', async 
     ]);
     expect(status).toBe(1);
     expect(stdout + stderr).toContain('AUTH_DISABLED requires NODE_ENV=development');
-    await expect(
-      fetch('http://127.0.0.1:3002/health', { signal: AbortSignal.timeout(1000) }),
-    ).rejects.toThrow();
+    expect(stdout + stderr).not.toContain('UNEXPECTED_STILL_RUNNING');
   } finally {
     clearTimeout(timer);
     child.kill();
   }
-}, 20000);
+}, 15000);
 
 describe('password authentication configuration', () => {
   const production = {

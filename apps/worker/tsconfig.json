@@ -8,7 +8,7 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["../web/src/*"]
     }
   },
   "include": ["src/**/*.ts"]

@@ -34,12 +34,20 @@ bun run build
 bun run test:unit
 ```
 
-Validation includes formatting/import order, types, strict lint, unused code and React Doctor 100. Application imports use `@/*`; Prettier sorts imports automatically. Fast unit tests need no database.
+Validation includes formatting/import order, types, strict lint, unused code and React Doctor 100. Application imports use `@/*`; Prettier sorts imports automatically. Fast unit tests need no database: auth/env, pure simulation helpers, pictures, budgets, lifecycle, policy gateway and in-memory queue state transitions.
 
 Heavy suites (production PRs/pushes, or manual workflow dispatch): Docker image
-builds and smoke (`Full validation`), migrated `orbit_test` simulation
-(`PostgreSQL integration`), and Playwright (`Playwright E2E`). Prefer GitHub for
-those unless iterating locally.
+builds and smoke (`Full validation`), migrated `orbit_test` PostgreSQL suites
+(`test:queue`, `test:simulation`, worker integration), and Playwright
+(`Playwright E2E`). Prefer GitHub for those unless iterating locally.
+
+```sh
+bun run test:queue          # SKIP LOCKED, leases, retries, worker drain against orbit_test
+bun run test:simulation     # durable simulation persistence
+bun run test:integration    # queue + worker/web enqueue path + simulation persistence
+```
+
+Queue and integration suites need a migrated `orbit_test` database. Start the worker locally with `bun run --filter @orbit/worker dev` after migrations; it shares `apps/web/src/lib` modules through `@/*`.
 
 Browser tests use a **disposable `orbit_test` database and truncate its foundation tables**. They do not use the development `orbit` database:
 
@@ -52,6 +60,6 @@ bunx playwright install chromium
 bun run test:e2e
 ```
 
-The production-build suite checks password login, session revocation, throttling, PostgreSQL persistence, controls, themes and accessibility at five viewport widths. A separate OpenRouter environment-default suite starts the built app with `OPENROUTER_API_KEY` and checks Access tab source states. The development suite checks cookie-free local bypass and audit identity. Screenshots and failure evidence are written to ignored `test-results/`. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium installation.
+The production-build suite starts the web server and Bun worker together (`scripts/playwright-stack.ts`) so queued simulations complete. It checks password login, session revocation, throttling, PostgreSQL persistence, controls, themes and accessibility at five viewport widths. A separate OpenRouter environment-default suite starts the built app with `OPENROUTER_API_KEY` and checks Access tab source states. The development suite checks cookie-free local bypass and audit identity. Screenshots and failure evidence are written to ignored `test-results/`. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium installation.
 
 The profile-picture browser test uses the local Compose RustFS instance, stopping and starting it to verify storage failure handling and durable images. It requires the local-only storage credentials in `.env.example`; it never uses a remote bucket. Do not run PostgreSQL-mutating suites concurrently.

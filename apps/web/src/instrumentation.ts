@@ -16,3 +16,10 @@ export async function register() {
     }
   }
 }
+
+export async function onRequestError() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const { reportFailure } = await import('@/lib/runtime/telemetry');
+    await reportFailure('web.request');
+  }
+}

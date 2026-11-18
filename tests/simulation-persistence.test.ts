@@ -2,11 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, expect, test } from 'bun:test';
 import postgres from 'postgres';
 
+import { budgetDefaults } from '@/lib/budgets';
 import { executeSimulation } from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
 
 // Disposable PostgreSQL database only. Inference is deliberately mocked, never a live API call.
-const databaseUrl = 'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
+const databaseUrl =
+  process.env.TEST_DATABASE_URL ??
+  process.env.DATABASE_URL ??
+  'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
 process.env.DATABASE_URL = databaseUrl;
 process.env.APP_URL = 'http://localhost:3000';
 process.env.AUTH_DISABLED = 'false';
@@ -15,9 +19,14 @@ process.env.ORBIT_ADMIN_PASSWORD = 'test-only-password-123456';
 process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
 const sql = postgres(databaseUrl);
 const ids: string[] = [];
+const uncapped = { ...budgetDefaults, dailySpendCents: null, monthlySpendCents: null };
 afterAll(async () => {
   for (const id of ids) {
+    await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
+    await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
+    await sql`DELETE FROM usage_counters WHERE agent_id=${id}`;
     await sql`DELETE FROM simulation_runs WHERE agent_id=${id}`;
+    await sql`DELETE FROM jobs WHERE payload->>'agentId'=${id}`;
     await sql`DELETE FROM agent_credentials WHERE agent_id=${id}`;
     await sql`DELETE FROM agent_configurations WHERE agent_id=${id}`;
     await sql`DELETE FROM agents WHERE id=${id}`;
@@ -35,7 +44,7 @@ test('John and Sarah persist independent snapshots and distinct results across n
     ids.push(id);
     const [preset] = await sql`SELECT config FROM templates WHERE id=${template}`;
     const config = { ...preset.config, name, personality: `${name}'s independent voice` };
-    await sql`INSERT INTO agents(id,name,mission) VALUES (${id},${name},${config.mission})`;
+    await sql`INSERT INTO agents(id,name,mission,budgets) VALUES (${id},${name},${config.mission},${sql.json(uncapped)})`;
     const [version] =
       await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
     configurations.push(version.id);
@@ -47,7 +56,8 @@ test('John and Sarah persist independent snapshots and distinct results across n
         'bun',
         '--eval',
         `
-      import { executeSimulation } from './apps/web/src/lib/runtime/execute';
+      import { budgetDefaults } from '@/lib/budgets';
+import { executeSimulation } from './apps/web/src/lib/runtime/execute';
       const config = ${JSON.stringify(config)};
       const name = ${JSON.stringify(name)};
       const result = await executeSimulation(${JSON.stringify({ agentId: id, configurationId: version.id, actor: 'test', input })}, secret => async request => {
@@ -81,7 +91,7 @@ test('John and Sarah persist independent snapshots and distinct results across n
       actor: 'test',
       input,
     });
-    expect(mismatch.error).toBeDefined();
+    expect('error' in mismatch).toBe(true);
   } finally {
     await freshConnection.end();
   }
@@ -89,7 +99,7 @@ test('John and Sarah persist independent snapshots and distinct results across n
 test('missing keys, interruption recovery and concurrent claims are durable', async () => {
   const id = randomUUID();
   ids.push(id);
-  await sql`INSERT INTO agents(id,name,mission) VALUES (${id},'Test','Test')`;
+  await sql`INSERT INTO agents(id,name,mission,budgets) VALUES (${id},'Test','Test',${sql.json(uncapped)})`;
   const [v] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
   const params = { agentId: id, configurationId: v.id, actor: 'test', input: 'Question' };
@@ -122,7 +132,8 @@ test('missing keys, interruption recovery and concurrent claims are durable', as
   });
   await started;
   try {
-    expect((await executeSimulation(params)).error).toContain('already in progress');
+    const blocked = await executeSimulation(params);
+    expect('error' in blocked && blocked.error).toContain('concurrency limit');
   } finally {
     release();
     await first;
@@ -132,7 +143,7 @@ test('missing keys, interruption recovery and concurrent claims are durable', as
 test('environment OpenRouter default works without encryption or an agent credential', async () => {
   const id = randomUUID();
   ids.push(id);
-  await sql`INSERT INTO agents(id,name,mission) VALUES (${id},'EnvDefault','Use env key')`;
+  await sql`INSERT INTO agents(id,name,mission,budgets) VALUES (${id},'EnvDefault','Use env key',${sql.json(uncapped)})`;
   const [v] =
     await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) SELECT ${id},1,config,'test' FROM templates WHERE id='blank' RETURNING id`;
   const previousEncryption = process.env.ORBIT_ENCRYPTION_KEY;
@@ -151,7 +162,7 @@ test('environment OpenRouter default works without encryption or an agent creden
         };
       },
     );
-    expect(result.error).toBeUndefined();
+    expect('error' in result).toBe(false);
     const [run] = await sql`SELECT status, result FROM simulation_runs WHERE agent_id=${id}`;
     expect(run.status).toBe('completed');
     expect(JSON.stringify(run)).not.toContain('env-default-simulation-secret');

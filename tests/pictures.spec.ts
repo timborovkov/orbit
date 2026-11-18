@@ -20,7 +20,7 @@ test('private agent pictures survive RustFS restart, preserve edits and support 
     S3_ACCESS_KEY_ID: 'orbit_local',
     S3_SECRET_ACCESS_KEY: 'orbit_local_storage_only',
   });
-  await sql`TRUNCATE simulation_runs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
   await page.goto('/login');
   await page.getByLabel(/^Email/).fill('admin@example.com');
   await page.getByLabel(/^Password/).fill('test-only-password-123456');
@@ -31,7 +31,7 @@ test('private agent pictures survive RustFS restart, preserve edits and support 
       .getByLabel('Template', { exact: true })
       .selectOption({ label: name === 'John' ? 'Sales and GTM' : 'Customer Support' });
     await page.getByLabel(/^Name/).fill(name);
-    await page.getByRole('button', { name: 'Create paused agent' }).click();
+    await page.getByRole('button', { name: 'Create shadow agent' }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
   }
   await page.getByRole('link', { name: 'John', exact: true }).click();
