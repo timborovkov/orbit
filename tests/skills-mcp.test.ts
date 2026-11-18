@@ -387,13 +387,13 @@ afterAll(() => {
 });
 
 test('MCP HTTP tools execute through policy and bound a stalled session close', async () => {
-  const closing = { session: null as string | null };
+  const closingSessions: (string | null)[] = [];
   fakeServer = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       if (request.method === 'DELETE') {
-        closing.session = request.headers.get('mcp-session-id');
+        closingSessions.push(request.headers.get('mcp-session-id'));
         return await new Promise<Response>(() => {});
       }
       if (request.method !== 'POST') return new Response('method', { status: 405 });
@@ -489,7 +489,7 @@ test('MCP HTTP tools execute through policy and bound a stalled session close', 
     content: [{ type: 'text', text: 'orbit' }],
   });
   await close();
-  expect(closing.session).toBe('http-fixture-session');
+  expect(closingSessions).toEqual(['http-fixture-session']);
 });
 
 test('tool step gate blocks further MCP and skill calls once exhausted', async () => {
