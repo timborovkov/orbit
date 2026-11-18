@@ -12,6 +12,7 @@ import {
   persistAgentMcpConnections,
   persistMcpConnection,
 } from '@/lib/server/mcp-mutations';
+import { resolveMcpDiscoverHeaders } from '@/lib/server/mcp-queries';
 
 const uuid = z.uuid();
 
@@ -79,6 +80,8 @@ export async function saveAgentMcpConnections(form: FormData) {
 const discoverInput = z.object({
   url: z.url().max(2000),
   transport: z.enum(['http', 'sse']),
+  connectionId: uuid.optional(),
+  clearHeaders: z.boolean().optional(),
   headers: z
     .array(
       z.object({
@@ -90,10 +93,12 @@ const discoverInput = z.object({
     .optional(),
 });
 
-/** Probe a remote MCP server for tool names using draft form credentials. */
+/** Probe a remote MCP server for tool names using draft or stored credentials. */
 export async function discoverMcpTools(input: {
   url: string;
   transport: 'http' | 'sse';
+  connectionId?: string;
+  clearHeaders?: boolean;
   headers?: { key: string; value: string }[];
 }): Promise<{ tools: string[] } | { error: string }> {
   await checkOrigin();
@@ -101,11 +106,11 @@ export async function discoverMcpTools(input: {
   const parsed = discoverInput.safeParse(input);
   if (!parsed.success) return { error: 'Provide a valid URL, transport and header rows.' };
 
-  const headers: Record<string, string> = {};
-  for (const row of parsed.data.headers ?? []) {
-    const value = row.value.trim();
-    if (value) headers[row.key.trim()] = value;
-  }
+  const headers = await resolveMcpDiscoverHeaders({
+    connectionId: parsed.data.connectionId,
+    clearHeaders: parsed.data.clearHeaders,
+    draftHeaders: parsed.data.headers,
+  });
 
   let client: Awaited<ReturnType<typeof createMCPClient>> | undefined;
   try {
@@ -113,7 +118,7 @@ export async function discoverMcpTools(input: {
       transport: {
         type: parsed.data.transport,
         url: parsed.data.url,
-        headers: Object.keys(headers).length ? headers : undefined,
+        headers,
       },
       protocolVersionDiscovery: false,
     });

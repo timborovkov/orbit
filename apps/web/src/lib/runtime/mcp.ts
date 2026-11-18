@@ -58,7 +58,30 @@ export function mcpToolAlias(connectionName: string, toolName: string) {
   return `${prefix}${head}${suffix}`;
 }
 
-function decodeHeaders(connectionId: string, encryptedHeaders: string | null) {
+/**
+ * Prefer draft header rows; otherwise reuse stored headers unless clearing.
+ * Callers that load stored headers must keep them server-side only.
+ */
+export function selectMcpDiscoverHeaders(input: {
+  draftHeaders?: { key: string; value: string }[];
+  clearHeaders?: boolean;
+  storedHeaders?: Record<string, string>;
+}): Record<string, string> | undefined {
+  const draft: Record<string, string> = {};
+  for (const row of input.draftHeaders ?? []) {
+    const key = row.key.trim();
+    const value = row.value.trim();
+    if (key && value) draft[key] = value;
+  }
+  if (Object.keys(draft).length) return draft;
+  if (input.clearHeaders) return undefined;
+  return input.storedHeaders && Object.keys(input.storedHeaders).length
+    ? input.storedHeaders
+    : undefined;
+}
+
+/** Decrypt stored MCP auth headers. Never return ciphertext or secrets to the browser. */
+export function decodeMcpHeaders(connectionId: string, encryptedHeaders: string | null) {
   if (!encryptedHeaders) return undefined;
   try {
     const raw = decryptSecret(connectionId, encryptedHeaders);
@@ -80,7 +103,7 @@ export async function connectMcpClient(
   connection: McpConnectionConfig,
   signal?: AbortSignal,
 ): Promise<MCPClient> {
-  const headers = decodeHeaders(connection.id, connection.encryptedHeaders);
+  const headers = decodeMcpHeaders(connection.id, connection.encryptedHeaders);
   return await createMCPClient({
     transport: {
       type: connection.transport,

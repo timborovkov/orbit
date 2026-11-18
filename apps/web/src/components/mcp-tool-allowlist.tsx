@@ -51,6 +51,8 @@ export function McpToolAllowlist({
       const result = await discoverMcpTools({
         url: editor.url,
         transport: editor.transport,
+        connectionId: editor.connectionId,
+        clearHeaders: editor.clearHeaders,
         headers: editor.headers.filter((row: HeaderRow) => row.key.trim() && row.value.trim()),
       });
       if ('error' in result) {

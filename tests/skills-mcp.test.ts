@@ -5,11 +5,14 @@ import { normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
 import { evaluateActionForTest } from '@/lib/policy/gateway';
 import {
   connectMcpClient,
+  decodeMcpHeaders,
   loadMcpToolsForAgent,
   mcpToolAlias,
   mcpToolId,
+  selectMcpDiscoverHeaders,
   type McpConnectionConfig,
 } from '@/lib/runtime/mcp';
+import { encryptSecret } from '@/lib/runtime/secrets';
 import {
   createLoadSkillTool,
   formatSkillCatalog,
@@ -60,6 +63,40 @@ test('MCP allowlist normalization keeps legacy strings mutating', () => {
     { name: 'get', readOnly: true },
   ]);
   expect(normalizeMcpAllowlist([])).toBeNull();
+});
+
+test('Fetch tools reuses stored headers unless draft rows or clear win', () => {
+  const previous = process.env.ORBIT_ENCRYPTION_KEY;
+  process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
+  try {
+    const connectionId = '00000000-0000-4000-8000-0000000000aa';
+    const stored = decodeMcpHeaders(
+      connectionId,
+      encryptSecret(connectionId, JSON.stringify({ Authorization: 'Bearer stored' })),
+    );
+    expect(stored).toEqual({ Authorization: 'Bearer stored' });
+    expect(
+      selectMcpDiscoverHeaders({
+        draftHeaders: [{ key: '', value: '' }],
+        storedHeaders: stored,
+      }),
+    ).toEqual({ Authorization: 'Bearer stored' });
+    expect(
+      selectMcpDiscoverHeaders({
+        draftHeaders: [{ key: 'Authorization', value: 'Bearer draft' }],
+        storedHeaders: stored,
+      }),
+    ).toEqual({ Authorization: 'Bearer draft' });
+    expect(
+      selectMcpDiscoverHeaders({
+        clearHeaders: true,
+        storedHeaders: stored,
+      }),
+    ).toBeUndefined();
+  } finally {
+    if (previous) process.env.ORBIT_ENCRYPTION_KEY = previous;
+    else delete process.env.ORBIT_ENCRYPTION_KEY;
+  }
 });
 
 test('skill catalogue exposes names and descriptions only', () => {
