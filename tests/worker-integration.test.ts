@@ -247,6 +247,64 @@ test('reused quota reservations settle on the original accounting day', async ()
   }
 });
 
+test('top-ups validate spend against the reservation accounting period', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const budgets = {
+    ...uncapped,
+    dailyRequests: 5,
+    monthlyRequests: 5,
+    dailySpendCents: 1,
+    monthlySpendCents: 1,
+  };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'QuotaTopUpPeriod','Mission','shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const [version] = await sql`INSERT INTO agent_configurations(agent_id,version,config,actor)
+      SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
+  const token = randomUUID();
+  const originalDay = '2026-11-16';
+  const [run] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token)
+    VALUES (
+      ${id},
+      ${version.id},
+      'quota top up period',
+      'running',
+      ${sql.json({
+        steps: [],
+        actions: [],
+        error: null,
+        quotaReservations: [
+          { stage: 'evaluator', reservedMicros: '9000', periodStart: originalDay },
+        ],
+      })},
+      'test@example.com',
+      ${new Date(Date.now() + 120_000)},
+      ${token}
+    )
+    RETURNING id
+  `;
+  await sql`
+    INSERT INTO usage_counters(agent_id,period,period_start,spend_micros,requests)
+    VALUES
+      (${id},'day',${originalDay},9000,1),
+      (${id},'month','2026-11-01',9000,1)
+  `;
+  await expect(
+    reserveRequestQuota(id, 11000, {
+      runId: run.id,
+      token,
+      signal: AbortSignal.timeout(5_000),
+      stage: 'evaluator',
+    }),
+  ).rejects.toBeInstanceOf(BudgetError);
+  const [original] =
+    await sql`SELECT spend_micros::text AS spend FROM usage_counters WHERE agent_id=${id} AND period='day' AND period_start=${originalDay}`;
+  expect(original.spend).toBe('9000');
+});
+
 test('reused quota reservations top up spend when the quote grows', async () => {
   const id = randomUUID();
   ids.push(id);
