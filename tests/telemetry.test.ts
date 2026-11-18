@@ -4,6 +4,12 @@ import { parseEnv } from '@/lib/env';
 import { parseObservabilityEnv } from '@/lib/observability/env';
 import { reportFailure } from '@/lib/observability/errors';
 import {
+  applyOpenRouterCostToSpan,
+  generationCostAttributes,
+  langfuseMetadataAttributes,
+  openRouterCostUsd,
+} from '@/lib/observability/langfuse-attributes';
+import {
   redactSentryEvent,
   redactString,
   redactValue,
@@ -325,6 +331,17 @@ describe('run spans', () => {
       async () => 'ok',
     );
     await telemetry.withSpan(
+      'orbit.tool',
+      {
+        tool: 'reply',
+        stage: 'main',
+        policy_decision: 'suppressed',
+        run_id: runId,
+        agent_id: agentId,
+      },
+      async () => 'ok',
+    );
+    await telemetry.withSpan(
       'orbit.budget',
       { stage: 'evaluator', budget_violation: 'daily-requests', run_id: runId },
       async () => 'ok',
@@ -343,6 +360,7 @@ describe('run spans', () => {
     expect(serialized).toContain('orbit.run');
     expect(serialized).toContain('orbit.evaluator');
     expect(serialized).toContain('orbit.policy');
+    expect(serialized).toContain('orbit.tool');
     expect(serialized).toContain('orbit.budget');
     expect(serialized).toContain(runId);
     expect(serialized).toContain(agentId);
@@ -350,20 +368,71 @@ describe('run spans', () => {
     expect(serialized).toContain('test/model');
     expect(serialized).toContain('0.0025');
     expect(serialized).not.toContain('langfuse.observation.usage_details');
-    expect(serialized).not.toContain('langfuse.observation.cost_details');
     expect(serialized).not.toMatch(/PRIVATE_|sk-or-|Bearer /);
-    expect(
-      spans.find((span) => span.name === 'orbit.evaluator')?.attributes[
-        'langfuse.observation.type'
-      ],
-    ).toBe('span');
+    const evaluator = spans.find((span) => span.name === 'orbit.evaluator');
+    expect(evaluator?.attributes['langfuse.observation.type']).toBe('span');
+    expect(evaluator?.attributes['langfuse.observation.cost_details']).toBeUndefined();
+    expect(evaluator?.attributes['gen_ai.usage.cost']).toBeUndefined();
+    expect(evaluator?.attributes['langfuse.observation.metadata.orbit.run_id']).toBe(
+      JSON.stringify(runId),
+    );
+    expect(evaluator?.attributes['langfuse.observation.metadata.orbit.cost_usd']).toBe(
+      JSON.stringify(0.0025),
+    );
     const root = spans.find((span) => span.name === 'orbit.run');
+    expect(root?.attributes['langfuse.trace.metadata.orbit.run_id']).toBe(JSON.stringify(runId));
+    expect(root?.attributes['langfuse.observation.metadata.orbit.agent_id']).toBe(
+      JSON.stringify(agentId),
+    );
     const rootId = root?.spanContext().spanId;
     expect(rootId).toBeDefined();
-    for (const name of ['orbit.evaluator', 'orbit.policy', 'orbit.budget']) {
+    for (const name of ['orbit.evaluator', 'orbit.policy', 'orbit.tool', 'orbit.budget']) {
       const child = spans.find((span) => span.name === name);
       expect(child?.parentSpanContext?.spanId).toBe(rootId);
+      expect(child?.attributes['langfuse.observation.metadata.orbit.run_id']).toBe(
+        JSON.stringify(runId),
+      );
     }
+    expect(
+      spans.find((span) => span.name === 'orbit.policy')?.attributes[
+        'langfuse.observation.status_message'
+      ],
+    ).toBe('policy:suppressed');
+    expect(
+      spans.find((span) => span.name === 'orbit.tool')?.attributes['langfuse.observation.level'],
+    ).toBe('WARNING');
+    const budget = spans.find((span) => span.name === 'orbit.budget');
+    expect(budget?.attributes['langfuse.observation.level']).toBe('ERROR');
+    expect(budget?.attributes['langfuse.observation.status_message']).toBe('budget:daily-requests');
+  });
+
+  test('maps OpenRouter cost onto Langfuse generation attributes', () => {
+    expect(generationCostAttributes(0.0025)).toEqual({
+      'gen_ai.usage.cost': 0.0025,
+      'langfuse.observation.cost_details': JSON.stringify({ total: 0.0025 }),
+    });
+    expect(
+      openRouterCostUsd({
+        providerMetadata: { openrouter: { usage: { cost: 0.0025 } } },
+      }),
+    ).toBe(0.0025);
+    const recorded: Record<string, string | number> = {};
+    applyOpenRouterCostToSpan(
+      {
+        setAttribute(key, value) {
+          recorded[key] = value;
+        },
+      },
+      { openrouter: { usage: { cost: 0.0025 } } },
+    );
+    expect(recorded).toEqual({
+      'gen_ai.usage.cost': 0.0025,
+      'langfuse.observation.cost_details': JSON.stringify({ total: 0.0025 }),
+    });
+    expect(langfuseMetadataAttributes({ 'orbit.run_id': runId, 'orbit.stage': 'main' })).toEqual({
+      'langfuse.observation.metadata.orbit.run_id': JSON.stringify(runId),
+      'langfuse.observation.metadata.orbit.stage': JSON.stringify('main'),
+    });
   });
 
   test('does not re-run a failed model call when Langfuse wrapping fails', async () => {

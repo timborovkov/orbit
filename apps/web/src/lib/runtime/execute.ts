@@ -430,6 +430,7 @@ async function processSimulationRun(
     trigger: 'playground',
   });
   let didComplete = false;
+  let statusMessage: string | undefined;
   try {
     const credential = (
       await db().select().from(credentials).where(eq(credentials.agentId, run.agentId))
@@ -620,6 +621,7 @@ async function processSimulationRun(
     );
 
     const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
+    if (result.error && isTrustedBudgetMessage(result.error)) statusMessage = result.error;
     await retryableStore(() =>
       updateIfOwned(run.id, executionToken, {
         status: terminalStatus,
@@ -652,6 +654,7 @@ async function processSimulationRun(
     if (isBudgetError(error)) {
       inspectable = error.message;
       isBudget = true;
+      statusMessage = `budget:${error.kind}`;
     } else if (error instanceof Error && error.message === 'Missing OpenRouter credential') {
       inspectable =
         'No OpenRouter credential available. Save an agent key under Access or set OPENROUTER_API_KEY on the server.';
@@ -672,7 +675,7 @@ async function processSimulationRun(
         ),
       );
   } finally {
-    await telemetry.finish(!didComplete);
+    await telemetry.finish(!didComplete, statusMessage);
   }
 }
 

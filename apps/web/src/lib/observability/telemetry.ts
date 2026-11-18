@@ -8,12 +8,18 @@ import {
 } from '@opentelemetry/sdk-trace-base';
 import type { TelemetryOptions } from 'ai';
 
+import { isBudgetError } from '@/lib/budgets';
 import {
   observabilityEnvironment,
   parseObservabilityEnv,
   type ObservabilityEnv,
 } from '@/lib/observability/env';
 import { reportFailure, type FailureCorrelation } from '@/lib/observability/errors';
+import {
+  applyOpenRouterCostToSpan,
+  langfuseBlockedStatus,
+  langfuseMetadataAttributes,
+} from '@/lib/observability/langfuse-attributes';
 import { redactValue, safeOrbitTags } from '@/lib/observability/redact';
 import type { ModelCall } from '@/lib/runtime/simulation';
 
@@ -186,12 +192,23 @@ async function aiSdkTelemetry(functionId: string): Promise<TelemetryOptions | un
   try {
     const { LangfuseVercelAiSdkIntegration } = await import('@langfuse/vercel-ai-sdk');
     const tracer = await getTracer();
+    const integration = new LangfuseVercelAiSdkIntegration(tracer ? { tracer } : undefined);
+    const executeLanguageModelCall = integration.executeLanguageModelCall.bind(integration);
+    integration.executeLanguageModelCall = ({ callId, execute }) =>
+      executeLanguageModelCall({
+        callId,
+        execute: async () => {
+          const result = await execute();
+          applyOpenRouterCostToSpan(trace.getActiveSpan(), result);
+          return result;
+        },
+      });
     return {
       isEnabled: true,
       recordInputs: captureContent,
       recordOutputs: captureContent,
       functionId,
-      integrations: [new LangfuseVercelAiSdkIntegration(tracer ? { tracer } : undefined)],
+      integrations: [integration],
     };
   } catch (error) {
     swallow('Langfuse AI SDK integration failed', error);
@@ -201,6 +218,21 @@ async function aiSdkTelemetry(functionId: string): Promise<TelemetryOptions | un
       recordOutputs: captureContent,
       functionId,
     };
+  }
+}
+
+function applyBlockedStatus(
+  span: {
+    setAttribute(key: string, value: string): void;
+    setStatus(status: { code: number; message?: string }): void;
+  },
+  status: { level: 'WARNING' | 'ERROR'; message: string } | undefined,
+) {
+  if (!status) return;
+  span.setAttribute('langfuse.observation.level', status.level);
+  span.setAttribute('langfuse.observation.status_message', status.message);
+  if (status.level === 'ERROR') {
+    span.setStatus({ code: SpanStatusCode.ERROR, message: status.message });
   }
 }
 
@@ -243,6 +275,7 @@ export function createRunTelemetry(run: RunTelemetryContext) {
         {
           attributes: {
             ...tags,
+            ...langfuseMetadataAttributes(tags, 'both'),
             'langfuse.observation.type': 'agent',
             'langfuse.trace.name': 'orbit.run',
             'langfuse.environment': observabilityEnvironment(),
@@ -292,11 +325,32 @@ export function createRunTelemetry(run: RunTelemetryContext) {
     const tracer = await getTracer();
     if (!tracer) return await fn();
     const parent = runContext();
-    const span = tracer.startSpan(name, { attributes: safeOrbitTags(attributes) }, parent);
+    const tags = safeOrbitTags(attributes);
+    const span = tracer.startSpan(
+      name,
+      {
+        attributes: {
+          ...tags,
+          ...langfuseMetadataAttributes(tags),
+        },
+      },
+      parent,
+    );
+    applyBlockedStatus(span, langfuseBlockedStatus(attributes));
     try {
-      return await context.with(trace.setSpan(parent, span), async () => await fn());
+      const result = await context.with(trace.setSpan(parent, span), async () => await fn());
+      applyBlockedStatus(span, langfuseBlockedStatus(attributes, result));
+      return result;
     } catch (error) {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: 'failed' });
+      if (isBudgetError(error)) {
+        const message = `budget:${error.kind}`;
+        span.setAttribute('langfuse.observation.level', 'ERROR');
+        span.setAttribute('langfuse.observation.status_message', message);
+        span.setAttributes(langfuseMetadataAttributes({ 'orbit.budget_violation': error.kind }));
+        span.setStatus({ code: SpanStatusCode.ERROR, message });
+      } else {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: 'failed' });
+      }
       throw error;
     } finally {
       span.end();
@@ -308,11 +362,13 @@ export function createRunTelemetry(run: RunTelemetryContext) {
     const stage = request.stage ?? 'main';
     return await inRunContext(async () => {
       const tracer = await getTracer();
+      const modelTags = safeOrbitTags({ stage, agent_id: run.agentId, run_id: run.runId });
       const span = tracer?.startSpan(
         `orbit.${stage}`,
         {
           attributes: {
-            ...safeOrbitTags({ stage, agent_id: run.agentId, run_id: run.runId }),
+            ...modelTags,
+            ...langfuseMetadataAttributes(modelTags),
             'langfuse.observation.type': 'span',
             ...(/^[\w.-]+\/[\w.:-]+$/.test(request.model)
               ? { 'langfuse.observation.model.name': request.model }
@@ -330,6 +386,15 @@ export function createRunTelemetry(run: RunTelemetryContext) {
         span?.setAttribute('orbit.duration_ms', Math.round(performance.now() - start));
         span?.setAttribute('orbit.input_tokens', response.inputTokens);
         span?.setAttribute('orbit.output_tokens', response.outputTokens);
+        span?.setAttributes(
+          langfuseMetadataAttributes({
+            'orbit.input_tokens': response.inputTokens,
+            'orbit.output_tokens': response.outputTokens,
+            ...(response.costMicros === undefined
+              ? {}
+              : { 'orbit.cost_usd': response.costMicros / 1_000_000 }),
+          }),
+        );
         if (response.costMicros !== undefined) {
           span?.setAttribute('orbit.cost_usd', response.costMicros / 1_000_000);
         }
@@ -368,11 +433,15 @@ export function createRunTelemetry(run: RunTelemetryContext) {
     recordScore: (score: ScoreInput) => {
       recordLangfuseScore(score);
     },
-    finish: async (failed: boolean) => {
+    finish: async (failed: boolean, statusMessage?: string) => {
       try {
         await ready;
-        if (failed)
-          root?.setStatus({ code: SpanStatusCode.ERROR, message: 'Run did not complete' });
+        if (failed) {
+          const message = statusMessage ?? 'Run did not complete';
+          root?.setAttribute('langfuse.observation.level', 'ERROR');
+          root?.setAttribute('langfuse.observation.status_message', message);
+          root?.setStatus({ code: SpanStatusCode.ERROR, message });
+        }
         root?.end();
       } catch (error) {
         swallow('Langfuse run span finish failed', error);
