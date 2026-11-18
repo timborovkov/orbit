@@ -26,20 +26,44 @@ describe('playground attachment gate', () => {
 });
 
 describe('playground queue refresh', () => {
-  test('detects the streamed queue acknowledgement', () => {
+  test('detects the streamed queue acknowledgement for the current submission', () => {
     expect(
       playgroundMessagesAcknowledgeQueue([
-        { parts: [{ type: 'text', text: 'Simulation queued. Waiting for the worker…' }] },
+        { role: 'user', parts: [{ type: 'text', text: 'Help me' }] },
+        {
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'Simulation queued. Waiting for the worker…' }],
+        },
       ]),
     ).toBe(true);
-    expect(playgroundMessagesAcknowledgeQueue([{ parts: [{ type: 'text', text: 'Hello' }] }])).toBe(
-      false,
-    );
+    expect(
+      playgroundMessagesAcknowledgeQueue([
+        { role: 'user', parts: [{ type: 'text', text: 'Help me' }] },
+        { role: 'assistant', parts: [{ type: 'text', text: 'Hello' }] },
+      ]),
+    ).toBe(false);
   });
 
-  test('refreshes once per busy cycle when the queue is acknowledged', () => {
+  test('ignores a prior run ack when a new user message has no assistant reply yet', () => {
+    expect(
+      playgroundMessagesAcknowledgeQueue([
+        { role: 'user', parts: [{ type: 'text', text: 'First' }] },
+        {
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'Simulation queued. Waiting for the worker…' }],
+        },
+        { role: 'user', parts: [{ type: 'text', text: 'Second' }] },
+      ]),
+    ).toBe(false);
+  });
+
+  test('refreshes once per busy cycle when the current queue ack arrives', () => {
     const messages = [
-      { parts: [{ type: 'text', text: 'Simulation queued. Waiting for the worker…' }] },
+      { role: 'user', parts: [{ type: 'text', text: 'Help me' }] },
+      {
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'Simulation queued. Waiting for the worker…' }],
+      },
     ];
     expect(
       shouldRefreshWorkspaceForQueuedRun({ busy: true, alreadyRefreshed: false, messages }),

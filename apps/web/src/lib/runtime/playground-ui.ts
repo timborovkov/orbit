@@ -11,28 +11,46 @@ export function playgroundAttachmentRejection(
   return PLAYGROUND_ATTACHMENTS_UNSUPPORTED;
 }
 
-/** True when streamed assistant text acknowledges that the durable job is queued. */
-export function playgroundMessagesAcknowledgeQueue(
-  messages: { parts?: { type: string; text?: string }[] }[],
-): boolean {
-  return messages.some((message) =>
-    (message.parts ?? []).some(
-      (part) =>
-        part.type === 'text' &&
-        typeof part.text === 'string' &&
-        part.text.startsWith('Simulation queued'),
-    ),
+function messageHasQueueAck(message: { parts?: { type: string; text?: string }[] }): boolean {
+  return (message.parts ?? []).some(
+    (part) =>
+      part.type === 'text' &&
+      typeof part.text === 'string' &&
+      part.text.startsWith('Simulation queued'),
   );
 }
 
 /**
+ * True when the *current* submission's assistant reply acknowledges the queue.
+ * Only inspects messages after the latest user turn so a prior run's ack cannot
+ * fire a refresh for a new submission.
+ */
+export function playgroundMessagesAcknowledgeQueue(
+  messages: { role?: string; parts?: { type: string; text?: string }[] }[],
+): boolean {
+  let lastUserIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user') {
+      lastUserIndex = i;
+      break;
+    }
+  }
+  if (lastUserIndex < 0) return false;
+
+  return messages.slice(lastUserIndex + 1).some((message) => {
+    if (message.role && message.role !== 'assistant') return false;
+    return messageHasQueueAck(message);
+  });
+}
+
+/**
  * Whether the workspace should soft-refresh for a newly queued run.
- * Refreshes once per busy cycle when the queue acknowledgement arrives.
+ * Refreshes once per busy cycle when the current submission's queue ack arrives.
  */
 export function shouldRefreshWorkspaceForQueuedRun(options: {
   busy: boolean;
   alreadyRefreshed: boolean;
-  messages: { parts?: { type: string; text?: string }[] }[];
+  messages: { role?: string; parts?: { type: string; text?: string }[] }[];
 }): boolean {
   if (!options.busy || options.alreadyRefreshed) return false;
   return playgroundMessagesAcknowledgeQueue(options.messages);
