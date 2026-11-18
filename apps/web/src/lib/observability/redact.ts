@@ -86,6 +86,31 @@ export function redactString(value: string) {
   return value.replace(secretValue, REDACTED);
 }
 
+const sqlParamsSection = /(?:^|\n)params:\s*[\s\S]*$/i;
+
+/**
+ * Strip SQL bind parameters and oversized payloads from exception text.
+ * DrizzleQueryError embeds query params (including saved prompts) in `message`.
+ */
+function sanitizeExceptionMessage(value: string) {
+  let message = sqlParamsSection.test(value)
+    ? value.replace(sqlParamsSection, '\nparams: [redacted]')
+    : value;
+  message = redactString(message);
+  if (message.length > 200) return `${message.slice(0, 180)} [redacted]`;
+  return message;
+}
+
+function dropSqlParamKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((entry) => dropSqlParamKeys(entry));
+  if (!isPlainObject(value)) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value)) {
+    result[key] = key.toLowerCase() === 'params' ? REDACTED : dropSqlParamKeys(nested);
+  }
+  return result;
+}
+
 /**
  * Recursively redact secrets from JSON-like values. Prompt/model content is
  * stripped unless `captureContent` is true; secret keys and values are always
@@ -175,7 +200,7 @@ const droppedRequestHeaders = new Set([
 function redactCrumb<T extends { message?: string; data?: unknown }>(crumb: T): T {
   return {
     ...crumb,
-    message: crumb.message ? redactString(crumb.message) : crumb.message,
+    message: crumb.message ? sanitizeExceptionMessage(crumb.message) : crumb.message,
     data: crumb.data ? redactValue(crumb.data, { captureContent: false }) : crumb.data,
   };
 }
@@ -204,13 +229,19 @@ export function redactSentryEvent<T extends SentryLikeEvent>(event: T): T {
   }
   return {
     ...event,
-    message: event.message ? redactString(event.message) : event.message,
+    message: event.message ? sanitizeExceptionMessage(event.message) : event.message,
     user: undefined,
     extra: event.extra
-      ? (redactValue(event.extra, { captureContent: false }) as Record<string, unknown>)
+      ? (dropSqlParamKeys(redactValue(event.extra, { captureContent: false })) as Record<
+          string,
+          unknown
+        >)
       : undefined,
     contexts: event.contexts
-      ? (redactValue(event.contexts, { captureContent: false }) as Record<string, unknown>)
+      ? (dropSqlParamKeys(redactValue(event.contexts, { captureContent: false })) as Record<
+          string,
+          unknown
+        >)
       : undefined,
     tags,
     request: event.request
@@ -228,7 +259,7 @@ export function redactSentryEvent<T extends SentryLikeEvent>(event: T): T {
       ? {
           values: (event.exception.values ?? []).map((item) => ({
             ...item,
-            value: item.value ? redactString(item.value) : item.value,
+            value: item.value ? sanitizeExceptionMessage(item.value) : item.value,
           })),
         }
       : undefined,
@@ -238,8 +269,8 @@ export function redactSentryEvent<T extends SentryLikeEvent>(event: T): T {
 /** Replace secret-bearing or oversized error messages while keeping stack frames. */
 export function sanitizeError(error: unknown, fallback: string): Error {
   if (!(error instanceof Error)) return new Error(fallback);
-  const redacted = redactString(error.message);
-  if (redacted !== error.message || error.message.length > 200 || secretKey.test(error.message)) {
+  const redacted = sanitizeExceptionMessage(error.message);
+  if (redacted !== error.message || secretKey.test(error.message)) {
     const sanitized = new Error(fallback);
     sanitized.name = error.name;
     sanitized.stack = error.stack;

@@ -18,6 +18,7 @@
     "@langfuse/vercel-ai-sdk": "^6.1.1",
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/context-async-hooks": "^2.12.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.301.2",
     "@opentelemetry/sdk-trace-base": "^2.12.1",
     "@radix-ui/react-slot": "^1.5.0",

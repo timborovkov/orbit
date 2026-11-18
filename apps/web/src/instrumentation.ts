@@ -20,6 +20,8 @@ export async function register() {
 
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     await import('@/sentry.server.config');
+    const { ensureTelemetryContext } = await import('@/lib/observability/telemetry');
+    ensureTelemetryContext();
   }
 
   if (process.env.NEXT_RUNTIME === 'edge') {

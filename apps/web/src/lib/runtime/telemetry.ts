@@ -1,2 +1,6 @@
 export { reportFailure } from '@/lib/observability/errors';
-export { createRunTelemetry, shutdownTelemetry } from '@/lib/observability/telemetry';
+export {
+  createRunTelemetry,
+  ensureTelemetryContext,
+  shutdownTelemetry,
+} from '@/lib/observability/telemetry';

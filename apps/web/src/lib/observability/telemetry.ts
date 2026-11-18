@@ -1,4 +1,5 @@
 import { context, ROOT_CONTEXT, SpanStatusCode, trace, type Tracer } from '@opentelemetry/api';
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
@@ -36,6 +37,19 @@ let testExporter: InMemorySpanExporter | undefined;
 let testProvider: BasicTracerProvider | undefined;
 let langfuse: LangfuseHandle | undefined;
 let langfuseInitAttempted = false;
+let telemetryContextReady = false;
+
+/** Install async context so Langfuse works without Sentry. Idempotent if Sentry already registered. */
+export function ensureTelemetryContext() {
+  if (telemetryContextReady) return;
+  if (!testProvider && !observability().langfuse) return;
+  try {
+    context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  } catch (error) {
+    swallow('OpenTelemetry context manager setup failed', error);
+  }
+  telemetryContextReady = true;
+}
 
 function observability(): ObservabilityEnv {
   return parseObservabilityEnv(process.env);
@@ -55,6 +69,7 @@ async function ensureLangfuse() {
   langfuseInitAttempted = true;
   const config = observability().langfuse;
   if (!config) return;
+  ensureTelemetryContext();
   try {
     const [{ LangfuseSpanProcessor }, { setLangfuseTracerProvider }, { LangfuseClient }] =
       await Promise.all([
@@ -106,7 +121,35 @@ export function installTestTelemetry() {
   testProvider = new BasicTracerProvider({
     spanProcessors: [new SimpleSpanProcessor(testExporter)],
   });
+  ensureTelemetryContext();
   return testExporter;
+}
+
+/** Verify `context.with` parents child spans when Sentry is not initialized. */
+export async function parentSpanViaActiveContext() {
+  ensureTelemetryContext();
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  try {
+    const tracer = provider.getTracer('orbit');
+    const parent = tracer.startSpan('orbit.context.parent', {}, ROOT_CONTEXT);
+    context.with(trace.setSpan(ROOT_CONTEXT, parent), () => {
+      tracer.startSpan('orbit.context.child', {}, context.active()).end();
+    });
+    parent.end();
+    await provider.forceFlush();
+    const spans = exporter.getFinishedSpans();
+    const parentSpan = spans.find((span) => span.name === 'orbit.context.parent');
+    const childSpan = spans.find((span) => span.name === 'orbit.context.child');
+    return {
+      parentId: parentSpan?.spanContext().spanId,
+      childParentId: childSpan?.parentSpanContext?.spanId,
+    };
+  } finally {
+    await provider.shutdown();
+  }
 }
 
 export function getTestSpans(): ReadableSpan[] {
@@ -270,7 +313,7 @@ export function createRunTelemetry(run: RunTelemetryContext) {
         {
           attributes: {
             ...safeOrbitTags({ stage, agent_id: run.agentId, run_id: run.runId }),
-            'langfuse.observation.type': stage === 'evaluator' ? 'evaluator' : 'generation',
+            'langfuse.observation.type': 'span',
             ...(/^[\w.-]+\/[\w.:-]+$/.test(request.model)
               ? { 'langfuse.observation.model.name': request.model }
               : {}),
@@ -285,19 +328,11 @@ export function createRunTelemetry(run: RunTelemetryContext) {
           () => call({ ...request, telemetry }),
         );
         span?.setAttribute('orbit.duration_ms', Math.round(performance.now() - start));
-        span?.setAttributes({
-          'langfuse.observation.usage_details': JSON.stringify({
-            input: response.inputTokens,
-            output: response.outputTokens,
-          }),
-          ...(response.costMicros === undefined
-            ? {}
-            : {
-                'langfuse.observation.cost_details': JSON.stringify({
-                  total: response.costMicros / 1_000_000,
-                }),
-              }),
-        });
+        span?.setAttribute('orbit.input_tokens', response.inputTokens);
+        span?.setAttribute('orbit.output_tokens', response.outputTokens);
+        if (response.costMicros !== undefined) {
+          span?.setAttribute('orbit.cost_usd', response.costMicros / 1_000_000);
+        }
         recordLangfuseScore({
           name: stage === 'evaluator' ? 'relevance' : 'completed',
           value: response.decision.relevant ? 1 : 0,

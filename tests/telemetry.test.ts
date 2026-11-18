@@ -8,12 +8,15 @@ import {
   redactString,
   redactValue,
   safeOrbitTags,
+  sanitizeError,
 } from '@/lib/observability/redact';
 import {
   createRunTelemetry,
+  ensureTelemetryContext,
   flushTelemetry,
   getTestSpans,
   installTestTelemetry,
+  parentSpanViaActiveContext,
   recordLangfuseScore,
   resetTestTelemetry,
 } from '@/lib/observability/telemetry';
@@ -192,6 +195,39 @@ describe('redaction', () => {
     );
   });
 
+  test('strips SQL bind parameters from Sentry exception chains', () => {
+    const params = JSON.stringify({
+      mission: 'PRIVATE_MISSION',
+      instructions: 'PRIVATE_SYSTEM_PROMPT for the agent',
+    });
+    const drizzleMessage = `Failed query: insert into "configurations" ("config") values ($1)\nparams: [${params}]`;
+    const event = redactSentryEvent({
+      message: drizzleMessage,
+      extra: {
+        params: [
+          { mission: 'PRIVATE_MISSION', instructions: 'PRIVATE_SYSTEM_PROMPT for the agent' },
+        ],
+      },
+      exception: {
+        values: [
+          { type: 'DrizzleQueryError', value: drizzleMessage },
+          {
+            type: 'Error',
+            value: `Failed query: update templates set config = $1\nparams: [${params}]`,
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(event)).not.toMatch(/PRIVATE_/);
+    expect(event.message).toContain('params: [redacted]');
+    expect(event.exception?.values?.[0]?.value).toContain('params: [redacted]');
+    expect(event.exception?.values?.[1]?.value).toContain('params: [redacted]');
+    expect((event.extra as Record<string, unknown> | undefined)?.params).toBe('[redacted]');
+    const sanitized = sanitizeError(new Error(drizzleMessage), 'Orbit web request failed');
+    expect(sanitized.message).toBe('Orbit web request failed');
+    expect(sanitized.message).not.toMatch(/PRIVATE_/);
+  });
+
   test('redacts Sentry breadcrumb arrays without throwing', () => {
     const event = redactSentryEvent({
       breadcrumbs: [
@@ -313,7 +349,14 @@ describe('run spans', () => {
     expect(serialized).toContain(jobId);
     expect(serialized).toContain('test/model');
     expect(serialized).toContain('0.0025');
+    expect(serialized).not.toContain('langfuse.observation.usage_details');
+    expect(serialized).not.toContain('langfuse.observation.cost_details');
     expect(serialized).not.toMatch(/PRIVATE_|sk-or-|Bearer /);
+    expect(
+      spans.find((span) => span.name === 'orbit.evaluator')?.attributes[
+        'langfuse.observation.type'
+      ],
+    ).toBe('span');
     const root = spans.find((span) => span.name === 'orbit.run');
     const rootId = root?.spanContext().spanId;
     expect(rootId).toBeDefined();
@@ -348,5 +391,22 @@ describe('run spans', () => {
       ),
     ).rejects.toThrow('provider failed');
     expect(calls).toBe(1);
+  });
+
+  test('installs async context when Langfuse is enabled without Sentry', async () => {
+    process.env.LANGFUSE_PUBLIC_KEY = 'pk-lf-test';
+    process.env.LANGFUSE_SECRET_KEY = 'sk-lf-test';
+    expect(parseObservabilityEnv(process.env).sentryDsn).toBeUndefined();
+    expect(
+      parseWorkerEnv({
+        DATABASE_URL: production.DATABASE_URL,
+        LANGFUSE_PUBLIC_KEY: 'pk-lf-test',
+        LANGFUSE_SECRET_KEY: 'sk-lf-test',
+      }).observability.langfuse,
+    ).toBeDefined();
+    ensureTelemetryContext();
+    const probe = await parentSpanViaActiveContext();
+    expect(probe.childParentId).toBe(probe.parentId);
+    expect(probe.parentId).toBeDefined();
   });
 });

@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
     '@langfuse/tracing',
     '@langfuse/vercel-ai-sdk',
     '@opentelemetry/sdk-trace-base',
+    '@opentelemetry/context-async-hooks',
     '@opentelemetry/exporter-trace-otlp-http',
   ],
 };

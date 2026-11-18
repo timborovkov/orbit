@@ -11,7 +11,7 @@ import {
   processSimulationJob,
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
-import { reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
+import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
 import { workerEnvConfig } from '@/lib/worker-env';
 
 const config = workerEnvConfig();
@@ -36,6 +36,7 @@ if (sentry) {
     });
   });
 }
+ensureTelemetryContext();
 
 const workerId = config.ORBIT_WORKER_ID ?? `worker-${hostname()}-${process.pid}`;
 
