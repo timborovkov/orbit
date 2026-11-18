@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { ApprovalsInbox } from '@/app/approvals-inbox';
 import { ThemeSwitch } from '@/app/theme';
+import { Button } from '@/components/ui/button';
 import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { getApprovalsInbox } from '@/lib/server/workspace-queries';
@@ -76,18 +77,22 @@ export default async function ApprovalsPage({
         </div>
 
         <form className="approvals-filter" method="get">
-          <label htmlFor="approvals-agent-filter">Filter by agent</label>
-          <select id="approvals-agent-filter" name="agent" defaultValue={filterAgentId ?? ''}>
-            <option value="">All agents</option>
-            {team.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name}
-              </option>
-            ))}
-          </select>
-          <button type="submit">Apply filter</button>
+          <div className="approvals-filter-field">
+            <label htmlFor="approvals-agent-filter">Filter by agent</label>
+            <select id="approvals-agent-filter" name="agent" defaultValue={filterAgentId ?? ''}>
+              <option value="">All agents</option>
+              {team.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button type="submit" variant="outline">
+            Apply filter
+          </Button>
           {filterAgentId && (
-            <Link href="/approvals" className="templates-link">
+            <Link href="/approvals" className="button button-ghost">
               Clear
             </Link>
           )}

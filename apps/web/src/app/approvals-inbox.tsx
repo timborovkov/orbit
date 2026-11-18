@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useId, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import { reviewProposal, reviewProposalsBulk } from '@/actions/policy';
+import { Button } from '@/components/ui/button';
 import { formatAge, formatUtcTimestamp } from '@/lib/format';
 
 const actionLabels = {
@@ -28,6 +29,80 @@ export interface ApprovalItem {
   createdAt: Date | string;
   reviewedBy: string | null;
   reviewedAt: Date | string | null;
+}
+
+function PendingRow({
+  item,
+  selected,
+  pendingUi,
+  onToggle,
+  onReview,
+}: {
+  item: ApprovalItem;
+  selected: boolean;
+  pendingUi: boolean;
+  onToggle: () => void;
+  onReview: (decision: 'approved' | 'rejected', draft?: string) => void;
+}) {
+  const draftId = useId();
+  const selectId = useId();
+  const keyLabel = actionLabels[item.actionType] ?? item.actionType;
+
+  return (
+    <li className="approvals-row">
+      <div className="approvals-row-select">
+        <input
+          id={selectId}
+          type="checkbox"
+          checked={selected}
+          onChange={onToggle}
+          aria-label={`Select ${keyLabel} for ${item.agentName}`}
+        />
+      </div>
+      <div className="approvals-row-body">
+        <div className="approvals-row-meta">
+          <strong>{keyLabel}</strong>
+          <span className="state-label">Pending</span>
+          <Link href={`/agents/${item.agentId}`}>{item.agentName}</Link>
+          <span className="muted mono">{formatAge(item.createdAt)} ago</span>
+          <span className="muted mono">{formatUtcTimestamp(item.createdAt)}</span>
+        </div>
+        {item.reason && <p className="approvals-reason">{item.reason}</p>}
+        <div className="approvals-draft">
+          <label htmlFor={draftId}>Draft</label>
+          <textarea
+            id={draftId}
+            name={`draft-${item.id}`}
+            rows={3}
+            defaultValue={item.draft ?? ''}
+            maxLength={8000}
+          />
+        </div>
+        <div className="approvals-row-actions">
+          <Button
+            type="button"
+            disabled={pendingUi}
+            onClick={() => {
+              const draft = (document.getElementById(draftId) as HTMLTextAreaElement | null)?.value;
+              onReview('approved', draft);
+            }}
+          >
+            Approve
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={pendingUi}
+            onClick={() => {
+              onReview('rejected');
+            }}
+          >
+            Reject
+          </Button>
+        </div>
+      </div>
+    </li>
+  );
 }
 
 export function ApprovalsInbox({
@@ -98,98 +173,55 @@ export function ApprovalsInbox({
               <span className="count">{pending.length}</span>
             </div>
             <div className="approvals-bulk-actions">
-              <button
+              <Button
                 type="button"
-                className="button-primary"
                 disabled={pendingUi || selected.size === 0}
                 onClick={() => {
                   runBulk('approved');
                 }}
               >
                 Bulk approve
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="button-outline"
+                variant="outline"
                 disabled={pendingUi || selected.size === 0}
                 onClick={() => {
                   runBulk('rejected');
                 }}
               >
                 Bulk reject
-              </button>
+              </Button>
             </div>
           </div>
-          <ul className="policy-records approvals-list" aria-label="Pending approvals">
+          <ul className="approvals-list" aria-label="Pending approvals">
             {pending.map((item) => {
               const key = keyFor(item);
               return (
-                <li key={item.id}>
-                  <label className="approvals-select">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(key)}
-                      onChange={() => {
-                        toggle(key);
-                      }}
-                    />
-                    <span className="sr-only">Select {item.actionType}</span>
-                  </label>
-                  <div className="approvals-row-body">
-                    <div className="approvals-row-meta">
-                      <strong>{actionLabels[item.actionType] ?? item.actionType}</strong>
-                      <span className="state-label">Pending</span>
-                      <Link href={`/agents/${item.agentId}`}>{item.agentName}</Link>
-                      <span className="muted">{formatAge(item.createdAt)} ago</span>
-                      <span className="muted">{formatUtcTimestamp(item.createdAt)}</span>
-                    </div>
-                    {item.reason && <p>{item.reason}</p>}
-                    <label className="field">
-                      <span className="field-label">Draft</span>
-                      <textarea
-                        name={`draft-${item.id}`}
-                        rows={2}
-                        defaultValue={item.draft ?? ''}
-                        maxLength={8000}
-                        id={`draft-${item.id}`}
-                      />
-                    </label>
-                    <div className="policy-review-actions">
-                      <button
-                        type="button"
-                        className="button-primary"
-                        disabled={pendingUi}
-                        onClick={() => {
-                          const draft = (
-                            document.getElementById(
-                              `draft-${item.id}`,
-                            ) as HTMLTextAreaElement | null
-                          )?.value;
-                          runOne(item, 'approved', draft);
-                        }}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="button-outline"
-                        disabled={pendingUi}
-                        onClick={() => {
-                          runOne(item, 'rejected');
-                        }}
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                </li>
+                <PendingRow
+                  key={item.id}
+                  item={item}
+                  selected={selected.has(key)}
+                  pendingUi={pendingUi}
+                  onToggle={() => {
+                    toggle(key);
+                  }}
+                  onReview={(decision, draft) => {
+                    runOne(item, decision, draft);
+                  }}
+                />
               );
             })}
           </ul>
         </section>
       ) : (
         <section className="surface">
-          <p className="muted">No pending approvals.</p>
+          <div className="empty-state">
+            <h3>No pending approvals</h3>
+            <p>
+              When an agent action needs review, it appears here until you approve or reject it.
+            </p>
+          </div>
         </section>
       )}
 
@@ -201,17 +233,19 @@ export function ApprovalsInbox({
               <span className="count">{resolved.length}</span>
             </div>
           </div>
-          <ul className="policy-records approvals-list" aria-label="Resolved approvals">
+          <ul className="approvals-list approvals-history" aria-label="Resolved approvals">
             {resolved.map((item) => (
-              <li key={item.id}>
+              <li key={item.id} className="approvals-row">
                 <div className="approvals-row-body">
                   <div className="approvals-row-meta">
                     <strong>{actionLabels[item.actionType] ?? item.actionType}</strong>
                     <span className="state-label">{item.status}</span>
                     <Link href={`/agents/${item.agentId}`}>{item.agentName}</Link>
-                    <span className="muted">{formatAge(item.createdAt)} ago</span>
+                    <span className="muted mono">{formatAge(item.createdAt)} ago</span>
                   </div>
-                  {item.draft && <blockquote>{item.draft}</blockquote>}
+                  {item.draft && (
+                    <blockquote className="approvals-preview">{item.draft}</blockquote>
+                  )}
                   {item.reviewedBy && (
                     <p className="field-hint">
                       Reviewed by {item.reviewedBy}

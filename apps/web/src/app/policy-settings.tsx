@@ -41,47 +41,52 @@ export function ReviewSettings({
       </div>
       <WorkspaceForm action={saveApprovalTools} label="Save approval requirements">
         <input type="hidden" name="agentId" value={agentId} />
-        <div className="policy-options" role="group" aria-label="Other actions requiring approval">
+        <fieldset className="policy-options" aria-label="Other actions requiring approval">
+          <legend className="sr-only">Other actions requiring approval</legend>
           {proposalTypes
             .filter((tool) => tool !== 'introduce' && tool !== 'escalate')
             .map((tool) => (
-              <label key={tool}>
+              <label key={tool} className="policy-option">
                 <input
                   type="checkbox"
                   name="tool"
                   value={tool}
                   defaultChecked={requiredTools.has(tool)}
                 />
-                {actionLabels[tool]}
+                <span>{actionLabels[tool]}</span>
               </label>
             ))}
-        </div>
-        <div>
-          <label htmlFor="approval-spend">Spend threshold (USD cents, optional)</label>
-          <input
-            id="approval-spend"
-            name="approvalSpendCents"
-            type="number"
-            min={1}
-            max={100000000}
-            defaultValue={approvalSpendCents ?? undefined}
-          />
-          <p className="field-hint">
-            When set, write actions need approval once today’s recorded spend reaches this amount.
-          </p>
-        </div>
-        <div>
-          <label htmlFor="approval-expiry">Auto-reject after (hours, optional)</label>
-          <input
-            id="approval-expiry"
-            name="approvalExpiresAfterHours"
-            type="number"
-            min={1}
-            max={720}
-            defaultValue={approvalExpiresAfterHours ?? undefined}
-          />
-          <p className="field-hint">Leave blank to keep pending items until reviewed.</p>
-        </div>
+        </fieldset>
+        <ul className="approval-fields">
+          <li>
+            <label htmlFor="approval-spend">Spend threshold (USD cents, optional)</label>
+            <input
+              id="approval-spend"
+              name="approvalSpendCents"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={100000000}
+              defaultValue={approvalSpendCents ?? undefined}
+            />
+            <p className="field-hint">
+              When set, write actions need approval once today’s recorded spend reaches this amount.
+            </p>
+          </li>
+          <li>
+            <label htmlFor="approval-expiry">Auto-reject after (hours, optional)</label>
+            <input
+              id="approval-expiry"
+              name="approvalExpiresAfterHours"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={720}
+              defaultValue={approvalExpiresAfterHours ?? undefined}
+            />
+            <p className="field-hint">Leave blank to keep pending items until reviewed.</p>
+          </li>
+        </ul>
         <WorkspaceSelect
           id="approval-on-reject"
           name="approvalOnReject"
@@ -186,10 +191,12 @@ export function ProposalReview({
         <ul className="policy-records" aria-label="Proposals, pending first">
           {reviews.map((proposal) => (
             <li id={`proposal-${proposal.id}`} key={proposal.id}>
-              <strong>{actionLabels[proposal.actionType] ?? proposal.actionType}</strong>{' '}
-              <span className="state-label">
-                {proposal.status === 'pending' ? 'Pending review' : proposal.status}
-              </span>
+              <div className="approvals-row-meta">
+                <strong>{actionLabels[proposal.actionType] ?? proposal.actionType}</strong>
+                <span className="state-label">
+                  {proposal.status === 'pending' ? 'Pending review' : proposal.status}
+                </span>
+              </div>
               {proposal.recipients.length > 0 && (
                 <p className="muted">{proposal.recipients.join(' · ')}</p>
               )}
@@ -200,15 +207,16 @@ export function ProposalReview({
                     <input type="hidden" name="agentId" value={agentId} />
                     <input type="hidden" name="intentId" value={proposal.id} />
                     <input type="hidden" name="decision" value="approved" />
-                    <label className="field">
-                      <span className="field-label">Draft (edit before approve)</span>
+                    <div className="approvals-draft">
+                      <label htmlFor={`draft-${proposal.id}`}>Draft (edit before approve)</label>
                       <textarea
+                        id={`draft-${proposal.id}`}
                         name="draft"
                         rows={3}
                         defaultValue={proposal.draft ?? ''}
                         maxLength={8000}
                       />
-                    </label>
+                    </div>
                   </WorkspaceForm>
                   <WorkspaceForm action={reviewProposal} label="Reject">
                     <input type="hidden" name="agentId" value={agentId} />
@@ -217,7 +225,9 @@ export function ProposalReview({
                   </WorkspaceForm>
                 </div>
               ) : (
-                proposal.draft && <blockquote>{proposal.draft}</blockquote>
+                proposal.draft && (
+                  <blockquote className="approvals-preview">{proposal.draft}</blockquote>
+                )
               )}
               {proposal.reviewedBy && (
                 <p className="field-hint">Reviewed by {proposal.reviewedBy}</p>

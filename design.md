@@ -210,7 +210,12 @@ the pending queue first, with editable draft, approve and reject controls. The
 global Approvals page lists pending items newest first (agent, action, payload
 preview, age) with bulk approve/reject, agent filter and resolved history; the
 nav badge shows the pending count. Approval requirements stay off by default and
-use simple checkboxes plus optional spend/expiry/reject behaviour fields.
+use simple checkboxes plus optional spend/expiry/reject behaviour fields. Approvals
+actions use the shared `Button` component (`button` + variant classes). Draft fields
+and checkboxes must not sit inside the global flex `label` rule that pairs a caption
+with a control side-by-side. Access approval settings follow `WorkspaceForm` /
+budget-style field lists so number inputs and checkboxes inherit console control
+styles rather than raw unscoped markup.
 Lifecycle options show the current state and clearly label Live as simulation-only
 until adapters are configured. Access also shows which OpenRouter key source is active—agent key, environment
 default or none—by label only, never by value or prefix. It accepts a password input

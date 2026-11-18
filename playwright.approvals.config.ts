@@ -24,6 +24,7 @@ export default defineConfig({
       ORBIT_ADMIN_EMAIL: '',
       ORBIT_ADMIN_PASSWORD: '',
       ORBIT_ENCRYPTION_KEY: 'a'.repeat(64),
+      NEXT_DISABLE_DEV_INDICATOR: '1',
     },
   },
 });
