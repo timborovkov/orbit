@@ -76,7 +76,8 @@ async function quoteOpenRouter(
 
 export function openRouterInference(apiKey: string): ModelCall {
   const provider = createOpenRouter({ apiKey });
-  const call: ModelCall = async ({ model, system, input, signal, quote }) => {
+  const call: ModelCall = async (request) => {
+    const { model, system, input, signal, quote, telemetry } = request;
     const response = await generateText({
       model: provider(model, {
         usage: { include: true },
@@ -95,7 +96,7 @@ export function openRouterInference(apiKey: string): ModelCall {
       maxOutputTokens,
       maxRetries: 0,
       abortSignal: signal,
-      telemetry: { isEnabled: false },
+      telemetry: telemetry ?? { isEnabled: false },
     });
     const usage = z
       .object({

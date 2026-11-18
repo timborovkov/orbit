@@ -30,7 +30,7 @@ import {
   type ModelCall,
   type SimulationResult,
 } from '@/lib/runtime/simulation';
-import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
+import { createRunTelemetry, reportFailure, withOrbitSpan } from '@/lib/runtime/telemetry';
 import { agents, configurations, credentials, jobs, runs, usageCounters } from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
@@ -344,7 +344,7 @@ async function processSimulationRun(
   if (!claimed) return;
   if (claimed.skip) return;
 
-  const { run, config, budgets, executionToken, expiresAt } = claimed;
+  const { run, config, budgets, executionToken, expiresAt, agent } = claimed;
   // Reconstruct the original start so deadline checks accumulate across retries.
   const startedAt = new Date(expiresAt.getTime() - budgets.runDeadlineSeconds * 1000);
   const remainingMs = expiresAt.getTime() - Date.now();
@@ -368,6 +368,9 @@ async function processSimulationRun(
     agentId: run.agentId,
     configurationId: config.id,
     version: config.version,
+    jobId: claim?.jobId,
+    lifecycle: agent.lifecycle,
+    trigger: 'playground',
   });
   let didComplete = false;
   try {
@@ -393,7 +396,13 @@ async function processSimulationRun(
           try {
             await settle(response.costMicros);
           } catch {
-            void reportFailure('worker.settlement', { runId: run.id, traceId: telemetry.traceId });
+            void reportFailure('worker.settlement', {
+              runId: run.id,
+              agentId: run.agentId,
+              jobId: claim?.jobId,
+              lifecycle: agent.lifecycle,
+              traceId: telemetry.traceId,
+            });
             console.warn('OpenRouter cost settlement failed', { runId: run.id });
           }
         }
@@ -420,24 +429,36 @@ async function processSimulationRun(
         initial: checkpointed,
         prepare: async (request) => {
           try {
-            if (checkRunDeadline(startedAt, new Date(), budgets)) {
-              throw new BudgetError('run-deadline');
-            }
-            try {
-              signal.throwIfAborted();
-            } catch {
-              throw new BudgetError('cancelled');
-            }
-            quote = hasSpendCap(budgets)
-              ? await call.quote?.(request.model, request.signal)
-              : undefined;
-            settle = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
-              runId: run.id,
-              token: executionToken,
-              signal: request.signal,
-            });
-            await assertOwned(run.id, executionToken);
-            if (request.signal.aborted) throw new BudgetError('cancelled');
+            await withOrbitSpan(
+              'orbit.budget',
+              {
+                stage: request.stage ?? 'main',
+                agent_id: run.agentId,
+                run_id: run.id,
+                job_id: claim?.jobId,
+                lifecycle: agent.lifecycle,
+              },
+              async () => {
+                if (checkRunDeadline(startedAt, new Date(), budgets)) {
+                  throw new BudgetError('run-deadline');
+                }
+                try {
+                  signal.throwIfAborted();
+                } catch {
+                  throw new BudgetError('cancelled');
+                }
+                quote = hasSpendCap(budgets)
+                  ? await call.quote?.(request.model, request.signal)
+                  : undefined;
+                settle = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
+                  runId: run.id,
+                  token: executionToken,
+                  signal: request.signal,
+                });
+                await assertOwned(run.id, executionToken);
+                if (request.signal.aborted) throw new BudgetError('cancelled');
+              },
+            );
           } catch (error) {
             // Quota/store faults here never reached the provider — mark so simulate can
             // release the step reservation and let the queue retry the stage.
@@ -452,6 +473,16 @@ async function processSimulationRun(
           await assertOwned(run.id, executionToken);
           const stepLimit = checkToolStepLimit(partial.steps.length, budgets);
           if (stepLimit) {
+            await withOrbitSpan(
+              'orbit.budget',
+              {
+                stage,
+                budget_violation: stepLimit,
+                agent_id: run.agentId,
+                run_id: run.id,
+              },
+              async () => undefined,
+            );
             return actions.map((action) => ({
               ...action,
               policy: 'denied' as const,
@@ -468,21 +499,44 @@ async function processSimulationRun(
           }
           return await Promise.all(
             actions.map(async (action, index) => {
-              const decision = await retryableStore(() =>
-                authorizeAction(ctx, {
-                  type: action.type,
-                  recipients: run.recipients,
-                  preliminary: stage === 'evaluator',
-                  executionToken,
-                  payload: { draft: action.draft, reason: action.reason },
-                  idempotencyKey: idempotencyKey([
-                    run.id,
-                    stage,
-                    action.type,
-                    String(index),
-                    action.reason,
-                  ]),
-                }),
+              const decision = await withOrbitSpan(
+                'orbit.policy',
+                {
+                  tool: action.type,
+                  stage,
+                  agent_id: run.agentId,
+                  run_id: run.id,
+                  job_id: claim?.jobId,
+                  lifecycle: agent.lifecycle,
+                },
+                async () =>
+                  retryableStore(() =>
+                    authorizeAction(ctx, {
+                      type: action.type,
+                      recipients: run.recipients,
+                      preliminary: stage === 'evaluator',
+                      executionToken,
+                      payload: { draft: action.draft, reason: action.reason },
+                      idempotencyKey: idempotencyKey([
+                        run.id,
+                        stage,
+                        action.type,
+                        String(index),
+                        action.reason,
+                      ]),
+                    }),
+                  ),
+              );
+              await withOrbitSpan(
+                'orbit.tool',
+                {
+                  tool: action.type,
+                  stage,
+                  policy_decision: decision.decision,
+                  agent_id: run.agentId,
+                  run_id: run.id,
+                },
+                async () => undefined,
               );
               return {
                 ...action,
@@ -509,6 +563,19 @@ async function processSimulationRun(
   } catch (error) {
     // Leave the run non-terminal so a reclaimed job can resume after failJob retries.
     if (isRetryableInfrastructureError(error)) throw error;
+    if (!isBudgetError(error)) {
+      reportFailure(
+        'worker.runtime',
+        {
+          runId: run.id,
+          agentId: run.agentId,
+          jobId: claim?.jobId,
+          lifecycle: agent.lifecycle,
+          traceId: telemetry.traceId,
+        },
+        error,
+      );
+    }
     const fallback =
       'Unable to complete inference. Check the agent credential or OPENROUTER_API_KEY, server encryption key and provider availability, then try again.';
     let inspectable = fallback;
@@ -536,7 +603,7 @@ async function processSimulationRun(
         ),
       );
   } finally {
-    telemetry.finish(!didComplete);
+    await telemetry.finish(!didComplete);
   }
 }
 

@@ -65,13 +65,12 @@ before deleting orphans. No storage cleanup worker is scheduled in this mileston
 
 ## Runtime telemetry
 
-Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` on the worker. Set
-`LANGFUSE_BASE_URL` to the project’s host if it differs from
-`https://cloud.langfuse.com`. The worker sends OpenTelemetry generation spans for
-the evaluator and main model to that project.
+Observability is optional. The variables, including sample rates and prompt
+capture, are listed in [`.env.example`](../.env.example). Unset, the web app and
+worker make no exporter network calls.
 
-Set `SENTRY_DSN` on both services to report server and worker failures. Worker
-inference events carry the Orbit run ID, the Langfuse trace ID when configured,
-and the failed stage’s duration. Both telemetry paths use an explicit metadata
-allowlist. Prompts, drafts, provider errors, headers and credentials stay in the
-application boundary. Set retention and access controls in the telemetry projects.
+Create one Sentry project (web and worker can share it) and one Langfuse
+project, plus an optional development Langfuse project — not a project per
+agent. Source map upload needs `SENTRY_AUTH_TOKEN` and is skipped without it.
+See [architecture.md](../architecture.md) §12 and the Phase 2 observability
+decision for tracing behaviour, redaction and evaluations.

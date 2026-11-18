@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { parseObservabilityEnv } from '@/lib/observability/env';
+
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 const isLoopback = (value: string) =>
   URL.canParse(value) && loopbackHosts.has(new URL(value).hostname);
@@ -60,9 +62,10 @@ const configuration = z.discriminatedUnion('AUTH_DISABLED', [passwordAuth, local
 
 export function parseEnv(input: Record<string, string | undefined>) {
   const config = configuration.parse({ ...input, AUTH_DISABLED: input.AUTH_DISABLED ?? 'false' });
+  const observability = parseObservabilityEnv(input);
   return config.AUTH_DISABLED === 'true'
-    ? { ...config, AUTH_DISABLED: true as const }
-    : { ...config, AUTH_DISABLED: false as const };
+    ? { ...config, AUTH_DISABLED: true as const, observability }
+    : { ...config, AUTH_DISABLED: false as const, observability };
 }
 export function env() {
   return parseEnv(process.env);

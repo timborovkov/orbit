@@ -15,11 +15,19 @@ export async function register() {
       process.exit(1);
     }
   }
+
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    await import('@/sentry.server.config');
+  }
+
+  if (process.env.NEXT_RUNTIME === 'edge') {
+    await import('@/sentry.edge.config');
+  }
 }
 
-export async function onRequestError() {
-  if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { reportFailure } = await import('@/lib/runtime/telemetry');
-    await reportFailure('web.request');
-  }
+export async function onRequestError(
+  ...args: Parameters<(typeof import('@sentry/nextjs'))['captureRequestError']>
+) {
+  const Sentry = await import('@sentry/nextjs');
+  Sentry.captureRequestError(...args);
 }

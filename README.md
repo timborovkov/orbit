@@ -72,7 +72,8 @@ remain active with or without spend caps.
 Access records recipient consent and configures which actions require review.
 Approvals lists simulated proposals and records the administrator’s decision.
 Introductions require both recipients’ consent. Escalations require consent from
-their recipient. See the deployment guide for optional Langfuse and Sentry setup.
+their recipient. Optional Sentry and Langfuse variables are listed in
+[.env.example](.env.example); tracing behaviour is in [architecture.md](architecture.md).
 
 Agent lifecycle is `shadow` (default), `paused`, `live` or `stopped` — administrator
 only, audited. Live exists but stays gated until write adapters ship. Stop cancels
