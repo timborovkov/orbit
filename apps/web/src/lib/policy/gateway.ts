@@ -87,10 +87,19 @@ export async function loadPolicyContext(
     .where(eq(usageCounters.agentId, agentId));
   const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
   const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
-  const active = await store.execute(sql`
-    SELECT count(*)::int AS count FROM simulation_runs
-    WHERE agent_id = ${agentId} AND status IN ('queued','running')
-  `);
+  // Exclude the already-admitted run so in-run tool authorization does not trip
+  // maxConcurrentRuns (defaults to 1). Admission still counts other runs.
+  const active = runId
+    ? await store.execute(sql`
+        SELECT count(*)::int AS count FROM simulation_runs
+        WHERE agent_id = ${agentId}
+          AND status IN ('queued','running')
+          AND id <> ${runId}
+      `)
+    : await store.execute(sql`
+        SELECT count(*)::int AS count FROM simulation_runs
+        WHERE agent_id = ${agentId} AND status IN ('queued','running')
+      `);
   const activeRows = Array.isArray(active) ? active : [];
   const first = activeRows[0] as { count?: number } | undefined;
   const activeRuns = first?.count ?? 0;
@@ -378,9 +387,15 @@ export async function reserveRequestQuota(
     signal: AbortSignal;
     /** When set, reservation is idempotent per run+stage across queue retries. */
     stage?: 'evaluator' | 'main';
+    /**
+     * Provider calls covered by this reservation (tool loops may issue several).
+     * Defaults to 1. Request counters and request-cap checks use this value.
+     */
+    providerCalls?: number;
   },
 ) {
   const requestedMicros = BigInt(upperBoundMicros ?? 0);
+  const providerCalls = Math.max(1, execution?.providerCalls ?? 1);
   const outcome = await retryableStore(() =>
     db().transaction(async (tx) => {
       const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
@@ -497,9 +512,10 @@ export async function reserveRequestQuota(
       const violation = checkRequestBudgets(
         { budgets, day, month, activeRuns: 0 },
         requestedMicros,
+        providerCalls,
       );
       if (violation) throw new BudgetError(violation);
-      await recordRequestUsage(tx, agentId, today, requestedMicros, 1);
+      await recordRequestUsage(tx, agentId, today, requestedMicros, providerCalls);
       const reservation =
         execution?.stage !== undefined
           ? {

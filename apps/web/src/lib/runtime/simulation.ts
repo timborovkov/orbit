@@ -189,7 +189,9 @@ export async function simulate(
       tools: [...entry.tools],
     }));
   }
-  if (options.toolCalls) result.toolCalls = options.toolCalls.map((entry) => ({ ...entry }));
+  // Share the live array so tool wrappers pushing during inference are visible to
+  // onActions / step-limit checks (a shallow copy would stay empty).
+  if (options.toolCalls) result.toolCalls = options.toolCalls;
   else result.toolCalls ??= [];
   const providerTimeout = AbortSignal.timeout(120000);
   const signal = options.signal

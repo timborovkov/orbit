@@ -101,21 +101,29 @@ export function openRouterInference(apiKey: string): ModelCall {
       abortSignal: signal,
       telemetry: { isEnabled: false },
     });
-    const usage = z
-      .object({
-        usage: z.object({
-          cost: z
-            .number()
-            .nonnegative()
-            .max(Number.MAX_SAFE_INTEGER / microsPerDollar),
-        }),
-      })
-      .safeParse(response.finalStep.providerMetadata?.openrouter);
+    // Sum every generation step's OpenRouter cost — tool loops issue multiple paid requests.
+    const costSchema = z.object({
+      usage: z.object({
+        cost: z
+          .number()
+          .nonnegative()
+          .max(Number.MAX_SAFE_INTEGER / microsPerDollar),
+      }),
+    });
+    let costDollars = 0;
+    let sawCost = false;
+    for (const step of response.steps) {
+      const parsed = costSchema.safeParse(step.providerMetadata?.openrouter);
+      if (parsed.success) {
+        costDollars += parsed.data.usage.cost;
+        sawCost = true;
+      }
+    }
     return {
       decision: response.output,
       inputTokens: response.usage.inputTokens ?? 0,
       outputTokens: response.usage.outputTokens ?? 0,
-      costMicros: usage.success ? Math.ceil(usage.data.usage.cost * microsPerDollar) : undefined,
+      costMicros: sawCost ? Math.ceil(costDollars * microsPerDollar) : undefined,
     };
   };
   call.quote = quoteOpenRouter;

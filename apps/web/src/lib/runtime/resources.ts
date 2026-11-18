@@ -12,6 +12,7 @@ import {
   type SkillSummary,
   type ToolCallRecord,
 } from '@/lib/runtime/skills';
+import { createToolStepGate } from '@/lib/runtime/tool-steps';
 import { agentMcpConnections, agentSkills, mcpConnections, skills } from '@/lib/schema';
 
 async function loadAgentSkills(agentId: string): Promise<SkillSummary[]> {
@@ -50,6 +51,7 @@ export async function prepareRunTools(options: {
   policy: PolicyContext;
   executionToken?: string;
   signal?: AbortSignal;
+  maxToolSteps?: number;
   onCall?: (record: ToolCallRecord) => void | Promise<void>;
 }) {
   const [attachedSkills, connections] = await Promise.all([
@@ -58,6 +60,9 @@ export async function prepareRunTools(options: {
   ]);
   const versions = skillVersionsAttached(attachedSkills);
   const toolCalls: ToolCallRecord[] = [];
+  const toolSteps = createToolStepGate(
+    options.maxToolSteps ?? options.policy.budgets.maxToolStepsPerRun,
+  );
   const record = async (entry: ToolCallRecord) => {
     toolCalls.push(entry);
     await options.onCall?.(entry);
@@ -71,6 +76,7 @@ export async function prepareRunTools(options: {
       executionToken: options.executionToken,
       versions,
       onCall: record,
+      toolSteps,
     });
   }
 
@@ -80,6 +86,7 @@ export async function prepareRunTools(options: {
     executionToken: options.executionToken,
     signal: options.signal,
     onCall: record,
+    toolSteps,
   });
   Object.assign(tools, mcp.tools);
 

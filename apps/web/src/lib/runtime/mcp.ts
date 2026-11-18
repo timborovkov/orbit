@@ -5,6 +5,7 @@ import type { Tool } from 'ai';
 import { authorizeAction, type CandidateAction, type PolicyContext } from '@/lib/policy/gateway';
 import { decryptSecret } from '@/lib/runtime/secrets';
 import type { ToolCallRecord } from '@/lib/runtime/skills';
+import type { ToolStepGate } from '@/lib/runtime/tool-steps';
 import type { McpTransport } from '@/lib/schema';
 
 export interface McpConnectionConfig {
@@ -86,10 +87,12 @@ async function loadOneConnection(
     }>;
     onCall?: (record: ToolCallRecord) => void | Promise<void>;
     connect: typeof connectMcpClient;
+    toolSteps?: ToolStepGate;
   },
 ): Promise<LoadedConnection> {
+  let client: MCPClient | undefined;
   try {
-    const client = await options.connect(connection, options.signal);
+    client = await options.connect(connection, options.signal);
     const remote = await client.tools();
     const allow = connection.toolAllowlist?.length ? new Set(connection.toolAllowlist) : null;
     const registered: string[] = [];
@@ -107,6 +110,19 @@ async function loadOneConnection(
             input !== null && typeof input === 'object' && !Array.isArray(input)
               ? { ...(input as Record<string, unknown>) }
               : { value: input };
+
+          if (options.toolSteps && !options.toolSteps.tryConsume()) {
+            const record: ToolCallRecord = {
+              tool: capability,
+              args,
+              policy: 'deny',
+              result: null,
+              error: 'Maximum tool steps for this run reached.',
+            };
+            await options.onCall?.(record);
+            return { error: record.error };
+          }
+
           const idempotencyKey = createHash('sha256')
             .update(
               [
@@ -117,9 +133,11 @@ async function loadOneConnection(
               ].join(':'),
             )
             .digest('hex');
+          // Annotations from remote MCP servers are untrusted; treat unknown tools as
+          // mutating so pause, shadow, approval, consent and outbound budgets apply.
           const decision = await options.authorize(options.policy, {
             type: capability,
-            readOnly: true,
+            readOnly: false,
             executionToken: options.executionToken,
             payload: args,
             idempotencyKey,
@@ -174,6 +192,13 @@ async function loadOneConnection(
       },
     };
   } catch {
+    if (client) {
+      try {
+        await client.close();
+      } catch {
+        // Best-effort; discovery already failed.
+      }
+    }
     return {
       tools: {},
       status: {
@@ -206,6 +231,7 @@ export async function loadMcpToolsForAgent(options: {
   }>;
   onCall?: (record: ToolCallRecord) => void | Promise<void>;
   connect?: typeof connectMcpClient;
+  toolSteps?: ToolStepGate;
 }): Promise<{
   tools: Record<string, Tool>;
   statuses: McpConnectionStatus[];
@@ -222,6 +248,7 @@ export async function loadMcpToolsForAgent(options: {
         authorize,
         onCall: options.onCall,
         connect,
+        toolSteps: options.toolSteps,
       }),
     ),
   );

@@ -15,6 +15,7 @@ import {
   skillVersionsAttached,
   type SkillSummary,
 } from '@/lib/runtime/skills';
+import { createToolStepGate } from '@/lib/runtime/tool-steps';
 
 const policy = {
   actor: 'test@example.com',
@@ -160,12 +161,12 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
     encryptedHeaders: null,
     toolAllowlist: ['echo'],
   };
-  const decisions: string[] = [];
+  const decisions: { type: string; readOnly?: boolean }[] = [];
   const { tools, statuses, close } = await loadMcpToolsForAgent({
     connections: [connection],
     policy,
     authorize: async (_ctx, action) => {
-      decisions.push(action.type);
+      decisions.push({ type: action.type, readOnly: action.readOnly });
       if (action.type === mcpToolId('demo', 'echo')) {
         return { decision: 'allow', reasons: ['ok'] };
       }
@@ -195,7 +196,7 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
     { ...execOptions, toolCallId: 't4' },
   );
   expect(result).toEqual({ echoed: 'hi' });
-  expect(decisions).toEqual([mcpToolId('demo', 'echo')]);
+  expect(decisions).toEqual([{ type: mcpToolId('demo', 'echo'), readOnly: false }]);
   await close();
 });
 
@@ -334,4 +335,109 @@ test('MCP HTTP fake server tools register and execute through policy', async () 
     content: [{ type: 'text', text: 'orbit' }],
   });
   await close();
+});
+
+test('tool step gate blocks further MCP and skill calls once exhausted', async () => {
+  const gate = createToolStepGate(1);
+  const connection: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000031',
+    name: 'gated',
+    url: 'http://127.0.0.1:9/mcp',
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: null,
+  };
+  const { tools, close } = await loadMcpToolsForAgent({
+    connections: [connection],
+    policy,
+    toolSteps: gate,
+    authorize: async () => ({ decision: 'allow', reasons: ['ok'] }),
+    connect: async () =>
+      ({
+        tools: async () => ({
+          a: fakeTool(async () => ({ ok: 1 })),
+          b: fakeTool(async () => ({ ok: 2 })),
+        }),
+        close: async () => undefined,
+      }) as unknown as Awaited<ReturnType<typeof connectMcpClient>>,
+  });
+  const first = await tools[mcpToolId('gated', 'a')]!.execute!(
+    {},
+    { ...execOptions, toolCallId: 'g1' },
+  );
+  expect(first).toEqual({ ok: 1 });
+  const second = await tools[mcpToolId('gated', 'b')]!.execute!(
+    {},
+    { ...execOptions, toolCallId: 'g2' },
+  );
+  expect(second).toEqual({ error: 'Maximum tool steps for this run reached.' });
+  await close();
+
+  const loadSkill = createLoadSkillTool({
+    skills,
+    policy,
+    versions: skillVersionsAttached(skills),
+    toolSteps: createToolStepGate(0),
+    authorize: async () => ({ decision: 'allow', reasons: ['ok'] }),
+  });
+  const blocked = await loadSkill.execute!(
+    { name: 'research-brief' },
+    { ...execOptions, toolCallId: 'g3' },
+  );
+  expect(blocked).toEqual({ error: 'Maximum tool steps for this run reached.' });
+});
+
+test('MCP discovery failure closes an initialized client', async () => {
+  let closed = 0;
+  const connection: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000032',
+    name: 'leaky',
+    url: 'http://127.0.0.1:9/mcp',
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: null,
+  };
+  const { statuses, close } = await loadMcpToolsForAgent({
+    connections: [connection],
+    policy,
+    authorize: async () => ({ decision: 'allow', reasons: ['ok'] }),
+    connect: async () =>
+      ({
+        tools: async () => {
+          throw new Error('tools/list failed');
+        },
+        close: async () => {
+          closed += 1;
+        },
+      }) as unknown as Awaited<ReturnType<typeof connectMcpClient>>,
+  });
+  expect(statuses[0]?.status).toBe('error');
+  expect(closed).toBe(1);
+  await close();
+});
+
+test('read-only authorization still enforces concurrency from the policy snapshot', () => {
+  const denied = evaluateActionForTest(
+    {
+      lifecycle: 'shadow',
+      enabledTools: [],
+      approvalTools: undefined,
+      budgets: budgetDefaults,
+      globalPaused: false,
+      usage: {
+        spendMicros: BigInt(0),
+        requests: 0,
+        outboundActions: 0,
+        month: { spendMicros: BigInt(0), requests: 0, outboundActions: 0 },
+        activeRuns: 1,
+      },
+    },
+    {
+      type: LOAD_SKILL_TOOL,
+      readOnly: true,
+      idempotencyKey: 'concurrency-check',
+    },
+  );
+  expect(denied.decision).toBe('deny');
+  expect(denied.violation).toBe('concurrency');
 });

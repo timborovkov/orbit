@@ -2,6 +2,7 @@ import { tool, type Tool } from 'ai';
 import { z } from 'zod';
 
 import { authorizeAction, type CandidateAction, type PolicyContext } from '@/lib/policy/gateway';
+import type { ToolStepGate } from '@/lib/runtime/tool-steps';
 
 export const LOAD_SKILL_TOOL = 'load_skill';
 
@@ -62,6 +63,7 @@ export function createLoadSkillTool(options: {
   }>;
   onCall?: (record: ToolCallRecord) => void | Promise<void>;
   versions: SkillVersionRecord[];
+  toolSteps?: ToolStepGate;
 }): Tool {
   const byName = new Map(options.skills.map((skill) => [skill.name, skill]));
   const authorize = options.authorize ?? authorizeAction;
@@ -79,6 +81,17 @@ export function createLoadSkillTool(options: {
     }),
     execute: async ({ name }) => {
       const skill = byName.get(name);
+      if (options.toolSteps && !options.toolSteps.tryConsume()) {
+        const record: ToolCallRecord = {
+          tool: LOAD_SKILL_TOOL,
+          args: { name },
+          policy: 'deny',
+          result: null,
+          error: 'Maximum tool steps for this run reached.',
+        };
+        await options.onCall?.(record);
+        return { error: record.error };
+      }
       const idempotencyKey = `load_skill:${options.policy.runId ?? 'none'}:${name}:${Date.now()}`;
       const decision = await authorize(options.policy, {
         type: LOAD_SKILL_TOOL,

@@ -537,6 +537,7 @@ async function processSimulationRun(
       policy: basePolicy,
       executionToken,
       signal,
+      maxToolSteps: budgets.maxToolStepsPerRun,
     });
     try {
       let settle!: (billedMicros: number) => Promise<void>;
@@ -616,11 +617,21 @@ async function processSimulationRun(
                 ? await call.quote?.(request.model, request.signal)
                 : undefined;
               const stage = request.stage === 'main' ? 'main' : 'evaluator';
-              const reserved = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
+              const hasTools = Boolean(request.tools && Object.keys(request.tools).length);
+              // Match openRouterInference stopWhen: structured output + room for tool steps.
+              const providerCalls = hasTools
+                ? Math.max(2, (request.maxToolSteps ?? budgets.maxToolStepsPerRun) + 1)
+                : 1;
+              const upperBound =
+                quote?.upperBoundMicros !== undefined
+                  ? quote.upperBoundMicros * providerCalls
+                  : undefined;
+              const reserved = await reserveRequestQuota(run.agentId, upperBound, {
                 runId: run.id,
                 token: executionToken,
                 signal: request.signal,
                 stage,
+                providerCalls,
               });
               settle = reserved;
               if (reserved.reservation) {

@@ -111,11 +111,12 @@ export type BudgetViolation =
 export function checkRequestBudgets(
   snapshot: BudgetSnapshot,
   reserveMicros = BigInt(0),
+  reserveRequests = 1,
 ): BudgetViolation | null {
   const { budgets, day, month, activeRuns } = snapshot;
   if (activeRuns >= budgets.maxConcurrentRuns) return 'concurrency';
-  if (day.requests >= budgets.dailyRequests) return 'daily-requests';
-  if (month.requests >= budgets.monthlyRequests) return 'monthly-requests';
+  if (day.requests + reserveRequests > budgets.dailyRequests) return 'daily-requests';
+  if (month.requests + reserveRequests > budgets.monthlyRequests) return 'monthly-requests';
   for (const [reached, reservation, used, cap] of [
     ['daily-spend', 'daily-spend-reservation', day.spendMicros, budgets.dailySpendCents],
     ['monthly-spend', 'monthly-spend-reservation', month.spendMicros, budgets.monthlySpendCents],

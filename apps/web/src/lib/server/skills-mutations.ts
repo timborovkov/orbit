@@ -26,7 +26,9 @@ export async function persistSkill(
 ) {
   return await db().transaction(async (tx) => {
     if (skillId) {
-      const current = (await tx.select().from(skills).where(eq(skills.id, skillId))).at(0);
+      const current = (
+        await tx.select().from(skills).where(eq(skills.id, skillId)).for('update')
+      ).at(0);
       if (!current) return { error: 'Skill not found.' as const };
       const contentChanged =
         current.description !== input.description ||
