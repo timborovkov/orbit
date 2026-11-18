@@ -215,12 +215,12 @@ export function evaluateCandidate(
     return { decision: 'suppressed', reasons };
   }
 
-  // load_skill is local catalogue I/O — the run's model reservation already covers
-  // inference quota. Do not require an extra spare request slot.
-  const requestLimit =
-    action.type === 'load_skill'
-      ? checkRequestBudgets(snapshot, BigInt(0), 0)
-      : checkRequestBudgets(snapshot);
+  // load_skill and authorized MCP tools do not open another inference request —
+  // the run's model reservation already covers quota. Do not require a spare slot.
+  const inRunTool = action.type === 'load_skill' || action.type.startsWith('mcp:');
+  const requestLimit = inRunTool
+    ? checkRequestBudgets(snapshot, BigInt(0), 0)
+    : checkRequestBudgets(snapshot);
   if (requestLimit) {
     reasons.push(budgetViolationMessage(requestLimit));
     return { decision: 'deny', reasons, violation: requestLimit };

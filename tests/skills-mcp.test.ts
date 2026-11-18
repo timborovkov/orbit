@@ -587,30 +587,36 @@ test('MCP model-facing aliases are OpenAI-compatible while policy keeps canonica
   expect(mcpToolAlias('a_b', 'c')).not.toBe(mcpToolAlias('a', 'b_c'));
 });
 
-test('load_skill does not require a spare inference request slot', () => {
-  const allowed = evaluateActionForTest(
-    {
-      lifecycle: 'shadow',
-      enabledTools: [],
-      approvalTools: undefined,
-      budgets: { ...budgetDefaults, dailyRequests: 12, monthlyRequests: 12 },
-      globalPaused: false,
-      usage: {
-        spendMicros: BigInt(0),
-        // Evaluator (1) + main tool-loop reservation (11) already filled the day.
-        requests: 12,
-        outboundActions: 0,
-        month: { spendMicros: BigInt(0), requests: 12, outboundActions: 0 },
-        activeRuns: 0,
-      },
+test('load_skill and read-only MCP do not require a spare inference request slot', () => {
+  const saturated = {
+    lifecycle: 'shadow' as const,
+    enabledTools: [] as string[],
+    approvalTools: undefined,
+    budgets: { ...budgetDefaults, dailyRequests: 12, monthlyRequests: 12 },
+    globalPaused: false,
+    usage: {
+      spendMicros: BigInt(0),
+      // Evaluator (1) + main tool-loop reservation (11) already filled the day.
+      requests: 12,
+      outboundActions: 0,
+      month: { spendMicros: BigInt(0), requests: 12, outboundActions: 0 },
+      activeRuns: 0,
     },
-    {
+  };
+  expect(
+    evaluateActionForTest(saturated, {
       type: LOAD_SKILL_TOOL,
       readOnly: true,
       idempotencyKey: 'skill-no-extra-request',
-    },
-  );
-  expect(allowed.decision).toBe('allow');
+    }).decision,
+  ).toBe('allow');
+  expect(
+    evaluateActionForTest(saturated, {
+      type: mcpToolId('crm', 'search'),
+      readOnly: true,
+      idempotencyKey: 'mcp-no-extra-request',
+    }).decision,
+  ).toBe('allow');
 });
 
 test('tool-step limit for proposals counts invocations, not inference stages', async () => {
