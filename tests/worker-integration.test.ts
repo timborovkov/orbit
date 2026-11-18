@@ -223,6 +223,7 @@ test('reserveRequestQuota reuses a per-stage reservation across retries', async 
   expect(first.reservation).toEqual({
     stage: 'evaluator',
     reservedMicros: '0',
+    reservedRequests: 1,
     periodStart,
   });
   const second = await reserveRequestQuota(id, 0, {
@@ -235,6 +236,7 @@ test('reserveRequestQuota reuses a per-stage reservation across retries', async 
   expect(second.reservation).toEqual({
     stage: 'evaluator',
     reservedMicros: '0',
+    reservedRequests: 1,
     periodStart,
   });
   const [day] =
@@ -242,7 +244,7 @@ test('reserveRequestQuota reuses a per-stage reservation across retries', async 
   expect(day.requests).toBe(1);
   const [stored] = await sql`SELECT result FROM simulation_runs WHERE id=${run.id}`;
   expect(stored.result.quotaReservations).toEqual([
-    { stage: 'evaluator', reservedMicros: '0', periodStart },
+    { stage: 'evaluator', reservedMicros: '0', reservedRequests: 1, periodStart },
   ]);
 });
 
@@ -415,12 +417,86 @@ test('reused quota reservations top up spend when the quote grows', async () => 
   expect(topped.reservation).toEqual({
     stage: 'evaluator',
     reservedMicros: '5000',
+    reservedRequests: 1,
     periodStart,
   });
   const [day] =
     await sql`SELECT spend_micros::text AS spend, requests FROM usage_counters WHERE agent_id=${id} AND period='day'`;
   expect(day.spend).toBe('5000');
   expect(day.requests).toBe(1);
+});
+
+test('reused quota reservations top up request slots when tools attach', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const budgets = {
+    ...uncapped,
+    dailyRequests: 12,
+    monthlyRequests: 12,
+  };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'QuotaRequestTopUp','Mission','shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const [version] = await sql`INSERT INTO agent_configurations(agent_id,version,config,actor)
+      SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
+  const token = randomUUID();
+  const periodStart = new Date().toISOString().slice(0, 10);
+  const [run] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token)
+    VALUES (
+      ${id},
+      ${version.id},
+      'quota request top up',
+      'running',
+      ${sql.json({
+        steps: [],
+        actions: [],
+        error: null,
+        quotaReservations: [
+          { stage: 'main', reservedMicros: '0', reservedRequests: 1, periodStart },
+        ],
+      })},
+      'test@example.com',
+      ${new Date(Date.now() + 120_000)},
+      ${token}
+    )
+    RETURNING id
+  `;
+  await sql`
+    INSERT INTO usage_counters(agent_id,period,period_start,spend_micros,requests)
+    VALUES
+      (${id},'day',${periodStart},0,1),
+      (${id},'month',${`${periodStart.slice(0, 7)}-01`},0,1)
+  `;
+  const topped = await reserveRequestQuota(id, 0, {
+    runId: run.id,
+    token,
+    signal: AbortSignal.timeout(5_000),
+    stage: 'main',
+    providerCalls: 11,
+  });
+  expect(topped.reused).toBe(true);
+  expect(topped.reservation).toEqual({
+    stage: 'main',
+    reservedMicros: '0',
+    reservedRequests: 11,
+    periodStart,
+  });
+  const [day] =
+    await sql`SELECT spend_micros::text AS spend, requests FROM usage_counters WHERE agent_id=${id} AND period='day'`;
+  expect(day.spend).toBe('0');
+  expect(day.requests).toBe(11);
+
+  await expect(
+    reserveRequestQuota(id, 0, {
+      runId: run.id,
+      token,
+      signal: AbortSignal.timeout(5_000),
+      stage: 'main',
+      providerCalls: 13,
+    }),
+  ).rejects.toThrow(budgetViolationMessage('daily-requests'));
 });
 
 test('stale execution tokens cannot overwrite a reclaimed run', async () => {
@@ -451,10 +527,14 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
     firstGate = { continue: resolve };
   });
   let firstCalls = 0;
+  const firstInference = Promise.withResolvers<void>();
 
   const first = processSimulationJob({ runId, agentId: id }, () => async () => {
     firstCalls += 1;
-    if (firstCalls === 1) await firstHold;
+    if (firstCalls === 1) {
+      firstInference.resolve();
+      await firstHold;
+    }
     return {
       decision: {
         relevant: true,
@@ -467,12 +547,7 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
     };
   });
 
-  // Wait until the first claim has marked the run running with a token.
-  for (let i = 0; i < 50; i++) {
-    const [row] = await sql`SELECT status, execution_token FROM simulation_runs WHERE id=${runId}`;
-    if (row.status === 'running' && row.execution_token) break;
-    await new Promise((r) => setTimeout(r, 10));
-  }
+  await firstInference.promise;
   const [before] = await sql`SELECT execution_token FROM simulation_runs WHERE id=${runId}`;
   expect(before.execution_token).toBeTruthy();
 
@@ -501,6 +576,86 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
   const [final] = await sql`SELECT status, result FROM simulation_runs WHERE id=${runId}`;
   expect(final.status).toBe('completed');
   expect(final.result.actions[0].draft).toBe('replacement draft');
+});
+
+test('a reclaimed tool loop cannot start more provider requests against the same reservation', async () => {
+  const agentId = randomUUID();
+  const skillId = randomUUID();
+  ids.push(agentId);
+  const budgets = { ...uncapped, maxToolStepsPerRun: 2 };
+  await sql`INSERT INTO agents(id,name,mission,lifecycle,budgets)
+    VALUES (${agentId},'Tool loop fence','Mission','shadow',${sql.json(budgets)})`;
+  const [version] = await sql`INSERT INTO agent_configurations(agent_id,version,config,actor)
+    SELECT ${agentId},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
+  await sql`INSERT INTO agent_credentials VALUES (${agentId},${encryptCredential(agentId, 'fixture-key')})`;
+  await sql`INSERT INTO skills(id,name,title,description,body,actor)
+    VALUES (${skillId},${`fence-${skillId}`},'Fence fixture','Fixture only','Fixture body','test')`;
+  await sql`INSERT INTO agent_skills VALUES (${agentId},${skillId})`;
+
+  const started = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  let pending: Promise<unknown> | undefined;
+  try {
+    const queued = await enqueueSimulation({
+      actor: 'test@example.com',
+      agentId,
+      configurationId: version.id,
+      input: 'Tool loop fence',
+    });
+    if (!queued.runId) throw new Error('Fixture failed to enqueue');
+    const runId = queued.runId;
+    const response = {
+      decision: {
+        relevant: true,
+        priority: 0.9,
+        reason: 'fixture',
+        actions: [{ type: 'reply' as const, reason: 'fixture', draft: null }],
+      },
+      inputTokens: 1,
+      outputTokens: 1,
+    };
+    let dispatched = 0;
+    pending = processSimulationJob({ runId, agentId }, () => async (request) => {
+      await request.beforeProviderCall!(0);
+      dispatched += 1;
+      if (request.stage === 'main') {
+        started.resolve();
+        await resume.promise;
+        await request.beforeProviderCall!(1);
+        dispatched += 1;
+      }
+      return response;
+    });
+    await Promise.race([
+      started.promise,
+      pending.then(() => {
+        throw new Error('Main inference did not start');
+      }),
+    ]);
+    const [inFlight] = await sql`SELECT result FROM simulation_runs WHERE id=${runId}`;
+    expect(inFlight.result.providerDispatches).toEqual({ evaluator: 1, main: 1 });
+
+    let replacementCalls = 0;
+    await processSimulationJob({ runId, agentId }, () => async () => {
+      replacementCalls += 1;
+      return response;
+    });
+    expect(replacementCalls).toBe(0);
+    resume.resolve();
+    await pending;
+    expect(dispatched).toBe(2);
+    const [finished] = await sql`SELECT status,result FROM simulation_runs WHERE id=${runId}`;
+    expect(finished.status).toBe('failed');
+    expect(finished.result.error).toContain('already used this model step');
+    expect(finished.result.providerDispatches).toEqual({ evaluator: 1, main: 1 });
+    const [day] =
+      await sql`SELECT requests FROM usage_counters WHERE agent_id=${agentId} AND period='day'`;
+    expect(day.requests).toBe(4);
+  } finally {
+    resume.resolve();
+    await pending;
+    await sql`DELETE FROM skills WHERE id=${skillId}`;
+  }
 });
 
 test('stale workers cannot rotate the execution token after losing their job claim', async () => {
@@ -1017,8 +1172,14 @@ test('OpenRouter spend reservations serialize and missing prices require both ca
     { requests: 2, spend_micros: 3000 },
   ]);
 
+  // Conservative multi-call reservation releases unused request slots on settle.
+  const multi = await reserveRequestQuota(id, 0, { providerCalls: 11 });
+  await multi(0, 1);
+  expect([
+    ...(await sql`SELECT requests FROM usage_counters WHERE agent_id=${id} AND period='day'`),
+  ]).toEqual([{ requests: 3 }]);
+
   await sql`UPDATE agents SET budgets=${sql.json({ ...uncapped, dailyRequests: 3 })} WHERE id=${id}`;
-  await reserveRequestQuota(id);
   await expect(reserveRequestQuota(id, 0)).rejects.toThrow(
     budgetViolationMessage('daily-requests'),
   );

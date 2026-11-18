@@ -86,6 +86,19 @@ test('spend caps are independent and accept an explicit no-cap setting', () => {
       39_000n,
     ),
   ).toBe('daily-spend-reservation');
+  // In-run tools may ignore spend that an admitted reservation already filled.
+  expect(
+    checkRequestBudgets(
+      {
+        ...snapshot,
+        day: { ...day, spendMicros: 10_000n },
+        budgets: { ...budgets, dailySpendCents: 1, monthlySpendCents: null },
+      },
+      0n,
+      0,
+      { checkSpend: false },
+    ),
+  ).toBeNull();
 });
 
 test('BudgetError messages are exact trusted allowlist entries', () => {
