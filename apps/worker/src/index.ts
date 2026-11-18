@@ -1,5 +1,6 @@
 import { hostname } from 'node:os';
 
+import { expireStaleApprovals } from '@/lib/approvals/review';
 import { closeDb } from '@/lib/db';
 import { startJobWorker } from '@/lib/queue/worker';
 import {
@@ -48,6 +49,7 @@ const worker = startJobWorker({
   },
   reconcileDeadLetters: async () => {
     await reconcileOrphanedSimulationRuns();
+    await expireStaleApprovals();
   },
   onError: () => {
     console.error('Worker queue operation failed.');

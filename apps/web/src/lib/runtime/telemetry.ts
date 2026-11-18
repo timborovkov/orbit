@@ -192,6 +192,35 @@ export function createRunTelemetry(context: {
   };
 }
 
+/**
+ * Record an approval decision as a short-lived Langfuse/OTel span when configured.
+ * Never includes drafts, payloads, or actor emails.
+ */
+export function recordApprovalDecision(input: {
+  intentId: string;
+  agentId: string;
+  runId?: string | null;
+  decision: 'approved' | 'rejected';
+}) {
+  const tracer = getTracer();
+  if (!tracer) return;
+  if (!uuid.test(input.intentId) || !uuid.test(input.agentId)) return;
+  const span = tracer.startSpan(
+    'Orbit approval decision',
+    {
+      attributes: {
+        'langfuse.observation.type': 'event',
+        'orbit.approval.decision': input.decision,
+        'orbit.intent_id': input.intentId,
+        'orbit.agent_id': input.agentId,
+        ...(input.runId && uuid.test(input.runId) ? { 'orbit.run_id': input.runId } : {}),
+      },
+    },
+    ROOT_CONTEXT,
+  );
+  span.end();
+}
+
 export async function flushTelemetry() {
   await tracerProvider?.forceFlush().catch(() => undefined);
 }

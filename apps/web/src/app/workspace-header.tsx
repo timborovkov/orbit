@@ -4,7 +4,13 @@ import { ChevronRight } from 'lucide-react';
 
 import { ThemeSwitch } from '@/app/theme';
 
-export function WorkspaceHeader({ name }: { name: string }) {
+export function WorkspaceHeader({
+  name,
+  pendingApprovalCount = 0,
+}: {
+  name: string;
+  pendingApprovalCount?: number;
+}) {
   return (
     <header className="agent-header">
       <div className="agent-header-inner">
@@ -21,6 +27,10 @@ export function WorkspaceHeader({ name }: { name: string }) {
           <span aria-current="page">{name}</span>
         </nav>
         <div className="header-actions">
+          <Link href="/approvals" className="templates-link">
+            Approvals
+            {pendingApprovalCount > 0 && <span className="tab-count">{pendingApprovalCount}</span>}
+          </Link>
           <Link href="/templates" className="templates-link">
             Templates
           </Link>

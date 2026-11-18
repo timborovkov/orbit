@@ -81,11 +81,27 @@ export async function persistApprovalTools(
   actor: string,
   agentId: string,
   approvalTools: string[],
+  options: {
+    approvalExpiresAfterHours?: number | null;
+    approvalOnReject?: 'continue' | 'end';
+    approvalSpendCents?: number | null;
+  } = {},
 ) {
   return db().transaction(async (tx) => {
     const rows = await tx
       .update(agents)
-      .set({ approvalTools })
+      .set({
+        approvalTools,
+        ...(options.approvalExpiresAfterHours !== undefined
+          ? { approvalExpiresAfterHours: options.approvalExpiresAfterHours }
+          : {}),
+        ...(options.approvalOnReject !== undefined
+          ? { approvalOnReject: options.approvalOnReject }
+          : {}),
+        ...(options.approvalSpendCents !== undefined
+          ? { approvalSpendCents: options.approvalSpendCents }
+          : {}),
+      })
       .where(eq(agents.id, agentId))
       .returning({ id: agents.id, name: agents.name });
     if (!rows.length) return false;

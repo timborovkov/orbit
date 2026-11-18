@@ -35,7 +35,15 @@ import {
   type SimulationResult,
 } from '@/lib/runtime/simulation';
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
-import { agents, configurations, credentials, jobs, runs, usageCounters } from '@/lib/schema';
+import {
+  actionIntents,
+  agents,
+  configurations,
+  credentials,
+  jobs,
+  runs,
+  usageCounters,
+} from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
 
@@ -188,11 +196,25 @@ async function expireStaleRuns(
     .where(
       and(
         eq(runs.agentId, agentId),
-        inArray(runs.status, ['queued', 'running']),
+        inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
         lt(runs.expiresAt, new Date()),
       ),
     )
-    .returning({ jobId: runs.jobId });
+    .returning({ id: runs.id, jobId: runs.jobId });
+  const runIds = stale.map((row) => row.id);
+  if (runIds.length) {
+    await tx
+      .update(actionIntents)
+      .set({
+        decision: 'deny',
+        reasons: ['Run expired while awaiting approval.'],
+        reviewStatus: 'rejected',
+        reviewedBy: 'system:run-expiry',
+        reviewedAt: new Date(),
+        reviewExpiresAt: null,
+      })
+      .where(and(inArray(actionIntents.runId, runIds), eq(actionIntents.reviewStatus, 'pending')));
+  }
   const jobIds = stale.map((row) => row.jobId).filter((id): id is string => !!id);
   if (jobIds.length) {
     await tx
@@ -246,7 +268,12 @@ export async function enqueueSimulation({
       await tx
         .select({ id: runs.id })
         .from(runs)
-        .where(and(eq(runs.agentId, agentId), inArray(runs.status, ['queued', 'running'])))
+        .where(
+          and(
+            eq(runs.agentId, agentId),
+            inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
+          ),
+        )
     ).length;
     if (active >= budgets.maxConcurrentRuns) {
       return {
@@ -369,6 +396,7 @@ async function processSimulationRun(
     if (peek.status === 'completed' || peek.status === 'failed' || peek.status === 'interrupted') {
       return { skip: true as const, run: peek };
     }
+    // awaiting_approval is only reclaimable when a resume job re-enqueues work.
 
     const agent = (
       await tx.select().from(agents).where(eq(agents.id, peek.agentId)).for('update')
@@ -399,7 +427,13 @@ async function processSimulationRun(
 
     const run = (await tx.select().from(runs).where(eq(runs.id, runId)).for('update')).at(0);
     if (!run) return null;
-    if (run.status === 'completed' || run.status === 'failed' || run.status === 'interrupted') {
+    if (
+      run.status === 'completed' ||
+      run.status === 'failed' ||
+      run.status === 'interrupted' ||
+      run.status === 'awaiting_approval'
+    ) {
+      // awaiting_approval is only resumed after review flips the run back to queued.
       return { skip: true as const, run };
     }
     if (run.expiresAt < new Date()) {
@@ -421,7 +455,7 @@ async function processSimulationRun(
     ).at(0);
     if (!config) return null;
     const executionToken = randomUUID();
-    // First claim starts the wall-clock deadline; retries keep the original expiresAt.
+    // First claim starts the wall-clock deadline; retries and approval resumes keep it.
     const expiresAt =
       run.status === 'queued'
         ? new Date(Date.now() + budgets.runDeadlineSeconds * 1000)
@@ -432,6 +466,7 @@ async function processSimulationRun(
         status: 'running',
         executionToken,
         expiresAt,
+        deferReason: null,
       })
       .where(eq(runs.id, run.id));
     return {
@@ -645,8 +680,15 @@ async function processSimulationRun(
                   ]),
                 }),
               );
+              const draft =
+                decision.payload && 'draft' in decision.payload
+                  ? typeof decision.payload.draft === 'string' || decision.payload.draft === null
+                    ? decision.payload.draft
+                    : action.draft
+                  : action.draft;
               return {
                 ...action,
+                draft,
                 intentId: decision.intentId,
                 policy: decision.decision,
                 effect: decision.reasons.join(' '),
@@ -657,16 +699,45 @@ async function processSimulationRun(
       },
     );
 
-    const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
+    const needsApproval =
+      !result.error && result.actions.some((action) => action.policy === 'needs-approval');
+    const terminalStatus = result.error
+      ? ('failed' as const)
+      : needsApproval
+        ? ('awaiting_approval' as const)
+        : ('completed' as const);
     try {
       await retryableStore(() =>
         updateIfOwned(run.id, executionToken, {
           status: terminalStatus,
-          finishedAt: new Date(),
+          finishedAt: needsApproval ? null : new Date(),
           result: { ...result, traceId: telemetry.traceId },
-          deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
+          deferReason: needsApproval
+            ? 'Awaiting administrator approval.'
+            : result.error && isTrustedBudgetMessage(result.error)
+              ? result.error
+              : null,
         }),
       );
+      if (needsApproval) {
+        // Ensure the linked job is finished so no worker lease or pending reclaim remains.
+        if (run.jobId) {
+          await db()
+            .update(jobs)
+            .set({
+              status: 'completed',
+              finishedAt: new Date(),
+              claimedAt: null,
+              claimExpiresAt: null,
+              claimedBy: null,
+              updatedAt: new Date(),
+              lastError: null,
+            })
+            .where(and(eq(jobs.id, run.jobId), inArray(jobs.status, ['pending', 'claimed'])));
+        }
+        didComplete = true;
+        return;
+      }
     } catch (error) {
       // Paid-step burn: never complete the job while the run is still running. Persist the burn
       // markers when possible, then Retryable so the queue retries finalization only (simulate
@@ -846,6 +917,42 @@ export async function finalizeExhaustedSimulationJob(
       result: sql`jsonb_set(coalesce(${runs.result}, '{"steps":[],"actions":[],"error":null}'::jsonb), '{error}', to_jsonb(${inspectable}::text))`,
     })
     .where(and(eq(runs.id, runId), inArray(runs.status, ['queued', 'running'])));
+}
+
+/**
+ * Re-enqueue a suspended run after all of its pending approvals are resolved.
+ * Uses a fresh idempotency key so the completed original job is not reused.
+ */
+export async function resumeSimulationAfterApproval(runId: string, actor: string) {
+  return await db().transaction(async (tx) => {
+    const run = (await tx.select().from(runs).where(eq(runs.id, runId)).for('update')).at(0);
+    if (run?.status !== 'awaiting_approval') {
+      return { skipped: true as const };
+    }
+    const pending = await tx
+      .select({ id: actionIntents.id })
+      .from(actionIntents)
+      .where(and(eq(actionIntents.runId, runId), eq(actionIntents.reviewStatus, 'pending')))
+      .limit(1);
+    if (pending.length > 0) return { skipped: true as const, waiting: true as const };
+
+    const job = await enqueueJob(tx, {
+      type: SIMULATION_JOB_TYPE,
+      payload: { runId: run.id, agentId: run.agentId, configurationId: run.configurationId, actor },
+      idempotencyKey: `simulation:${run.id}:resume:${Date.now()}`,
+      maxAttempts: 3,
+    });
+    await tx
+      .update(runs)
+      .set({
+        status: 'queued',
+        jobId: job.id,
+        deferReason: null,
+        finishedAt: null,
+      })
+      .where(eq(runs.id, run.id));
+    return { skipped: false as const, jobId: job.id };
+  });
 }
 
 /**

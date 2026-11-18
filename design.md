@@ -206,16 +206,20 @@ OpenRouter connection settings in one column. Daily and monthly spend limits use
 numeric fields paired with independently labelled No cap checkboxes. Consent
 records pair a recipient ID with a scope, choice and evidence reference. Playground
 accepts the same IDs for consent checks in an optional disclosure. Approvals shows
-the pending queue first, with the draft and explicit approve and reject controls.
+the pending queue first, with editable draft, approve and reject controls. The
+global Approvals page lists pending items newest first (agent, action, payload
+preview, age) with bulk approve/reject, agent filter and resolved history; the
+nav badge shows the pending count. Approval requirements stay off by default and
+use simple checkboxes plus optional spend/expiry/reject behaviour fields.
 Lifecycle options show the current state and clearly label Live as simulation-only
 until adapters are configured. Access also shows which OpenRouter key source is active—agent key, environment
 default or none—by label only, never by value or prefix. It accepts a password input
 for an agent override, clears it after submission and never reads the secret back.
 Removing an agent key falls back to the environment default when configured; otherwise
-it retains a visible missing-key state. History shows queued/running/completed/failed/
-interrupted run states and linked job status. While any run is queued or running, the
-workspace soft-refreshes every two seconds so Playground and History pick up worker
-results without a manual reload. No loading skeletons on Access.
+it retains a visible missing-key state. History shows queued/running/awaiting_approval/completed/failed/
+interrupted run states and linked job status. While any run is queued, running or
+awaiting approval, the workspace soft-refreshes every two seconds so Playground and
+History pick up worker results without a manual reload. No loading skeletons on Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents

@@ -2341,3 +2341,78 @@ details[open] > summary > .disclosure-chevron {
 .policy-records p {
   margin-block: 6px 0;
 }
+
+.approvals-dashboard {
+  display: grid;
+  gap: 24px;
+}
+
+.approvals-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+
+.approvals-filter label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.approvals-filter select {
+  min-width: 220px;
+}
+
+.approvals-list > li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.approvals-select {
+  padding-top: 4px;
+}
+
+.approvals-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.approvals-bulk-actions,
+.policy-review-actions,
+.policy-review-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.policy-review-edit {
+  flex-direction: column;
+}
+
+.workspace-nav .tab-count,
+.templates-link .tab-count {
+  margin-inline-start: 6px;
+}
+
+@media (max-width: 600px) {
+  .approvals-list > li {
+    grid-template-columns: 1fr;
+  }
+
+  .approvals-filter {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .approvals-filter select {
+    min-width: 0;
+    width: 100%;
+  }
+}

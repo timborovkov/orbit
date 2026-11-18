@@ -39,6 +39,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     history,
     current,
     reviews,
+    pendingApprovalCount,
     consents,
     usage,
   } = workspace;
@@ -47,7 +48,10 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   const viewedHistory = history;
   const latest = history.at(0);
   const hasPendingRuns = history.some(
-    (run) => run.displayStatus === 'queued' || run.displayStatus === 'running',
+    (run) =>
+      run.displayStatus === 'queued' ||
+      run.displayStatus === 'running' ||
+      run.displayStatus === 'awaiting_approval',
   );
   const versionFor = (configurationId: string) =>
     versions.find((version) => version.id === configurationId)?.version;
@@ -80,7 +84,13 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     <div className="access-stack">
       <LifecycleControls agentId={id} lifecycle={lifecycle} />
       <BudgetSettings agentId={id} budgets={agent.budgets} usage={usage} />
-      <ReviewSettings agentId={id} approvalTools={agent.approvalTools} />
+      <ReviewSettings
+        agentId={id}
+        approvalTools={agent.approvalTools}
+        approvalExpiresAfterHours={agent.approvalExpiresAfterHours}
+        approvalOnReject={agent.approvalOnReject}
+        approvalSpendCents={agent.approvalSpendCents}
+      />
       <ConsentSettings agentId={id} consents={consents} />
       <AccessPanel
         agentId={id}
@@ -244,7 +254,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <WorkspaceHeader name={agent.name} />
+      <WorkspaceHeader name={agent.name} pendingApprovalCount={pendingApprovalCount} />
       <main className="agent-main" id="main">
         {env().AUTH_DISABLED && (
           <p className="local-auth-notice">Authentication disabled · Local development · {email}</p>

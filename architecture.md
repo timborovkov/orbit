@@ -142,9 +142,9 @@ Use one Langfuse production project (and optionally a separate development proje
 
 ## 13. Dashboard and administration
 
-Global navigation: Agents, Activity, Conversations, People, Playground/Evaluations, Integrations and Settings. Each agent has Overview, Identity/Personality, Mission/Goals, Models, Tools, Triggers, Channels, Knowledge, Memory, Activity, Conversations, Analytics and Permissions.
+Global navigation: Agents, Activity, Approvals, Conversations, People, Playground/Evaluations, Integrations and Settings. Each agent has Overview, Identity/Personality, Mission/Goals, Models, Tools, Triggers, Channels, Knowledge, Memory, Activity, Conversations, Analytics and Permissions.
 
-Admin access initially uses environment-configured email/password credentials; trusted OAuth with allowlisted emails is planned. No open registration. The dashboard provides per-agent pause/resume, shadow/live mode, credential health, approvals, usage and action audit trails.
+Admin access initially uses environment-configured email/password credentials; trusted OAuth with allowlisted emails is planned. No open registration. The dashboard provides per-agent pause/resume, shadow/live mode, credential health, a global Approvals inbox with a pending-count badge, usage and action audit trails.
 
 ## 14. Suggested data domains (not a fixed schema)
 
@@ -159,11 +159,11 @@ Orbit's **full platform design is the implementation backbone**. Delivery is inc
 | Phase | Outcome |
 | --- | --- |
 | 1. Foundation | Private environment-configured administrator login and guarded local development AUTH_DISABLED bypass; OAuth and magic-link login and allowlist later, agents/templates, versioned configuration, optional OpenRouter env default plus encrypted per-agent credential overrides, Drizzle/Postgres, Zod environment validation, Docker/Compose/Railway configuration. |
-| 2. Runtime and safety | Bun worker, durable jobs and recovery, OpenRouter/AI SDK, model configuration, policy gateway, approval queue, hard budgets, consent, agent lifecycle, Langfuse traces, Sentry monitoring and audit trails. |
+| 2. Runtime and safety | Bun worker, durable jobs and recovery, OpenRouter/AI SDK, model configuration, policy gateway, human-in-the-loop approval queue with run suspend/resume, hard budgets, consent, agent lifecycle, Langfuse traces, Sentry monitoring and audit trails. |
 | 3. Evaluation and UI | Full agent workspace, playground for single inputs and multi-step scenarios, simulation and shadow mode, detailed timelines, production-derived regression datasets and side-by-side comparisons. |
 | 4. Channels and research | Approved X discovery, mentions, posting and other permitted actions; Resend virtual inboxes; web search and read; authenticated remote MCP tools. |
 | 5. Intelligence and memory | Cheap multi-action evaluator, adaptive context retrieval, proactive planning, conversations, structured and JSONB memories, reversible identity linking, agent-scoped and shared-library RAG with pgvector. |
-| 6. Durable outcomes | Future tasks, event-driven waits, follow-ups, approvals, evidence-based outcomes, introductions, relationship review and escalation. |
+| 6. Durable outcomes | Future tasks, event-driven waits, follow-ups, channel approval pings (Telegram/Slack), evidence-based outcomes, introductions, relationship review and escalation. |
 | 7. Validation and live readiness | Exercise all six templates plus blank agent, with detailed end-to-end tests for John, Sarah and the superconnector. Verify evaluations and safeguards, then require explicit administrator activation for live mode. |
 
 These are implementation milestones, not independent product architectures. Codex may refine sequencing and engineering choices while preserving the behavioural requirements.
@@ -244,7 +244,16 @@ Event coordination and research may be added as further templates without new ru
 - Agent-scoped document uploads include PDF, TXT and Markdown initially; support FAQs, product documentation and brand guidance as content. Originals live in object storage; extracted chunks, metadata and embeddings live in PostgreSQL/pgvector.
 - Retrieve relevant passages rather than placing entire documents in the system prompt. Show citations/sources and retrieved chunks in the dashboard. Use native/MCP tools for live operational facts rather than treating static RAG as authoritative for changing data.
 
-### 18.7 Operations and administration
+### 18.7 Human-in-the-loop approvals
+- Approval rules are **disabled by default**. Empty per-agent `approval_tools`, empty global `controls.approval_tools` and a null spend threshold leave behaviour unchanged aside from the existing introduce/escalate consent+approval product rules.
+- Rules are simple toggles/lists per agent (and optionally global): action types such as outbound DM/public post analogues (`reply`, social writes), named tool calls (including future MCP tool names), and an optional spend-above-threshold gate. There is no rules DSL.
+- Gateway outcomes remain `allow | deny | needs-approval | suppressed`. `needs-approval` is a first-class third path for consequential writes.
+- Suspension state machine: `queued → running → awaiting_approval → running → completed|failed|interrupted`. While `awaiting_approval`, the linked queue job is completed/released; workers hold no lease. Resume creates a new job that continues from the durable simulation checkpoint so paid model stages are not redispatched.
+- Pending actions persist on `action_intents` (agent, run, action type, proposed payload, review status, optional `review_expires_at`, reviewer). Resolved items remain visible in history. Administrators may approve, edit-then-approve, reject, or bulk approve/reject from the Approvals inbox; a nav badge shows the pending count; the list filters by agent.
+- Reject feedback is written into the intent/decision trail so the resumed run sees the decline. Per-agent `approval_on_reject` is `continue` (default) or `end`. Optional expiry auto-rejects stale pending items during worker reconcile.
+- Record decisions in run history, `policy_decisions`, administrator audit rows and Langfuse span events when observability is configured. A `notifyApprovalPending` hook is reserved for Telegram/Slack; do not implement those channels yet.
+
+### 18.8 Operations and administration
 - An environment-configured administrator can sign in with email and password; future OAuth or magic links require allowlisted administrator emails; there is no public registration. AUTH_DISABLED is allowed only in a strictly local development environment and must fail startup in production; use an explicit local admin identity. Each agent has its own connections, credentials, permissions, execution mode, schedules, memory, knowledge and budgets.
 - Support agent pause/resume, global outbound kill switch, per-tool approval policies, provider health/degraded states, secret rotation and revocation, and comprehensive audit history.
 - Support a dedicated per-agent email address, social identity and (later) Telegram bot. A single codebase and shared Bun worker execute all agents; no per-agent deployment or sandbox is required for trusted API tools.
@@ -305,9 +314,11 @@ Recorded so later phases can extend without redesign:
 
 3. **Shared runtime modules.** Framework-independent execution, queue, policy, budgets, schema and `db` stay under `apps/web/src/lib` and are imported by the Bun worker via `@/*` → `apps/web/src/*`. The worker validates `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` without loading admin auth env. OpenRouter key resolution remains agent credential → `OPENROUTER_API_KEY` → inspectable failure on both web and worker paths.
 
-4. **Policy gateway as the single choke point.** Every candidate action records an `action_intents` row with an idempotency key and a `policy_decisions` audit row before any dispatch would occur. Outcomes are `allow`, `deny`, `needs-approval` or `suppressed`. With no write adapters, non-read-only actions end suppressed (or denied for pause/lifecycle/tool/budget reasons).
+4. **Policy gateway as the single choke point.** Every candidate action records an `action_intents` row with an idempotency key and a `policy_decisions` audit row before any dispatch would occur. Outcomes are `allow`, `deny`, `needs-approval` or `suppressed`. With no write adapters, non-read-only actions end suppressed (or denied for pause/lifecycle/tool/budget reasons) unless a human-approval rule fires first.
 
 5. **Hard budgets.** Per-agent JSON budgets default to architecture §17 values (including 10 tool steps and a five-minute run deadline). When OpenRouter monetary pricing is unavailable, token usage is still recorded and spend is treated as zero for enforcement; request, concurrency, outbound, step and deadline caps still apply. Limit hits reject or defer work and surface in run history.
+
+6. **Human-in-the-loop approvals (optional, disabled by default).** Configurable approval rules are off until an administrator enables them. With empty per-agent and global approval-tool lists and no spend threshold, write proposals follow the existing suppress/deny path except for product-mandated introduce/escalate consent+approval. When a main-stage action evaluates to `needs-approval`, the runtime persists the pending intent, marks the run `awaiting_approval`, checkpoints simulation progress (including paid-stage burn markers) and completes the queue job so no worker lease is held. Approve (optionally with an edited payload) or reject records the decision, audits it, emits a Langfuse span event when telemetry is configured, and re-enqueues the run to continue from the checkpoint without redistributing paid model calls. Reject may continue or end the run per agent setting. Optional per-intent expiry auto-rejects stale items. A no-op notifier hook is reserved for later Telegram/Slack pings; channels are not built in this phase. The Approvals inbox lists pending and resolved items across agents.
 
 
 ### Guarded local development authentication

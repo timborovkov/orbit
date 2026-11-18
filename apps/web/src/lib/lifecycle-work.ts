@@ -2,7 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 
 import { db, type Db, type Tx } from '@/lib/db';
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
-import { runs } from '@/lib/schema';
+import { actionIntents, runs } from '@/lib/schema';
 
 type Store = Db | Tx;
 
@@ -25,7 +25,12 @@ export async function cancelWorkForLifecycle(
         finishedAt: new Date(),
         deferReason: 'Agent stopped; pending work cancelled.',
       })
-      .where(and(eq(runs.agentId, agentId), inArray(runs.status, ['queued', 'running'])));
+      .where(
+        and(
+          eq(runs.agentId, agentId),
+          inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
+        ),
+      );
   } else if (cancelledIds.length) {
     // Interrupt queued runs and retry-waiting running runs whose pending jobs were cancelled.
     // Preserve genuinely active claimed executions (pause does not cancel claimed jobs).
@@ -43,6 +48,20 @@ export async function cancelWorkForLifecycle(
           inArray(runs.jobId, cancelledIds),
         ),
       );
+  }
+  if (next === 'stopped') {
+    // Reject any leftover pending approvals so the inbox does not keep stopped work.
+    await store
+      .update(actionIntents)
+      .set({
+        decision: 'deny',
+        reasons: ['Agent stopped; pending approval cancelled.'],
+        reviewStatus: 'rejected',
+        reviewedBy: 'system:lifecycle-stop',
+        reviewedAt: new Date(),
+        reviewExpiresAt: null,
+      })
+      .where(and(eq(actionIntents.agentId, agentId), eq(actionIntents.reviewStatus, 'pending')));
   }
   return cancelledIds;
 }

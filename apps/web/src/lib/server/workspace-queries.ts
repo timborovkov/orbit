@@ -22,13 +22,78 @@ import {
 
 export async function getOverview() {
   const email = await requireAdmin();
-  const [team, events, state, presets] = await Promise.all([
+  const [team, events, state, presets, pendingApprovals] = await Promise.all([
     db().select().from(agents).orderBy(desc(agents.createdAt)),
     db().select().from(audit).orderBy(desc(audit.createdAt)).limit(12),
     db().select().from(controls),
     db().select().from(templates),
+    db()
+      .select({ count: sql<number>`count(*)::int` })
+      .from(actionIntents)
+      .where(eq(actionIntents.reviewStatus, 'pending')),
   ]);
-  return { email, team, events, state, presets };
+  return {
+    email,
+    team,
+    events,
+    state,
+    presets,
+    pendingApprovalCount: pendingApprovals[0]?.count ?? 0,
+  };
+}
+
+export async function getApprovalsInbox(filterAgentId?: string | null) {
+  const email = await requireAdmin();
+  const agentFilter =
+    filterAgentId && zUuid(filterAgentId) ? eq(actionIntents.agentId, filterAgentId) : undefined;
+  const [team, items, pending] = await Promise.all([
+    db().select({ id: agents.id, name: agents.name }).from(agents).orderBy(asc(agents.name)),
+    db()
+      .select({
+        id: actionIntents.id,
+        agentId: actionIntents.agentId,
+        agentName: agents.name,
+        runId: actionIntents.runId,
+        actionType: actionIntents.actionType,
+        draft: sql<string | null>`${actionIntents.payload}->>'draft'`,
+        reason: sql<string | null>`${actionIntents.payload}->>'reason'`,
+        recipients: actionIntents.recipients,
+        status: actionIntents.reviewStatus,
+        createdAt: actionIntents.createdAt,
+        reviewedBy: actionIntents.reviewedBy,
+        reviewedAt: actionIntents.reviewedAt,
+        reviewExpiresAt: actionIntents.reviewExpiresAt,
+        reviewNote: actionIntents.reviewNote,
+      })
+      .from(actionIntents)
+      .innerJoin(agents, eq(agents.id, actionIntents.agentId))
+      .where(
+        agentFilter
+          ? and(isNotNull(actionIntents.reviewStatus), agentFilter)
+          : isNotNull(actionIntents.reviewStatus),
+      )
+      .orderBy(sql`(${actionIntents.reviewStatus} = 'pending') DESC`, desc(actionIntents.createdAt))
+      .limit(100),
+    db()
+      .select({ count: sql<number>`count(*)::int` })
+      .from(actionIntents)
+      .where(
+        agentFilter
+          ? and(eq(actionIntents.reviewStatus, 'pending'), agentFilter)
+          : eq(actionIntents.reviewStatus, 'pending'),
+      ),
+  ]);
+  return {
+    email,
+    team,
+    items,
+    pendingCount: pending[0]?.count ?? 0,
+    filterAgentId: filterAgentId && zUuid(filterAgentId) ? filterAgentId : null,
+  };
+}
+
+function zUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 export async function getTemplates() {
   const email = await requireAdmin();
@@ -46,45 +111,53 @@ export async function getAgentWorkspace(id: string) {
   await requireAdmin();
   const agent = (await db().select().from(agents).where(eq(agents.id, id))).at(0);
   if (!agent) return null;
-  const [versions, keys, history, reviews, consents, counters] = await Promise.all([
-    db()
-      .select()
-      .from(configurations)
-      .where(eq(configurations.agentId, id))
-      .orderBy(desc(configurations.version)),
-    db()
-      .select({ agentId: credentials.agentId })
-      .from(credentials)
-      .where(eq(credentials.agentId, id)),
-    db().select().from(runs).where(eq(runs.agentId, id)).orderBy(desc(runs.createdAt)).limit(50),
-    db()
-      .select({
-        id: actionIntents.id,
-        actionType: actionIntents.actionType,
-        draft: sql<string | null>`${actionIntents.payload}->>'draft'`,
-        reason: sql<string | null>`${actionIntents.payload}->>'reason'`,
-        recipients: actionIntents.recipients,
-        status: actionIntents.reviewStatus,
-        createdAt: actionIntents.createdAt,
-        reviewedBy: actionIntents.reviewedBy,
-      })
-      .from(actionIntents)
-      .where(and(eq(actionIntents.agentId, id), isNotNull(actionIntents.reviewStatus)))
-      .orderBy(sql`(${actionIntents.reviewStatus} = 'pending') DESC`, desc(actionIntents.createdAt))
-      .limit(50),
-    db()
-      .select({
-        recipient: recipientConsents.recipient,
-        scope: recipientConsents.scope,
-        evidence: recipientConsents.evidence,
-        granted: recipientConsents.granted,
-      })
-      .from(recipientConsents)
-      .where(eq(recipientConsents.agentId, id))
-      .orderBy(desc(recipientConsents.updatedAt))
-      .limit(50),
-    db().select().from(usageCounters).where(eq(usageCounters.agentId, id)),
-  ]);
+  const [versions, keys, history, reviews, consents, counters, pendingApprovals] =
+    await Promise.all([
+      db()
+        .select()
+        .from(configurations)
+        .where(eq(configurations.agentId, id))
+        .orderBy(desc(configurations.version)),
+      db()
+        .select({ agentId: credentials.agentId })
+        .from(credentials)
+        .where(eq(credentials.agentId, id)),
+      db().select().from(runs).where(eq(runs.agentId, id)).orderBy(desc(runs.createdAt)).limit(50),
+      db()
+        .select({
+          id: actionIntents.id,
+          actionType: actionIntents.actionType,
+          draft: sql<string | null>`${actionIntents.payload}->>'draft'`,
+          reason: sql<string | null>`${actionIntents.payload}->>'reason'`,
+          recipients: actionIntents.recipients,
+          status: actionIntents.reviewStatus,
+          createdAt: actionIntents.createdAt,
+          reviewedBy: actionIntents.reviewedBy,
+        })
+        .from(actionIntents)
+        .where(and(eq(actionIntents.agentId, id), isNotNull(actionIntents.reviewStatus)))
+        .orderBy(
+          sql`(${actionIntents.reviewStatus} = 'pending') DESC`,
+          desc(actionIntents.createdAt),
+        )
+        .limit(50),
+      db()
+        .select({
+          recipient: recipientConsents.recipient,
+          scope: recipientConsents.scope,
+          evidence: recipientConsents.evidence,
+          granted: recipientConsents.granted,
+        })
+        .from(recipientConsents)
+        .where(eq(recipientConsents.agentId, id))
+        .orderBy(desc(recipientConsents.updatedAt))
+        .limit(50),
+      db().select().from(usageCounters).where(eq(usageCounters.agentId, id)),
+      db()
+        .select({ count: sql<number>`count(*)::int` })
+        .from(actionIntents)
+        .where(eq(actionIntents.reviewStatus, 'pending')),
+    ]);
   const current = versions.at(0);
   if (!current) return null;
   const jobIds = history.map((run) => run.jobId).filter((jobId): jobId is string => !!jobId);
@@ -94,7 +167,8 @@ export async function getAgentWorkspace(id: string) {
   const jobsById = new Map(linkedJobs.map((job) => [job.id, job]));
   const viewedHistory = history.map((run) => {
     const expired =
-      (run.status === 'running' || run.status === 'queued') && run.expiresAt < new Date();
+      (run.status === 'running' || run.status === 'queued' || run.status === 'awaiting_approval') &&
+      run.expiresAt < new Date();
     const deferred = Boolean(run.deferReason) && (run.status === 'failed' || expired);
     return {
       ...run,
@@ -115,7 +189,8 @@ export async function getAgentWorkspace(id: string) {
   const month =
     counters.find((row) => row.period === 'month' && row.periodStart === monthStart) ?? emptyUsage;
   const activeRuns = history.filter(
-    (run) => run.status === 'queued' || run.status === 'running',
+    (run) =>
+      run.status === 'queued' || run.status === 'running' || run.status === 'awaiting_approval',
   ).length;
   const hasAgentCredential = keys.length > 0;
   return {
@@ -125,6 +200,7 @@ export async function getAgentWorkspace(id: string) {
     keySource: openRouterKeySource(hasAgentCredential),
     history: viewedHistory,
     reviews,
+    pendingApprovalCount: pendingApprovals[0]?.count ?? 0,
     consents,
     current,
     usage: {

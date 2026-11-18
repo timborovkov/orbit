@@ -19,16 +19,25 @@ const actionLabels = {
 export function ReviewSettings({
   agentId,
   approvalTools,
+  approvalExpiresAfterHours,
+  approvalOnReject,
+  approvalSpendCents,
 }: {
   agentId: string;
   approvalTools: string[];
+  approvalExpiresAfterHours: number | null;
+  approvalOnReject: 'continue' | 'end';
+  approvalSpendCents: number | null;
 }) {
   const requiredTools = new Set(approvalTools);
   return (
-    <section className="access-workbench">
+    <section className="access-workbench" data-testid="approval-settings">
       <div className="editor-section-heading">
         <h2>Approval requirements</h2>
-        <p className="muted">Introductions and escalations always require consent and approval.</p>
+        <p className="muted">
+          Off by default. Enable actions that must pause for an administrator before continuing.
+          Introductions and escalations always require consent and approval.
+        </p>
       </div>
       <WorkspaceForm action={saveApprovalTools} label="Save approval requirements">
         <input type="hidden" name="agentId" value={agentId} />
@@ -47,6 +56,42 @@ export function ReviewSettings({
               </label>
             ))}
         </div>
+        <div>
+          <label htmlFor="approval-spend">Spend threshold (USD cents, optional)</label>
+          <input
+            id="approval-spend"
+            name="approvalSpendCents"
+            type="number"
+            min={1}
+            max={100000000}
+            defaultValue={approvalSpendCents ?? undefined}
+          />
+          <p className="field-hint">
+            When set, write actions need approval once today’s recorded spend reaches this amount.
+          </p>
+        </div>
+        <div>
+          <label htmlFor="approval-expiry">Auto-reject after (hours, optional)</label>
+          <input
+            id="approval-expiry"
+            name="approvalExpiresAfterHours"
+            type="number"
+            min={1}
+            max={720}
+            defaultValue={approvalExpiresAfterHours ?? undefined}
+          />
+          <p className="field-hint">Leave blank to keep pending items until reviewed.</p>
+        </div>
+        <WorkspaceSelect
+          id="approval-on-reject"
+          name="approvalOnReject"
+          label="When a proposal is rejected"
+          initialValue={approvalOnReject}
+          options={[
+            { value: 'continue', label: 'Continue the run with the decline recorded' },
+            { value: 'end', label: 'End the run' },
+          ]}
+        />
       </WorkspaceForm>
     </section>
   );
@@ -131,7 +176,8 @@ export function ProposalReview({
       <div className="editor-section-heading">
         <h2 id="proposal-review-title">Proposal review</h2>
         <p className="muted">
-          Review simulated actions. Approval records your decision without sending the action.
+          Pending items suspend the run until approved or rejected. Edit a draft before approving
+          when needed.
         </p>
       </div>
       {reviews.length === 0 ? (
@@ -148,21 +194,30 @@ export function ProposalReview({
                 <p className="muted">{proposal.recipients.join(' · ')}</p>
               )}
               {proposal.reason && <p>{proposal.reason}</p>}
-              {proposal.draft && <blockquote>{proposal.draft}</blockquote>}
-              {proposal.status === 'pending' && (
-                <div className="policy-review-actions">
-                  {(['approved', 'rejected'] as const).map((decision) => (
-                    <WorkspaceForm
-                      key={decision}
-                      action={reviewProposal}
-                      label={decision === 'approved' ? 'Approve' : 'Reject'}
-                    >
-                      <input type="hidden" name="agentId" value={agentId} />
-                      <input type="hidden" name="intentId" value={proposal.id} />
-                      <input type="hidden" name="decision" value={decision} />
-                    </WorkspaceForm>
-                  ))}
+              {proposal.status === 'pending' ? (
+                <div className="policy-review-edit">
+                  <WorkspaceForm action={reviewProposal} label="Approve">
+                    <input type="hidden" name="agentId" value={agentId} />
+                    <input type="hidden" name="intentId" value={proposal.id} />
+                    <input type="hidden" name="decision" value="approved" />
+                    <label className="field">
+                      <span className="field-label">Draft (edit before approve)</span>
+                      <textarea
+                        name="draft"
+                        rows={3}
+                        defaultValue={proposal.draft ?? ''}
+                        maxLength={8000}
+                      />
+                    </label>
+                  </WorkspaceForm>
+                  <WorkspaceForm action={reviewProposal} label="Reject">
+                    <input type="hidden" name="agentId" value={agentId} />
+                    <input type="hidden" name="intentId" value={proposal.id} />
+                    <input type="hidden" name="decision" value="rejected" />
+                  </WorkspaceForm>
                 </div>
+              ) : (
+                proposal.draft && <blockquote>{proposal.draft}</blockquote>
               )}
               {proposal.reviewedBy && (
                 <p className="field-hint">Reviewed by {proposal.reviewedBy}</p>
