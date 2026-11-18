@@ -10,6 +10,10 @@ Read [architecture.md](architecture.md) before making product or infrastructure 
 
 Before building or changing UI, read [design.md](design.md). Follow its current design direction and task-appropriate design skills. After implementing UI changes, capture established decisions, style guidance and verification in `design.md`, as requested by the user. Keep this as the single design reference rather than creating a duplicate uppercase file.
 
+## README
+
+[README.md](README.md) stays light. Keep a one or two sentence description, prerequisites, the minimal setup/run/test/validate commands that exist in `package.json`, a pointer to [`.env.example`](.env.example), and links to [architecture.md](architecture.md) and [docs/](docs/). Do not write out the obvious. No feature lists, architecture narration, marketing copy, long env var tables, or per-feature sections. New features add at most a line; details go in architecture.md, docs/, or `.env.example` comments. PRs that change README.md must keep to these rules.
+
 ## Next.js UI and logic boundaries
 
 - Use App Router Server Components by default. Pages compose views and load data through `lib/server` queries; keep SQL, transactions, storage orchestration and business rules out of JSX components.
