@@ -13,6 +13,8 @@ APP_URL=http://127.0.0.1:3000
 DATABASE_URL=postgres://orbit:orbit_dev@127.0.0.1:5432/orbit
 ```
 
+Run `bun run db:seed:demo` after migrations for a realistic local workspace (John, Sarah, Maya). Use `--reset` to wipe only demo-owned rows. See [AGENTS.md](../AGENTS.md#demo-seed).
+
 Run `bun run dev` and open the exact `APP_URL`. The guarded launcher binds to `127.0.0.1`; set `PORT` and update `APP_URL` together to change the port. It accepts no server flags. Do not proxy or tunnel this server.
 
 Bypass requires `NODE_ENV=development`, loopback app and database URLs, and an explicit local email. The launcher supplies the internal `ORBIT_LOCAL_DEV_SERVER` marker; do not set it manually. A localhost app URL alone cannot prove that the listener is bound locally. Production startup rejects bypass.
