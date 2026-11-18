@@ -1,5 +1,5 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { generateText, Output } from 'ai';
+import { generateText, isStepCount, Output } from 'ai';
 import { z } from 'zod';
 
 import {
@@ -33,6 +33,7 @@ const modelEndpoints = z.object({ data: z.object({ endpoints: z.array(z.unknown(
 async function quoteOpenRouter(
   model: string,
   signal: AbortSignal,
+  options?: { requireTools?: boolean },
 ): Promise<InferenceQuote | undefined> {
   // Router aliases and suffixes can select a model with different pricing.
   if (!/^[\w.-]+\/[\w.-]+$/.test(model)) return;
@@ -49,6 +50,10 @@ async function quoteOpenRouter(
       const { tag, context_length, pricing, supported_parameters } = result.data;
       const supported = new Set(supported_parameters);
       if (!supported.has('structured_outputs') || !supported.has('max_tokens')) {
+        return [];
+      }
+      // Tool-bearing main stages pin `only` + require_parameters; skip endpoints without tools.
+      if (options?.requireTools && !supported.has('tools')) {
         return [];
       }
       // The context window bounds billed input without trusting a local tokenizer.
@@ -82,7 +87,19 @@ async function quoteOpenRouter(
 export function openRouterInference(apiKey: string): ModelCall {
   const provider = createOpenRouter({ apiKey });
   const call: ModelCall = async (request) => {
-    const { model, system, input, signal, quote, telemetry } = request;
+    const {
+      model,
+      system,
+      input,
+      signal,
+      quote,
+      tools,
+      maxToolSteps,
+      beforeProviderCall,
+      telemetry,
+    } = request;
+    const hasTools = Boolean(tools && Object.keys(tools).length);
+    const toolSteps = maxToolSteps ?? 10;
     const response = await generateText({
       model: provider(model, {
         usage: { include: true },
@@ -97,29 +114,60 @@ export function openRouterInference(apiKey: string): ModelCall {
       }),
       instructions: system,
       prompt: input,
-      output: Output.object({ schema: request.grounded ? groundedDecisionSchema : decisionSchema }),
+      tools: hasTools ? tools : undefined,
+      // Structured output counts as a step; leave room for tool calls when attached.
+      stopWhen: hasTools ? isStepCount(toolSteps + 1) : undefined,
+      prepareStep: async ({ stepNumber }) => {
+        signal.throwIfAborted();
+        await beforeProviderCall?.(stepNumber);
+        if (hasTools && stepNumber >= toolSteps) return { activeTools: [] };
+      },
+      output: Output.object({
+        schema: request.grounded ? groundedDecisionSchema : decisionSchema,
+      }),
       maxOutputTokens,
       maxRetries: 0,
       abortSignal: signal,
       telemetry: telemetry ?? { isEnabled: false },
     });
-    const usage = z
-      .object({
-        usage: z.object({
-          cost: z
-            .number()
-            .nonnegative()
-            .max(Number.MAX_SAFE_INTEGER / microsPerDollar),
-        }),
-      })
-      .safeParse(response.finalStep.providerMetadata?.openrouter);
     return {
       decision: response.output,
       inputTokens: response.usage.inputTokens ?? 0,
       outputTokens: response.usage.outputTokens ?? 0,
-      costMicros: usage.success ? Math.ceil(usage.data.usage.cost * microsPerDollar) : undefined,
+      // Only bill a complete sum — partial metadata would release reserved spend for unpriced steps.
+      costMicros: costMicrosFromSteps(response.steps),
+      providerCalls: Math.max(1, response.steps.length),
     };
   };
   call.quote = quoteOpenRouter;
   return call;
+}
+
+const stepCostSchema = z.object({
+  usage: z.object({
+    cost: z
+      .number()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER / microsPerDollar),
+  }),
+});
+
+/** Sum OpenRouter step costs only when every step has valid cost metadata. */
+export function costMicrosFromSteps(
+  steps: readonly { providerMetadata?: unknown }[],
+): number | undefined {
+  if (!steps.length) return undefined;
+  let costDollars = 0;
+  for (const step of steps) {
+    const metadata =
+      step.providerMetadata &&
+      typeof step.providerMetadata === 'object' &&
+      'openrouter' in step.providerMetadata
+        ? (step.providerMetadata as { openrouter?: unknown }).openrouter
+        : undefined;
+    const parsed = stepCostSchema.safeParse(metadata);
+    if (!parsed.success) return undefined;
+    costDollars += parsed.data.usage.cost;
+  }
+  return Math.ceil(costDollars * microsPerDollar);
 }

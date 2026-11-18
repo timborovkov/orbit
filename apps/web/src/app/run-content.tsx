@@ -125,6 +125,50 @@ export function RunContent({
           </article>
         ))}
       </section>
+      {((run.result.toolCalls?.length ?? 0) > 0 ||
+        (run.result.skillVersions?.length ?? 0) > 0 ||
+        (run.result.mcpConnections?.length ?? 0) > 0) && (
+        <section className="proposals" aria-label="Skills and tools">
+          <div className="result-section-heading">
+            <h3>Skills and tools</h3>
+          </div>
+          {!!run.result.skillVersions?.length && (
+            <ul className="resource-meta-list">
+              {run.result.skillVersions.map((skill) => (
+                <li key={skill.skillId}>
+                  {skill.name} · v{skill.version}
+                  {skill.loaded ? ' · loaded' : ' · catalogue only'}
+                </li>
+              ))}
+            </ul>
+          )}
+          {!!run.result.mcpConnections?.length && (
+            <ul className="resource-meta-list">
+              {run.result.mcpConnections.map((connection) => (
+                <li key={connection.connectionId}>
+                  {connection.name}: {connection.status}
+                  {connection.error ? ` · ${connection.error}` : ''}
+                  {connection.tools.length
+                    ? ` · ${connection.tools.length} tool${connection.tools.length === 1 ? '' : 's'}`
+                    : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+          {!!run.result.toolCalls?.length && (
+            <ul className="resource-meta-list">
+              {run.result.toolCalls.map((call) => (
+                <li
+                  key={`${call.tool}:${JSON.stringify(call.args)}:${call.policy}:${call.error ?? ''}`}
+                >
+                  {call.tool} · {call.policy}
+                  {call.error ? ` · ${call.error}` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
       <details className="run-metadata">
         <summary>Run metadata</summary>
         <p>Run {run.id}</p>

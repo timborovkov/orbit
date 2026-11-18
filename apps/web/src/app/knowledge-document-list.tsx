@@ -54,9 +54,7 @@ export function KnowledgeDropzone({
     >
       <BookOpen size={28} strokeWidth={1.25} aria-hidden="true" />
       <h3>No documents yet</h3>
-      <p>
-        Drop files or browse. PDF, Markdown, plain text or FAQ · up to {maxKnowledgeUploadLabel}.
-      </p>
+      <p>Drop files or browse · up to {maxKnowledgeUploadLabel}.</p>
       <Button type="button" variant="outline" disabled={disabled} onClick={onBrowse}>
         Browse files
       </Button>

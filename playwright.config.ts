@@ -4,6 +4,7 @@ export default defineConfig({
   testDir: './tests',
   testMatch: [
     'foundation.spec.ts',
+    'skills-mcp.spec.ts',
     'workspace.spec.ts',
     'pictures.spec.ts',
     'runtime-safety.spec.ts',

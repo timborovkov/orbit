@@ -80,6 +80,9 @@ export async function searchKnowledge(input: {
       )
     : null;
 
+  // Filter to this agent's ready/compatible chunks first, then rank. Searching
+  // the global HNSW index and filtering afterward can empty the candidate list
+  // when other agents dominate the approximate neighbors.
   const [vectorRows, textRows] = await Promise.all([
     embedding
       ? client`
@@ -95,13 +98,16 @@ export async function searchKnowledge(input: {
         start_offset,
         end_offset,
         embedding <=> ${embedding}::vector AS vector_distance
-      FROM knowledge_chunks
-      WHERE agent_id = ${input.agentId}
-        AND ${ready} AND ${compatible}
+      FROM (
+        SELECT *
+        FROM knowledge_chunks
+        WHERE agent_id = ${input.agentId}
+          AND ${ready} AND ${compatible}
+      ) AS scoped
       ORDER BY embedding <=> ${embedding}::vector
       LIMIT ${candidateLimit}
     `
-      : [],
+      : Promise.resolve([] as SearchRow[]),
     client`
       SELECT
         id,

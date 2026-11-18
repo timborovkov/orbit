@@ -61,6 +61,11 @@ export function accessSectionPanelHidden(activeId: string, sectionId: string) {
   return activeId !== sectionId;
 }
 
+/** Same mount/hide contract for Knowledge Documents / Inspector / Playground sections. */
+export function knowledgeSectionPanelHidden(activeId: string, sectionId: string) {
+  return activeId !== sectionId;
+}
+
 export interface PlaygroundVersionSelection {
   /** `currentConfigurationId` when the user last picked an override. */
   baseId: string;

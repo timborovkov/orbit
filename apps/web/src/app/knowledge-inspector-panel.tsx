@@ -32,11 +32,14 @@ export function KnowledgeInspectorPanel({
   onInspect: () => void;
 }) {
   return (
-    <section className="knowledge-inspector" aria-labelledby="knowledge-inspector-title">
+    <section
+      className="access-workbench knowledge-inspector"
+      aria-labelledby="knowledge-inspector-title"
+    >
       <div className="editor-section-heading">
-        <h2 id="knowledge-inspector-title">Retrieval inspector</h2>
+        <h2 id="knowledge-inspector-title">Inspector</h2>
         <p className="muted">
-          Run a hybrid search against this agent’s ready chunks and inspect scores and citations.
+          Hybrid search over this agent’s ready chunks with scores and citations.
         </p>
       </div>
 

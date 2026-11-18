@@ -1,12 +1,21 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { KeyRound, PauseCircle, Scale, ShieldCheck, WalletCards } from 'lucide-react';
+import {
+  BookOpen,
+  KeyRound,
+  PauseCircle,
+  Plug,
+  Scale,
+  ShieldCheck,
+  WalletCards,
+} from 'lucide-react';
 
 import { AccessPanel } from '@/app/access-panel';
 import { BudgetSettings, type BudgetUsageView } from '@/app/budget-settings';
 import { LifecycleControls } from '@/app/lifecycle-controls';
 import { ConsentSettings, ReviewSettings } from '@/app/policy-settings';
+import { McpPicker, SkillPicker, type McpPickerConnection } from '@/app/resource-pickers';
 import {
   Select,
   SelectContent,
@@ -28,6 +37,8 @@ const sections = [
   { id: 'budgets', title: 'Budgets', icon: WalletCards },
   { id: 'approvals', title: 'Approvals', icon: Scale },
   { id: 'consent', title: 'Consent', icon: ShieldCheck },
+  { id: 'skills', title: 'Skills', icon: BookOpen },
+  { id: 'mcp', title: 'MCP', icon: Plug },
   { id: 'openrouter', title: 'OpenRouter', icon: KeyRound },
 ] as const;
 
@@ -41,6 +52,10 @@ export function AccessWorkbench({
   consents,
   hasAgentCredential,
   keySource,
+  skills,
+  skillIds,
+  mcpConnections,
+  mcpSelections,
 }: {
   agentId: string;
   agentName: string;
@@ -51,6 +66,10 @@ export function AccessWorkbench({
   consents: Workspace['consents'];
   hasAgentCredential: boolean;
   keySource: OpenRouterKeySource;
+  skills: { id: string; name: string; title: string; description: string; version: number }[];
+  skillIds: string[];
+  mcpConnections: McpPickerConnection[];
+  mcpSelections: Workspace['mcpSelections'];
 }) {
   const [active, setActive] = useState<(typeof sections)[number]['id']>('lifecycle');
   const [compact, setCompact] = useState(false);
@@ -79,6 +98,15 @@ export function AccessWorkbench({
     budgets: <BudgetSettings agentId={agentId} budgets={budgets} usage={usage} />,
     approvals: <ReviewSettings agentId={agentId} approvalTools={approvalTools} />,
     consent: <ConsentSettings agentId={agentId} consents={consents} />,
+    skills: <SkillPicker agentId={agentId} skills={skills} selectedIds={skillIds} />,
+    mcp: (
+      <McpPicker
+        key={mcpConnections.map(({ id, revision }) => `${id}:${revision}`).join(',')}
+        agentId={agentId}
+        connections={mcpConnections}
+        selections={mcpSelections}
+      />
+    ),
     openrouter: (
       <AccessPanel
         agentId={agentId}

@@ -20,3 +20,18 @@ export function formatRelativeTime(value: Date | string, now = new Date()): stri
   if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
   return formatUtcTimestamp(date);
 }
+
+const shortTimestamp = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: false,
+});
+
+/** Short local date for library rows, e.g. "Nov 18, 10:37". */
+export function formatShortTimestamp(value: Date | string): string {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '—';
+  return shortTimestamp.format(date);
+}

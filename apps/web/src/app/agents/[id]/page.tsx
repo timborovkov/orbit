@@ -6,7 +6,7 @@ import { saveConfiguration } from '@/actions/workspace';
 import { AccessWorkbench } from '@/app/access-workbench';
 import { AgentAvatar } from '@/app/agent-avatar';
 import { ConfigFields } from '@/app/config-fields';
-import { KnowledgePanel } from '@/app/knowledge-panel';
+import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { PlaygroundChat } from '@/app/playground-chat';
 import { ProposalReview } from '@/app/policy-settings';
@@ -22,6 +22,8 @@ import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { listKnowledgeDocuments } from '@/lib/server/knowledge-queries';
+import { listMcpConnections } from '@/lib/server/mcp-queries';
+import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
 
@@ -42,8 +44,14 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     reviews,
     consents,
     usage,
+    skillIds,
+    mcpSelections,
   } = workspace;
-  const knowledgeDocuments = await listKnowledgeDocuments(id);
+  const [knowledgeDocuments, { items: librarySkills }, { items: libraryMcp }] = await Promise.all([
+    listKnowledgeDocuments(id),
+    listSkillSummaries(),
+    listMcpConnections(),
+  ]);
   const lifecycle = agent.lifecycle;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const viewedHistory = history;
@@ -91,6 +99,18 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       consents={consents}
       hasAgentCredential={hasAgentCredential}
       keySource={keySource}
+      skills={librarySkills}
+      skillIds={skillIds}
+      mcpConnections={libraryMcp.map(({ id, name, url, transport, toolAllowlist, updatedAt }) => ({
+        id,
+        name,
+        url,
+        transport,
+        revision: updatedAt.toISOString(),
+        readOnlyTools:
+          toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [],
+      }))}
+      mcpSelections={mcpSelections}
     />
   );
   const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;
@@ -210,7 +230,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
               label: 'Knowledge',
               count: knowledgeDocuments.length,
               content: (
-                <KnowledgePanel
+                <KnowledgeWorkbench
                   agentId={id}
                   documents={knowledgeDocuments}
                   storageReady={storageConfigured()}

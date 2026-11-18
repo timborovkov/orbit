@@ -21,12 +21,25 @@ test('an admin can index, inspect and enable an agent’s knowledge library', as
   await page.getByRole('link', { name: 'Knowledge browser test' }).click();
 
   await openWorkspaceTab(page, 'Knowledge');
-  const toggle = page.getByRole('button', { name: 'Use knowledge in Playground' });
-  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  const section = page.getByLabel('Knowledge section');
+  if (await section.count()) {
+    await section.click();
+    await page.getByRole('option', { name: 'Playground' }).click();
+  } else {
+    await page.getByRole('button', { name: 'Playground', exact: true }).click();
+  }
+  const toggle = page.getByRole('switch', { name: 'Use knowledge in Playground' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
   await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
 
-  const library = page.getByRole('region', { name: 'Knowledge library' });
+  if (await section.count()) {
+    await section.click();
+    await page.getByRole('option', { name: 'Documents' }).click();
+  } else {
+    await page.getByRole('button', { name: 'Documents', exact: true }).click();
+  }
+  const library = page.getByRole('region', { name: 'Documents' });
   const file = {
     name: 'billing.md',
     mimeType: 'text/markdown',
@@ -35,18 +48,32 @@ test('an admin can index, inspect and enable an agent’s knowledge library', as
   await library.locator('input[type=file]').first().setInputFiles(file);
   const item = library.getByRole('listitem').filter({ hasText: 'billing' });
   await expect(item.getByText('Ready', { exact: true })).toBeVisible({ timeout: 20000 });
+
+  if (await section.count()) {
+    await section.click();
+    await page.getByRole('option', { name: 'Inspector' }).click();
+  } else {
+    await page.getByRole('button', { name: 'Inspector', exact: true }).click();
+  }
   await page.getByRole('textbox', { name: 'Query' }).fill('invoice due date');
   await page.getByRole('button', { name: 'Inspect', exact: true }).click();
-  const inspector = page.getByRole('region', { name: 'Retrieval inspector' });
+  const inspector = page.getByRole('region', { name: 'Inspector' });
   await expect(inspector.getByText(/December 7/).first()).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await openWorkspaceTab(page, 'Playground');
   await openWorkspaceTab(page, 'Knowledge');
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  const mobileSection = page.getByLabel('Knowledge section');
+  await mobileSection.click();
+  await page.getByRole('option', { name: 'Playground' }).click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await mobileSection.click();
+  await page.getByRole('option', { name: 'Documents' }).click();
   await item.getByRole('button', { name: 'Actions for billing' }).click();
   await page.getByRole('menuitem', { name: 'Delete…' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(item).toHaveCount(0);
+  await mobileSection.click();
+  await page.getByRole('option', { name: 'Inspector' }).click();
   await expect(inspector.getByText(/December 7/)).toHaveCount(0);
 });
