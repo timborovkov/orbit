@@ -1,6 +1,7 @@
 import { KeyRound } from 'lucide-react';
 
 import { AccessCredentialForms } from '@/app/access-credential-forms';
+import { FieldDescription } from '@/components/ui/field';
 import type { OpenRouterKeySource } from '@/lib/runtime/openrouter-key';
 
 const copy: Record<OpenRouterKeySource, { title: string; status: string; detail: string }> = {
@@ -49,9 +50,9 @@ export function AccessPanel({
         <KeyRound size={20} aria-hidden="true" />
         <div>
           <h3>{state.title}</h3>
-          <p className="muted" role="status">
+          <FieldDescription className="mt-1" role="status">
             {state.detail}
-          </p>
+          </FieldDescription>
         </div>
         <span className="state-label">{state.status}</span>
       </div>

@@ -1,5 +1,7 @@
 import { saveAgentBudgets } from '@/actions/lifecycle';
 import { WorkspaceForm } from '@/app/workspace-form';
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { budgetFields, type AgentBudgets } from '@/lib/budgets';
 
 export interface BudgetUsageView {
@@ -67,32 +69,45 @@ export function BudgetSettings({
             const canBeUnlimited =
               field.key === 'dailySpendCents' || field.key === 'monthlySpendCents';
             const used = usageLine(field.key, budgets, usage);
+            const inputId = `budget-${field.key}`;
+            const hintId = `${inputId}-hint`;
+            const usageId = used ? `${inputId}-usage` : undefined;
             return (
               <li key={field.key}>
-                <label htmlFor={`budget-${field.key}`}>{field.label}</label>
-                <input
-                  id={`budget-${field.key}`}
-                  name={field.key}
-                  type="number"
-                  inputMode="numeric"
-                  min={
-                    field.key === 'maxConcurrentRuns' || field.key === 'maxToolStepsPerRun' ? 1 : 0
-                  }
-                  defaultValue={budgets[field.key] ?? undefined}
-                  required={!canBeUnlimited}
-                />
-                {canBeUnlimited && (
-                  <label className="budget-unlimited">
-                    <input
-                      type="checkbox"
-                      name={`${field.key}Unlimited`}
-                      defaultChecked={budgets[field.key] === null}
-                    />
-                    No cap <span className="sr-only">for {field.label.toLowerCase()}</span>
-                  </label>
-                )}
-                {used && <p className="budget-usage">{used}</p>}
-                <p className="field-hint">{field.hint}</p>
+                <Field className="max-w-sm gap-2">
+                  <FieldLabel htmlFor={inputId}>{field.label}</FieldLabel>
+                  <Input
+                    id={inputId}
+                    name={field.key}
+                    type="number"
+                    inputMode="numeric"
+                    min={
+                      field.key === 'maxConcurrentRuns' || field.key === 'maxToolStepsPerRun'
+                        ? 1
+                        : 0
+                    }
+                    defaultValue={budgets[field.key] ?? undefined}
+                    required={!canBeUnlimited}
+                    aria-describedby={[usageId, hintId].filter(Boolean).join(' ')}
+                    className="m-0 max-w-60"
+                  />
+                  {canBeUnlimited && (
+                    <label className="budget-unlimited">
+                      <input
+                        type="checkbox"
+                        name={`${field.key}Unlimited`}
+                        defaultChecked={budgets[field.key] === null}
+                      />
+                      No cap <span className="sr-only">for {field.label.toLowerCase()}</span>
+                    </label>
+                  )}
+                  {used && (
+                    <p id={usageId} className="budget-usage">
+                      {used}
+                    </p>
+                  )}
+                  <FieldDescription id={hintId}>{field.hint}</FieldDescription>
+                </Field>
               </li>
             );
           })}

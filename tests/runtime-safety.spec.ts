@@ -61,7 +61,8 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
   await expect(page.getByText('Budgets saved.', { exact: false })).toBeVisible();
 
   await page.getByRole('tab', { name: 'Playground' }).click();
-  await expect(page.getByRole('button', { name: 'Queue simulation', exact: true })).toBeVisible();
+  await expect(page.getByLabel(/^Post or question/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole('tab', { name: 'Access' }).click();

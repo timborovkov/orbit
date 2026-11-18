@@ -4,7 +4,33 @@ import unusedImports from 'eslint-plugin-unused-imports';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/.next/**', '**/node_modules/**', '**/next-env.d.ts'] },
+  {
+    ignores: [
+      '**/.next/**',
+      '**/node_modules/**',
+      '**/next-env.d.ts',
+      // Vendor copies from the AI Elements / shadcn registries — lint Orbit-owned code instead.
+      'apps/web/src/components/ai-elements/**',
+      'apps/web/src/components/ui/alert.tsx',
+      'apps/web/src/components/ui/badge.tsx',
+      'apps/web/src/components/ui/button-group.tsx',
+      'apps/web/src/components/ui/collapsible.tsx',
+      'apps/web/src/components/ui/command.tsx',
+      'apps/web/src/components/ui/dialog.tsx',
+      'apps/web/src/components/ui/dropdown-menu.tsx',
+      'apps/web/src/components/ui/empty.tsx',
+      'apps/web/src/components/ui/field.tsx',
+      'apps/web/src/components/ui/hover-card.tsx',
+      'apps/web/src/components/ui/input-group.tsx',
+      'apps/web/src/components/ui/input.tsx',
+      'apps/web/src/components/ui/label.tsx',
+      'apps/web/src/components/ui/select.tsx',
+      'apps/web/src/components/ui/separator.tsx',
+      'apps/web/src/components/ui/tabs.tsx',
+      'apps/web/src/components/ui/textarea.tsx',
+      'apps/web/src/components/ui/tooltip.tsx',
+    ],
+  },
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
   {

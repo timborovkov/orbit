@@ -196,9 +196,12 @@ remain mounted. Invalid required fields reveal their section before receiving fo
 Task tabs are Configuration, Playground, History, Approvals and Access, with one keyboard tab
 stop plus Left/Right/Home/End navigation. Hidden panels remain mounted, preserving
 unsaved configuration and pasted input when changing tasks. Configuration presents
-one editor and one save bar. Playground places a composer beside the latest persisted
-result and explicitly names paid inference and suppressed external actions. Empty
-results explain what will appear; failures and interrupted runs show actual state.
+one editor and one save bar. Playground is an AI SDK chat surface (`useChat` + AI Elements
+Conversation/Message/PromptInput/Reasoning/Tool/Loader) with a streaming route that still
+enqueues the durable simulation job, watches run checkpoints, and streams evaluation,
+proposed actions and drafts. Empty conversation state explains what will appear; failures
+and interrupted runs show actual state. Paid inference and simulation-only actions remain
+explicit.
 History uses native details/summary for run content and exact configuration snapshots.
 History shows the provider’s recorded cost and labels missing cost explicitly.
 Access stacks lifecycle, budget, approval requirements, recipient consent and
@@ -383,6 +386,18 @@ The source detector returned `[]`. No real provider call was made: no administra
 key was available. Mocked inference does not establish real provider response quality.
 Automated checks do not establish complete WCAG conformance, physical-device behavior
 or screen-reader speech output.
+
+### Form field components — 18 November 2026
+
+Shared workspace and auth forms now compose the installed shadcn `Field`,
+`FieldLabel`, `FieldDescription`, `FieldError`, `Input` and `Textarea` primitives
+alongside existing Orbit `.workspace-form` styles. Native `<select>` and native
+`<dialog>` remain for create-agent and version pickers so form posts and modal
+focus/Escape behaviour stay unchanged. Optional `error` / `description` props on
+`WorkspaceField` and `WorkspaceSelect` surface inline validation without changing
+server-action contracts. Consent records render as a dedicated list above the
+consent form; proposal and overview empty states use the `Empty` primitive.
+Overview workspace nav scrolls horizontally on narrow viewports instead of wrapping.
 
 ### Agent profile pictures — 16 November 2026
 

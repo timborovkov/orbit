@@ -1,5 +1,48 @@
 @import 'tailwindcss';
 
+/* Match Orbit theme.js: data-theme light|dark|auto (+ OS preference for auto). */
+@custom-variant dark {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where([data-theme='auto'], [data-theme='auto'] *) {
+      @slot;
+    }
+  }
+}
+
+/*
+  shadcn/ui + AI Elements resolve colors via Tailwind v4 theme tokens
+  (--color-*). Map those to Orbit tokens. Do not redefine Orbit --muted
+  (text) or --border (separator); --color-muted uses --subtle instead.
+*/
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--subtle);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
 :root {
   --bg: #fafafa;
   --surface: #fff;
@@ -16,6 +59,25 @@
   --focus: #0070f3;
   --danger: #b42318;
   --danger-bg: #fff5f4;
+  /* shadcn CSS variable layer (aliases; follow Orbit theme changes) */
+  --radius: 0.375rem;
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--button);
+  --primary-foreground: var(--button-ink);
+  --secondary: var(--subtle);
+  --secondary-foreground: var(--ink);
+  --muted-foreground: var(--muted);
+  --accent: var(--hover);
+  --accent-foreground: var(--ink);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--button-ink);
+  --input: var(--control-border);
+  --ring: var(--focus);
   color-scheme: light;
 }
 :root[data-theme='dark'] {
@@ -264,11 +326,16 @@ h3 {
 }
 .workspace-nav {
   border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .nav-inner {
   display: flex;
+  flex-wrap: nowrap;
   gap: 27px;
   padding: 0 40px;
+  width: max-content;
+  min-width: 100%;
 }
 .workspace-nav a {
   position: relative;
@@ -1170,7 +1237,6 @@ textarea[aria-invalid='true'] {
 /* Reflow when browser text is enlarged; content stays in DOM reading order. */
 .header-inner,
 .header-actions,
-.nav-inner,
 .section-heading,
 .control-title {
   flex-wrap: wrap;
@@ -1319,7 +1385,10 @@ fieldset[aria-disabled='true'] textarea {
 }
 .password-field {
   position: relative;
-  margin-block: 8px 22px;
+  margin-block: 0;
+}
+[data-slot='field'] .password-field {
+  margin-block: 0;
 }
 .password-field input {
   padding-inline-end: 48px;
@@ -1556,9 +1625,21 @@ fieldset[aria-disabled='true'] textarea {
   color: var(--muted);
   font-weight: 400;
 }
-.workspace-form input:not([type='hidden']),
+/* Field owns vertical rhythm; neutralize Orbit's global control margins. */
+[data-slot='field'] input:not([type='checkbox']):not([type='radio']):not([type='hidden']),
+[data-slot='field'] textarea,
+[data-slot='field'] select {
+  margin: 0;
+}
+[data-slot='field'] > [data-slot='field-label'] {
+  margin-bottom: 0;
+  justify-content: flex-start;
+}
+.workspace-form input:not([type='hidden']):not([type='checkbox']):not([type='radio']),
 .workspace-form textarea,
 .workspace-form select,
+.workspace-form [data-slot='input'],
+.workspace-form [data-slot='textarea'],
 .create-dialog select {
   width: 100%;
   min-width: 0;
@@ -1568,12 +1649,21 @@ fieldset[aria-disabled='true'] textarea {
   border-radius: 6px;
   background: var(--surface);
   color: var(--ink);
+  -webkit-text-fill-color: var(--ink);
   font: inherit;
   font-size: 0.875rem;
   line-height: 1.6;
 }
+.workspace-form input:not([type='hidden']):not([type='checkbox']):not([type='radio']):read-only,
+.workspace-form textarea:read-only,
+.workspace-form [data-slot='input']:read-only,
+.workspace-form [data-slot='textarea']:read-only {
+  color: var(--ink);
+  -webkit-text-fill-color: var(--ink);
+  opacity: 1;
+}
 .create-dialog select {
-  margin: 8px 0 16px;
+  margin: 0;
 }
 .workspace-form textarea {
   min-height: 96px;
@@ -1767,14 +1857,57 @@ fieldset[aria-disabled='true'] textarea {
   padding-top: 16px;
   border-top: 1px solid var(--border);
 }
-.access-credential-forms > .workspace-form + .workspace-form .button {
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--border);
-}
 .access-credential-forms > [role='status'],
-.access-credential-forms > .form-error {
+.access-credential-forms > .form-error,
+.access-credential-forms > [data-slot='field-error'] {
   margin-top: 16px;
+}
+.playground-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  min-height: 540px;
+}
+.playground-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px;
+  min-height: 540px;
+}
+.playground-chat-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 480px;
+  background: var(--bg);
+}
+.playground-conversation {
+  min-height: 480px;
+  max-height: min(70vh, 720px);
+  border-inline-end: 1px solid var(--border);
+  background: var(--surface);
+}
+.playground-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  background: var(--surface);
+}
+.playground-prompt {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.playground-prompt.is-disabled {
+  opacity: 0.72;
+}
+.playground-clear {
+  align-self: start;
 }
 .playground-grid {
   display: grid;
@@ -1802,7 +1935,7 @@ fieldset[aria-disabled='true'] textarea {
   display: flex;
   align-items: start;
   gap: 8px;
-  margin-top: 16px;
+  margin: 0;
   color: var(--muted);
   font-size: 0.75rem;
 }
@@ -2085,8 +2218,14 @@ fieldset[aria-disabled='true'] textarea {
   .config-fields-body {
     padding: 24px;
   }
-  .playground-grid {
+  .playground-grid,
+  .playground-chat-shell {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .playground-conversation {
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--border);
+    max-height: min(50vh, 420px);
   }
   .simulation-composer {
     border-inline-end: 0;
@@ -2200,7 +2339,8 @@ fieldset[aria-disabled='true'] textarea {
     font-size: 1rem;
   }
   .simulation-composer,
-  .simulation-result {
+  .simulation-result,
+  .playground-chat {
     padding: 20px 16px;
   }
   .connection-status {
@@ -2319,6 +2459,29 @@ details[open] > summary > .disclosure-chevron {
   margin-top: 10px;
 }
 
+.consent-records-block {
+  margin: 20px 0 28px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--subtle);
+}
+.consent-records-title {
+  margin: 0 0 8px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.consent-records-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+.consent-records-block .policy-records {
+  margin-block: 0;
+}
+.consent-records-block .policy-records li:first-child {
+  border-top: 0;
+  padding-block-start: 4px;
+}
 .policy-records {
   display: grid;
   gap: 0;

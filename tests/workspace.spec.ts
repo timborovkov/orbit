@@ -108,8 +108,10 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await page.getByLabel('Configuration version').selectOption({ label: 'Version 1 · John' });
   await page.getByRole('tab', { name: 'Playground', exact: true }).click();
   await page.getByLabel(/^Post or question/).fill(input);
-  await page.getByRole('button', { name: 'Queue simulation', exact: true }).click();
-  await expect(page.getByText('Simulation queued.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Submit', exact: true }).click();
+  await expect(page.getByText('Simulation queued', { exact: false })).toBeVisible({
+    timeout: 15000,
+  });
   await expect(page.getByLabel('Configuration version').locator('option:checked')).toHaveText(
     'Version 1 · John',
   );
@@ -189,8 +191,10 @@ test('template copies, independent versions, encrypted keys and durable manual r
   );
   await page.getByRole('tab', { name: 'Playground', exact: true }).click();
   await page.getByLabel(/^Post or question/).fill(input);
-  await page.getByRole('button', { name: 'Queue simulation', exact: true }).click();
-  await expect(page.getByText('Simulation queued.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Submit', exact: true }).click();
+  await expect(page.getByText('Simulation queued', { exact: false })).toBeVisible({
+    timeout: 15000,
+  });
   const versions =
     await sql`SELECT a.name,c.version,c.config FROM agents a JOIN agent_configurations c ON c.agent_id=a.id ORDER BY a.name,c.version`;
   expect(versions.map((v) => `${v.name}:${v.version}`)).toEqual(['John:1', 'John:2', 'Sarah:1']);

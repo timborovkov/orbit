@@ -1,6 +1,23 @@
+import { Inbox } from 'lucide-react';
+
 import { reviewProposal, saveApprovalTools, saveConsent } from '@/actions/policy';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from '@/components/ui/field';
 import { proposalTypes } from '@/lib/policy/scopes';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
@@ -32,21 +49,31 @@ export function ReviewSettings({
       </div>
       <WorkspaceForm action={saveApprovalTools} label="Save approval requirements">
         <input type="hidden" name="agentId" value={agentId} />
-        <div className="policy-options" role="group" aria-label="Other actions requiring approval">
-          {proposalTypes
-            .filter((tool) => tool !== 'introduce' && tool !== 'escalate')
-            .map((tool) => (
-              <label key={tool}>
-                <input
-                  type="checkbox"
-                  name="tool"
-                  value={tool}
-                  defaultChecked={requiredTools.has(tool)}
-                />
-                {actionLabels[tool]}
-              </label>
-            ))}
-        </div>
+        <FieldSet>
+          <FieldLegend variant="label">Other actions requiring approval</FieldLegend>
+          <FieldDescription>
+            Select actions that must wait for an administrator decision before they can proceed.
+          </FieldDescription>
+          <FieldGroup className="policy-options gap-3" data-slot="checkbox-group">
+            {proposalTypes
+              .filter((tool) => tool !== 'introduce' && tool !== 'escalate')
+              .map((tool) => (
+                <Field key={tool} orientation="horizontal" className="w-fit max-w-full gap-2">
+                  <input
+                    id={`approval-tool-${tool}`}
+                    type="checkbox"
+                    name="tool"
+                    value={tool}
+                    defaultChecked={requiredTools.has(tool)}
+                    className="m-0 size-4 w-4 shrink-0"
+                  />
+                  <FieldLabel htmlFor={`approval-tool-${tool}`} className="w-fit font-normal">
+                    {actionLabels[tool]}
+                  </FieldLabel>
+                </Field>
+              ))}
+          </FieldGroup>
+        </FieldSet>
       </WorkspaceForm>
     </section>
   );
@@ -67,54 +94,63 @@ export function ConsentSettings({
           Record a recipient’s choice and the source of their consent for this agent.
         </p>
       </div>
+      <div className="consent-records-block">
+        <h3 className="consent-records-title">Existing consents</h3>
+        {consents.length > 0 ? (
+          <ul className="policy-records" aria-label="Recent consent records">
+            {consents.map((record) => (
+              <li key={JSON.stringify([record.recipient, record.scope])}>
+                <strong>{record.recipient}</strong> · {actionLabels[record.scope]} ·{' '}
+                {record.granted ? 'Granted' : 'Revoked'}
+                <p className="field-hint">{record.evidence}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted consent-records-empty">No consent records yet.</p>
+        )}
+      </div>
       <WorkspaceForm action={saveConsent} label="Save consent">
         <input type="hidden" name="agentId" value={agentId} />
-        <WorkspaceField
-          id="consent-recipient"
-          name="recipient"
-          label="Recipient ID"
-          maxLength={120}
-          required
-        />
-        <WorkspaceSelect
-          id="consent-scope"
-          name="scope"
-          label="Consent scope"
-          initialValue="introduce"
-          options={[
-            { value: 'introduce', label: 'Introductions' },
-            { value: 'escalate', label: 'Escalations' },
-          ]}
-        />
-        <WorkspaceSelect
-          id="consent-outcome"
-          name="outcome"
-          label="Recipient decision"
-          initialValue="grant"
-          options={[
-            { value: 'grant', label: 'Grant' },
-            { value: 'revoke', label: 'Revoke' },
-          ]}
-        />
-        <WorkspaceField
-          id="consent-evidence"
-          name="evidence"
-          label="Evidence reference"
-          maxLength={1000}
-          required
-        />
+        <FieldGroup className="gap-5">
+          <WorkspaceField
+            id="consent-recipient"
+            name="recipient"
+            label="Recipient ID"
+            maxLength={120}
+            required
+            description="Use the same recipient ID the playground consent checks will receive."
+          />
+          <WorkspaceSelect
+            id="consent-scope"
+            name="scope"
+            label="Consent scope"
+            initialValue="introduce"
+            options={[
+              { value: 'introduce', label: 'Introductions' },
+              { value: 'escalate', label: 'Escalations' },
+            ]}
+          />
+          <WorkspaceSelect
+            id="consent-outcome"
+            name="outcome"
+            label="Recipient decision"
+            initialValue="grant"
+            options={[
+              { value: 'grant', label: 'Grant' },
+              { value: 'revoke', label: 'Revoke' },
+            ]}
+          />
+          <WorkspaceField
+            id="consent-evidence"
+            name="evidence"
+            label="Evidence reference"
+            maxLength={1000}
+            required
+            description="Link or note that shows where this choice was recorded."
+          />
+        </FieldGroup>
       </WorkspaceForm>
-      {consents.length > 0 && (
-        <ul className="policy-records" aria-label="Recent consent records">
-          {consents.map((record) => (
-            <li key={JSON.stringify([record.recipient, record.scope])}>
-              <strong>{record.recipient}</strong> · {actionLabels[record.scope]} ·{' '}
-              {record.granted ? 'Granted' : 'Revoked'}
-              <p className="field-hint">{record.evidence}</p>
-            </li>
-          ))}
-        </ul>
-      )}
     </section>
   );
 }
@@ -135,7 +171,17 @@ export function ProposalReview({
         </p>
       </div>
       {reviews.length === 0 ? (
-        <p className="muted">No proposals awaiting review.</p>
+        <Empty className="border border-border py-10 md:py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Inbox aria-hidden="true" />
+            </EmptyMedia>
+            <EmptyTitle>No proposals awaiting review</EmptyTitle>
+            <EmptyDescription>
+              Simulated introduce and escalate actions that need approval will appear here.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <ul className="policy-records" aria-label="Proposals, pending first">
           {reviews.map((proposal) => (

@@ -4,9 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
-import { recipientId } from '@/lib/policy/scopes';
 import { configSchema } from '@/lib/runtime/config';
-import { enqueueSimulation } from '@/lib/runtime/execute';
 import {
   persistConfiguration,
   persistCredential,
@@ -54,33 +52,6 @@ export async function saveCredential(form: FormData) {
     return { error: 'Enter an OpenRouter API key without spaces.' };
   const result = await persistCredential(actor, agentId, secret.success ? secret.data : '', revoke);
   if ('error' in result) return result;
-  revalidatePath(`/agents/${agentId}`);
-  return result;
-}
-export async function runSimulation(form: FormData) {
-  await checkOrigin();
-  const actor = await requireAdmin();
-  const agentId = uuid.parse(form.get('agentId'));
-  const configurationId = uuid.parse(form.get('configurationId'));
-  const input = z.string().trim().min(1).max(16000).safeParse(form.get('input'));
-  if (!input.success) return { error: 'Paste a post or question with 1–16,000 characters.' };
-  const recipients = z
-    .array(recipientId)
-    .max(2)
-    .safeParse(
-      ['recipient', 'otherRecipient'].flatMap((field) => {
-        const value = form.get(field);
-        return typeof value === 'string' && value.trim() !== '' ? [value] : [];
-      }),
-    );
-  if (!recipients.success) return { error: 'Enter recipient IDs of 1–120 characters.' };
-  const result = await enqueueSimulation({
-    actor,
-    agentId,
-    configurationId,
-    input: input.data,
-    recipients: recipients.data,
-  });
   revalidatePath(`/agents/${agentId}`);
   return result;
 }
