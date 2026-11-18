@@ -1,5 +1,48 @@
 @import 'tailwindcss';
 
+/* Match Orbit theme.js: data-theme light|dark|auto (+ OS preference for auto). */
+@custom-variant dark {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where([data-theme='auto'], [data-theme='auto'] *) {
+      @slot;
+    }
+  }
+}
+
+/*
+  shadcn/ui + AI Elements resolve colors via Tailwind v4 theme tokens
+  (--color-*). Map those to Orbit tokens. Do not redefine Orbit --muted
+  (text) or --border (separator); --color-muted uses --subtle instead.
+*/
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--subtle);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
 :root {
   --bg: #fafafa;
   --surface: #fff;
@@ -16,6 +59,25 @@
   --focus: #0070f3;
   --danger: #b42318;
   --danger-bg: #fff5f4;
+  /* shadcn CSS variable layer (aliases; follow Orbit theme changes) */
+  --radius: 0.375rem;
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--button);
+  --primary-foreground: var(--button-ink);
+  --secondary: var(--subtle);
+  --secondary-foreground: var(--ink);
+  --muted-foreground: var(--muted);
+  --accent: var(--hover);
+  --accent-foreground: var(--ink);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--button-ink);
+  --input: var(--control-border);
+  --ring: var(--focus);
   color-scheme: light;
 }
 :root[data-theme='dark'] {
@@ -2543,6 +2605,40 @@ details[open] > summary > .disclosure-chevron {
 .workspace-nav .tab-count,
 .templates-link .tab-count {
   margin-inline-start: 6px;
+}
+
+.approval-tool-list {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.approval-tool-row {
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  width: 100%;
+}
+.approval-tool-row:last-child {
+  border-bottom: 0;
+}
+.approval-tool-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.approval-tool-row [data-slot='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  min-width: 1rem;
+  min-height: 1rem;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+  align-self: center;
 }
 
 @media (max-width: 600px) {
