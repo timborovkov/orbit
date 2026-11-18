@@ -17,6 +17,7 @@ import {
 import type { AgentBudgets } from '@/lib/budgets';
 import type { LifecycleState } from '@/lib/lifecycle';
 import type { OpenRouterKeySource } from '@/lib/runtime/openrouter-key';
+import { accessSectionPanelHidden } from '@/lib/runtime/playground-ui';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { cn } from '@/lib/utils';
 
@@ -139,7 +140,11 @@ export function AccessWorkbench({
       )}
       <div className="access-fields-body">
         {sections.map((section) => (
-          <div key={section.id} className="access-section-panel" hidden={active !== section.id}>
+          <div
+            key={section.id}
+            className="access-section-panel"
+            hidden={accessSectionPanelHidden(active, section.id)}
+          >
             {panels[section.id]}
           </div>
         ))}

@@ -97,4 +97,86 @@ describe('playground chat UI helpers', () => {
     expect(chunks.some((chunk) => chunk.type === 'text-delta')).toBe(true);
     expect(chunks.at(-1)).toEqual({ type: 'finish', finishReason: 'error' });
   });
+
+  test('does not keep evaluator candidates that the main stage drops', () => {
+    const progress = createPlaygroundStreamProgress();
+    const evaluatorOnly: SimulationResult = {
+      ...baseResult(),
+      steps: [
+        {
+          stage: 'evaluator',
+          model: 'test/model',
+          inputTokens: 10,
+          outputTokens: 5,
+          decision: {
+            relevant: true,
+            priority: 0.7,
+            reason: 'Candidate reply and escalate.',
+            actions: [
+              { type: 'reply', reason: 'Answer', draft: null },
+              { type: 'escalate', reason: 'Needs human', draft: null },
+            ],
+          },
+        },
+      ],
+      actions: [
+        {
+          type: 'reply',
+          reason: 'Answer',
+          draft: null,
+          policy: 'suppressed',
+          effect: 'Simulation only. No external action performed.',
+        },
+        {
+          type: 'escalate',
+          reason: 'Needs human',
+          draft: null,
+          policy: 'suppressed',
+          effect: 'Simulation only. No external action performed.',
+        },
+      ],
+    };
+
+    const mid = playgroundChunksFromResult(evaluatorOnly, progress, { status: 'running' });
+    expect(mid.filter((chunk) => chunk.type === 'tool-input-available')).toHaveLength(0);
+
+    const finalized: SimulationResult = {
+      ...evaluatorOnly,
+      steps: [
+        ...evaluatorOnly.steps,
+        {
+          stage: 'main',
+          model: 'test/model',
+          inputTokens: 20,
+          outputTokens: 8,
+          decision: {
+            relevant: true,
+            priority: 0.9,
+            reason: 'Reply only; drop escalate.',
+            actions: [{ type: 'reply', reason: 'Answer', draft: 'Here you go.' }],
+          },
+        },
+      ],
+      actions: [
+        {
+          type: 'reply',
+          reason: 'Answer',
+          draft: 'Here you go.',
+          policy: 'suppressed',
+          effect: 'Simulation only. No external action performed.',
+        },
+      ],
+    };
+
+    const done = playgroundChunksFromResult(finalized, progress, {
+      status: 'completed',
+      runId: 'run-3',
+    });
+    const tools = done.filter((chunk) => chunk.type === 'tool-input-available');
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ toolName: 'reply' });
+    expect(
+      done.some((chunk) => chunk.type === 'tool-input-available' && chunk.toolName === 'escalate'),
+    ).toBe(false);
+  });
 });

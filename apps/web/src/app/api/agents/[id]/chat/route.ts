@@ -10,7 +10,8 @@ import {
   playgroundChunksFromResult,
 } from '@/lib/runtime/chat-ui';
 import { enqueueSimulation } from '@/lib/runtime/execute';
-import { getSimulationRun } from '@/lib/server/playground-queries';
+import { isTerminalSimulationStatus } from '@/lib/runtime/simulation-watch';
+import { watchSimulationRun } from '@/lib/server/playground-queries';
 
 export const maxDuration = 180;
 export const dynamic = 'force-dynamic';
@@ -20,10 +21,6 @@ const bodySchema = z.object({
   configurationId: z.uuid(),
   recipients: z.array(recipientId).max(2).optional().default([]),
 });
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -88,22 +85,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       writer.write({ type: 'text-end', id: 'status' });
 
       const progress = createPlaygroundStreamProgress();
-      const started = Date.now();
-      const deadlineMs = 150_000;
+      let sawRun = false;
 
-      while (Date.now() - started < deadlineMs) {
+      for await (const run of watchSimulationRun(runId, { signal: request.signal })) {
         if (request.signal.aborted) {
           writer.write({ type: 'abort', reason: 'client disconnected' });
           return;
         }
 
-        const run = await getSimulationRun(runId);
         if (!run) {
           writer.write({ type: 'error', errorText: 'Run disappeared before completion.' });
           writer.write({ type: 'finish', finishReason: 'error' });
           return;
         }
 
+        sawRun = true;
         const chunks = playgroundChunksFromResult(run.result, progress, {
           status: run.status,
           runId: run.id,
@@ -112,11 +108,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           writer.write(chunk);
         }
 
-        if (['completed', 'failed', 'interrupted'].includes(run.status)) {
+        if (isTerminalSimulationStatus(run.status)) {
           return;
         }
+      }
 
-        await sleep(750);
+      if (request.signal.aborted) {
+        writer.write({ type: 'abort', reason: 'client disconnected' });
+        return;
+      }
+
+      if (!sawRun) {
+        writer.write({ type: 'error', errorText: 'Run disappeared before completion.' });
+        writer.write({ type: 'finish', finishReason: 'error' });
+        return;
       }
 
       writer.write({

@@ -229,8 +229,10 @@ it retains a visible missing-key state. History shows queued/running/completed/f
 interrupted run states and linked job status. Playground refreshes the workspace when the
 stream acknowledges a queued simulation so History and PendingRunRefresh see the new run
 immediately; while any run is queued or running, the workspace soft-refreshes every two
-seconds so Playground and History pick up worker results without a manual reload. No loading
-skeletons on Access.
+seconds so Playground and History pick up worker results without a manual reload. The chat
+route polls runs through an authorized `lib/server` watch helper; PromptInput rejects
+attachments until the runtime can consume them; tool cards emit only on terminal results so
+evaluator candidates cannot outlive the final plan. No loading skeletons on Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents

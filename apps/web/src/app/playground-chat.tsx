@@ -49,6 +49,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
+  playgroundAttachmentRejection,
+  shouldRefreshWorkspaceForQueuedRun,
+} from '@/lib/runtime/playground-ui';
 import { cn } from '@/lib/utils';
 
 interface AgentVersion {
@@ -136,19 +141,26 @@ export function PlaygroundChat({
       queuedRefreshDone.current = false;
       return;
     }
-    if (queuedRefreshDone.current) return;
-    const acknowledged = messages.some((message) =>
-      message.parts.some(
-        (part) => part.type === 'text' && part.text.startsWith('Simulation queued'),
-      ),
-    );
-    if (!acknowledged) return;
+    if (
+      !shouldRefreshWorkspaceForQueuedRun({
+        busy,
+        alreadyRefreshed: queuedRefreshDone.current,
+        messages,
+      })
+    ) {
+      return;
+    }
     queuedRefreshDone.current = true;
     router.refresh();
   }, [busy, messages, router]);
 
   async function onSubmit(message: PromptInputMessage) {
     setFormError(null);
+    const attachmentError = playgroundAttachmentRejection(message.files);
+    if (attachmentError) {
+      setFormError(attachmentError);
+      return;
+    }
     const text = message.text.trim();
     if (!text) {
       setFormError('Paste a post or question with 1–16,000 characters.');
@@ -268,6 +280,12 @@ export function PlaygroundChat({
         <div className="playground-composer">
           <PromptInput
             className={cn('playground-prompt', !canSimulate && 'is-disabled')}
+            // Text-only until the simulation runtime can consume attachments.
+            accept="application/x-orbit-unsupported"
+            maxFiles={0}
+            onError={() => {
+              setFormError(PLAYGROUND_ATTACHMENTS_UNSUPPORTED);
+            }}
             onSubmit={onSubmit}
           >
             <PromptInputBody>
