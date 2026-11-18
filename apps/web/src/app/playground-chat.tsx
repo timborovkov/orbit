@@ -127,6 +127,25 @@ export function PlaygroundChat({
   });
 
   const busy = status === 'submitted' || status === 'streaming';
+  const queuedRefreshDone = useRef(false);
+
+  // Soft-refresh once the stream acknowledges the queue so History / PendingRunRefresh
+  // pick up the new run without waiting for the full stream to finish.
+  useEffect(() => {
+    if (!busy) {
+      queuedRefreshDone.current = false;
+      return;
+    }
+    if (queuedRefreshDone.current) return;
+    const acknowledged = messages.some((message) =>
+      message.parts.some(
+        (part) => part.type === 'text' && part.text.startsWith('Simulation queued'),
+      ),
+    );
+    if (!acknowledged) return;
+    queuedRefreshDone.current = true;
+    router.refresh();
+  }, [busy, messages, router]);
 
   async function onSubmit(message: PromptInputMessage) {
     setFormError(null);

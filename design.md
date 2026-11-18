@@ -226,9 +226,11 @@ value or prefix. It accepts a password input for an agent override, clears it af
 and never reads the secret back.
 Removing an agent key falls back to the environment default when configured; otherwise
 it retains a visible missing-key state. History shows queued/running/completed/failed/
-interrupted run states and linked job status. While any run is queued or running, the
-workspace soft-refreshes every two seconds so Playground and History pick up worker
-results without a manual reload. No loading skeletons on Access.
+interrupted run states and linked job status. Playground refreshes the workspace when the
+stream acknowledges a queued simulation so History and PendingRunRefresh see the new run
+immediately; while any run is queued or running, the workspace soft-refreshes every two
+seconds so Playground and History pick up worker results without a manual reload. No loading
+skeletons on Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents
