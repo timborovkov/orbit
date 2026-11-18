@@ -6,9 +6,9 @@ A privately deployed control centre for persistent AI representatives, built wit
 
 The console supports administrator login, template-based agents, versioned configurations, private profile pictures, durable worker-backed simulations through OpenRouter, agent lifecycle controls, hard budgets, proposal approvals, scoped consent and a policy gateway. Schedules, channel integrations and live external actions are deferred.
 
-## Start locally
+## Setup
 
-Install Bun 1.4.4 and Docker. Copy `.env.example` to `.env` and replace the administrator email and password (at least 16 characters).
+Install Bun 1.4.4 and Docker. Copy [`.env.example`](.env.example) to `.env` and fill in the values.
 
 ```sh
 bun install --frozen-lockfile
@@ -19,10 +19,6 @@ bun run dev
 ```
 
 Open http://localhost:3000.
-
-- [Development and testing](docs/development.md), including local development without login.
-- [Deployment and environment variables](docs/deployment.md).
-- [Architecture](architecture.md), [design](design.md) and [contributing](CONTRIBUTING.md).
 
 ### Agent templates and manual simulation
 
@@ -108,11 +104,24 @@ console on 9001. `.env.example` supplies local-only credentials. Run
 configuration, the rest of Orbit works and picture uploads show setup guidance.
 See [deployment](docs/deployment.md) for private networking and production credentials.
 
-Browser tests require the local RustFS service and a separate `orbit-test` bucket:
+Browser tests require the local RustFS service and a separate `orbit-test` bucket;
+see [testing](docs/testing/README.md).
+
+## Checks
 
 ```sh
-S3_BUCKET=orbit-test bun run storage:setup
+bun run validate
+bun run test:unit
+bun run test:simulation
+bun run test:e2e
 ```
 
-They stop and restart the local Compose RustFS service to verify persistence and
-storage-failure handling. Do not point this suite at a production storage service.
+Simulation and e2e need extra local setup; see [testing](docs/testing/README.md).
+
+## Docs
+
+- [Architecture](architecture.md)
+- [Design](design.md)
+- [Development](docs/development.md)
+- [Deployment](docs/deployment.md)
+- [Contributing](CONTRIBUTING.md)
