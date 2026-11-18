@@ -1,6 +1,7 @@
 import { sqlClient } from '@/lib/db';
 import type { EmbedOneFn } from '@/lib/knowledge/embed';
 import { mergeHybridRanks } from '@/lib/knowledge/rank';
+import { cosineSimilarityFromDistance } from '@/lib/knowledge/similarity';
 import type { KnowledgeSearchResult, RankedKnowledgeHit } from '@/lib/knowledge/types';
 
 function vectorLiteral(values: number[]) {
@@ -18,6 +19,7 @@ interface SearchRow {
   section: unknown;
   start_offset: unknown;
   end_offset: unknown;
+  vector_distance?: unknown;
   vector_score?: unknown;
   text_score?: unknown;
 }
@@ -68,7 +70,7 @@ export async function searchKnowledge(input: {
         section,
         start_offset,
         end_offset,
-        1 - (embedding <=> ${vectorLiteralValue}::vector) AS vector_score
+        embedding <=> ${vectorLiteralValue}::vector AS vector_distance
       FROM knowledge_chunks
       WHERE agent_id = ${input.agentId}
         AND embedding IS NOT NULL
@@ -109,7 +111,13 @@ export async function searchKnowledge(input: {
     endOffset: asNumber(row.end_offset),
     vectorRank: kind === 'vector' ? index + 1 : null,
     textRank: kind === 'text' ? index + 1 : null,
-    vectorScore: kind === 'vector' ? asNullableNumber(row.vector_score) : null,
+    vectorScore:
+      kind === 'vector'
+        ? (() => {
+            const distance = asNullableNumber(row.vector_distance);
+            return distance === null ? null : cosineSimilarityFromDistance(distance);
+          })()
+        : null,
     textScore: kind === 'text' ? asNullableNumber(row.text_score) : null,
   });
 

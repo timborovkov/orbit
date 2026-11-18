@@ -193,17 +193,24 @@ status. Its save bar is separated by a top border and subtle fill. Identity,
 Behaviour and Models section buttons show one field group at a time; hidden fields
 remain mounted. Invalid required fields reveal their section before receiving focus.
 
-Task tabs are Configuration, Playground, Knowledge, History, Approvals and Access, with one keyboard tab
-stop plus Left/Right/Home/End navigation. Hidden panels remain mounted, preserving
+Task tabs are Configuration, Playground, Knowledge, History, Approvals and Access. On
+viewports wider than 600px they use a horizontal tablist with Left/Right/Home/End
+keyboard navigation; at 600px and below they collapse to a full-width Select (same
+pattern as the UI redesign branch). Hidden panels remain mounted, preserving
 unsaved configuration and pasted input when changing tasks. Configuration presents
 one editor and one save bar. Playground places a composer beside the latest persisted
 result and explicitly names paid inference and suppressed external actions. Empty
 results explain what will appear; failures and interrupted runs show actual state.
-Knowledge is list-first: the document library leads, with an upload control, per-row
-status labels (pending/processing/ready/failed), and reprocess/replace/delete actions
-using the shared Button variants. The retrieval inspector sits beside the list on wide
-screens and stacks below on narrow ones; empty library and empty inspector states use
-dashed subtle panels with a short explanation, matching Playground/History empties.
+Knowledge is list-first: the document library leads with a header Upload control and,
+when empty, a dashed dropzone (“Drop files or browse”, accepted types, 10 MB limit).
+Rows show title + status Badge, then a muted sans meta line (type, size, chunk count,
+relative “Updated …” with full UTC in a tooltip). Row actions live in an ellipsis
+DropdownMenu; Delete confirms via AlertDialog. Failed rows surface the error with
+Retry. The retrieval inspector uses a single-line InputGroup with an adjacent Inspect
+control; results open with a “Found N passages” header (plus a “Dev stub embeddings”
+Badge when the stub embedder is active). Each hit shows title, rank, combined score
+and vector/text score Badges, with raw offsets/reasons behind a Details collapsible.
+Wide layouts place the inspector beside the list; below 900px they stack.
 History uses native details/summary for run content and exact configuration snapshots.
 History shows the provider’s recorded cost and labels missing cost explicitly.
 Access stacks lifecycle, budget, approval requirements, recipient consent and
@@ -421,7 +428,10 @@ provisioned and no real OpenRouter call was made during this milestone.
 ### Agent knowledge library — 18 November 2026
 
 The Knowledge tab is list-first: documents with explicit pending/processing/ready/failed
-status, then a retrieval inspector. Upload uses the shared outline Button; row actions
-use ghost/destructive Button sizes. Empty library and empty inspector states mirror
-Playground/History dashed panels. Wide layouts place the inspector beside the list;
-below 900px they stack. Soft refresh also covers in-flight knowledge jobs.
+Badges, then a retrieval inspector. Empty library uses a dashed dropzone; header Upload
+remains available once documents exist. Row meta is muted sans (not mono debug dumps);
+actions use an ellipsis menu with delete confirmation. Inspector query is a single-line
+InputGroup; hit counts and stub-embedding notices live in the inspector results header.
+Wide layouts place the inspector beside the list; below 900px they stack. Soft refresh
+also covers in-flight knowledge jobs. Mobile workspace tabs use the compact Select
+pattern shared with the UI redesign.

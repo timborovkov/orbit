@@ -95,6 +95,7 @@ export async function inspectKnowledge(form: FormData) {
   if (!query.success) return { error: 'Enter a retrieval query.' };
 
   let embedQuery: (value: string, signal?: AbortSignal) => Promise<number[]>;
+  let embeddingMode: 'openrouter' | 'stub' = 'openrouter';
   try {
     const credential = (
       await db()
@@ -108,6 +109,7 @@ export async function inspectKnowledge(form: FormData) {
   } catch {
     if (process.env.NODE_ENV === 'development' && process.env.KNOWLEDGE_EMBEDDING_STUB === 'true') {
       embedQuery = stubEmbedders().embedOne;
+      embeddingMode = 'stub';
     } else {
       return {
         error:
@@ -121,12 +123,10 @@ export async function inspectKnowledge(form: FormData) {
   });
   if ('error' in inspected) return inspected;
   return {
-    message: inspected.result.hits.length
-      ? `Found ${inspected.result.hits.length} passage${inspected.result.hits.length === 1 ? '' : 's'}.`
-      : 'No matching passages yet.',
     inspection: {
       query: inspected.result.query,
       hits: inspected.result.hits,
+      embeddingMode,
       requestId: randomUUID(),
     },
   };

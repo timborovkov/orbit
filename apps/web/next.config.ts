@@ -4,6 +4,8 @@ import { withSentryConfig } from '@sentry/nextjs/config';
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // Keep screenshots and review captures free of the Next.js corner badge.
+  devIndicators: false,
   experimental: { serverActions: { bodySizeLimit: '6mb' } },
   outputFileTracingRoot: join(import.meta.dirname, '../..'),
   turbopack: { root: join(import.meta.dirname, '../..') },
