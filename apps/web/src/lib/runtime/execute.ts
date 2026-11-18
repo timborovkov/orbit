@@ -50,7 +50,7 @@ function mergeQuotaReservations(
   if (!existing?.length && !incoming?.length) return incoming ?? existing;
   const byStage = new Map<
     'evaluator' | 'main',
-    { stage: 'evaluator' | 'main'; reservedMicros: string }
+    NonNullable<SimulationResult['quotaReservations']>[number]
   >();
   for (const entry of existing ?? []) byStage.set(entry.stage, entry);
   for (const entry of incoming ?? []) byStage.set(entry.stage, entry);

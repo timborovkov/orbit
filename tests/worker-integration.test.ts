@@ -155,6 +155,7 @@ test('reserveRequestQuota reuses a per-stage reservation across retries', async 
     RETURNING id
   `;
   const signal = AbortSignal.timeout(5_000);
+  const periodStart = new Date().toISOString().slice(0, 10);
   const first = await reserveRequestQuota(id, 0, {
     runId: run.id,
     token,
@@ -162,7 +163,11 @@ test('reserveRequestQuota reuses a per-stage reservation across retries', async 
     stage: 'evaluator',
   });
   expect(first.reused).toBe(false);
-  expect(first.reservation).toEqual({ stage: 'evaluator', reservedMicros: '0' });
+  expect(first.reservation).toEqual({
+    stage: 'evaluator',
+    reservedMicros: '0',
+    periodStart,
+  });
   const second = await reserveRequestQuota(id, 0, {
     runId: run.id,
     token,
@@ -170,12 +175,137 @@ test('reserveRequestQuota reuses a per-stage reservation across retries', async 
     stage: 'evaluator',
   });
   expect(second.reused).toBe(true);
-  expect(second.reservation).toEqual({ stage: 'evaluator', reservedMicros: '0' });
+  expect(second.reservation).toEqual({
+    stage: 'evaluator',
+    reservedMicros: '0',
+    periodStart,
+  });
   const [day] =
     await sql`SELECT requests FROM usage_counters WHERE agent_id=${id} AND period='day'`;
   expect(day.requests).toBe(1);
   const [stored] = await sql`SELECT result FROM simulation_runs WHERE id=${run.id}`;
-  expect(stored.result.quotaReservations).toEqual([{ stage: 'evaluator', reservedMicros: '0' }]);
+  expect(stored.result.quotaReservations).toEqual([
+    { stage: 'evaluator', reservedMicros: '0', periodStart },
+  ]);
+});
+
+test('reused quota reservations settle on the original accounting day', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const budgets = { ...uncapped, dailyRequests: 5, monthlyRequests: 5 };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'QuotaPeriod','Mission','shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const [version] = await sql`INSERT INTO agent_configurations(agent_id,version,config,actor)
+      SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
+  const token = randomUUID();
+  const originalDay = '2026-11-16';
+  const [run] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token)
+    VALUES (
+      ${id},
+      ${version.id},
+      'quota period',
+      'running',
+      ${sql.json({
+        steps: [],
+        actions: [],
+        error: null,
+        quotaReservations: [
+          { stage: 'evaluator', reservedMicros: '9000', periodStart: originalDay },
+        ],
+      })},
+      'test@example.com',
+      ${new Date(Date.now() + 120_000)},
+      ${token}
+    )
+    RETURNING id
+  `;
+  await sql`
+    INSERT INTO usage_counters(agent_id,period,period_start,spend_micros,requests)
+    VALUES
+      (${id},'day',${originalDay},9000,1),
+      (${id},'month','2026-11-01',9000,1)
+  `;
+  const reused = await reserveRequestQuota(id, 9000, {
+    runId: run.id,
+    token,
+    signal: AbortSignal.timeout(5_000),
+    stage: 'evaluator',
+  });
+  expect(reused.reused).toBe(true);
+  await reused(2000);
+  const [original] =
+    await sql`SELECT spend_micros::text AS spend FROM usage_counters WHERE agent_id=${id} AND period='day' AND period_start=${originalDay}`;
+  expect(original.spend).toBe('2000');
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== originalDay) {
+    const [todayRow] =
+      await sql`SELECT spend_micros::text AS spend FROM usage_counters WHERE agent_id=${id} AND period='day' AND period_start=${today}`;
+    expect(todayRow ?? null).toBeNull();
+  }
+});
+
+test('reused quota reservations top up spend when the quote grows', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const budgets = {
+    ...uncapped,
+    dailyRequests: 5,
+    monthlyRequests: 5,
+    dailySpendCents: 1,
+    monthlySpendCents: 1,
+  };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'QuotaTopUp','Mission','shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const [version] = await sql`INSERT INTO agent_configurations(agent_id,version,config,actor)
+      SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
+  const token = randomUUID();
+  const periodStart = new Date().toISOString().slice(0, 10);
+  const [run] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token)
+    VALUES (
+      ${id},
+      ${version.id},
+      'quota top up',
+      'running',
+      ${sql.json({
+        steps: [],
+        actions: [],
+        error: null,
+        quotaReservations: [{ stage: 'evaluator', reservedMicros: '0', periodStart }],
+      })},
+      'test@example.com',
+      ${new Date(Date.now() + 120_000)},
+      ${token}
+    )
+    RETURNING id
+  `;
+  await sql`
+    INSERT INTO usage_counters(agent_id,period,period_start,spend_micros,requests)
+    VALUES
+      (${id},'day',${periodStart},0,1),
+      (${id},'month',${`${periodStart.slice(0, 7)}-01`},0,1)
+  `;
+  const topped = await reserveRequestQuota(id, 5000, {
+    runId: run.id,
+    token,
+    signal: AbortSignal.timeout(5_000),
+    stage: 'evaluator',
+  });
+  expect(topped.reused).toBe(true);
+  expect(topped.reservation).toEqual({
+    stage: 'evaluator',
+    reservedMicros: '5000',
+    periodStart,
+  });
+  const [day] =
+    await sql`SELECT spend_micros::text AS spend, requests FROM usage_counters WHERE agent_id=${id} AND period='day'`;
+  expect(day.spend).toBe('5000');
+  expect(day.requests).toBe(1);
 });
 
 test('stale execution tokens cannot overwrite a reclaimed run', async () => {

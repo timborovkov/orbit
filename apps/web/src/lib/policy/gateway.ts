@@ -407,19 +407,6 @@ export async function reserveRequestQuota(
             .for('update')
         ).at(0);
         if (!runRow) throw new BudgetError('cancelled');
-        if (execution.stage) {
-          const existing = runRow.result.quotaReservations?.find(
-            (entry) => entry.stage === execution.stage,
-          );
-          if (existing) {
-            return {
-              today: new Date().toISOString().slice(0, 10),
-              reservedMicros: BigInt(existing.reservedMicros),
-              reservation: existing,
-              reused: true as const,
-            };
-          }
-        }
       }
       const budgets = parseBudgets(agent.budgets);
       const today = new Date().toISOString().slice(0, 10);
@@ -428,26 +415,76 @@ export async function reserveRequestQuota(
         .select()
         .from(usageCounters)
         .where(eq(usageCounters.agentId, agentId));
+      const day =
+        counters.find((row) => row.period === 'day' && row.periodStart === today) ?? emptyUsage();
+      const month =
+        counters.find((row) => row.period === 'month' && row.periodStart === monthStart) ??
+        emptyUsage();
+      if (upperBoundMicros === undefined && hasSpendCap(budgets))
+        throw new BudgetError('unknown-price');
+
+      if (execution?.stage && runRow) {
+        const existing = runRow.result.quotaReservations?.find(
+          (entry) => entry.stage === execution.stage,
+        );
+        if (existing) {
+          // Settle against the original accounting day, not the retry's UTC date.
+          const periodStart = existing.periodStart;
+          let reservedMicros = BigInt(existing.reservedMicros);
+          let reservation = existing;
+          if (requestedMicros > reservedMicros) {
+            const additional = requestedMicros - reservedMicros;
+            // Request count stays idempotent; only validate/top up spend coverage.
+            for (const [period, used, cap] of [
+              ['daily-spend', day.spendMicros, budgets.dailySpendCents],
+              ['monthly-spend', month.spendMicros, budgets.monthlySpendCents],
+            ] as const) {
+              if (cap === null) continue;
+              const limit = BigInt(cap) * BigInt(10_000);
+              if (used >= limit || used + additional > limit) {
+                throw new BudgetError(period);
+              }
+            }
+            await recordRequestUsage(tx, agentId, periodStart, additional, 0);
+            reservation = {
+              stage: execution.stage,
+              reservedMicros: requestedMicros.toString(),
+              periodStart,
+            };
+            const quotaReservations = [
+              ...(runRow.result.quotaReservations ?? []).filter(
+                (entry) => entry.stage !== execution.stage,
+              ),
+              reservation,
+            ];
+            await tx
+              .update(runs)
+              .set({ result: { ...runRow.result, quotaReservations } })
+              .where(eq(runs.id, runRow.id));
+            reservedMicros = requestedMicros;
+          }
+          return {
+            today: periodStart,
+            reservedMicros,
+            reservation,
+            reused: true as const,
+          };
+        }
+      }
+
       const violation = checkRequestBudgets(
-        {
-          budgets,
-          day:
-            counters.find((row) => row.period === 'day' && row.periodStart === today) ??
-            emptyUsage(),
-          month:
-            counters.find((row) => row.period === 'month' && row.periodStart === monthStart) ??
-            emptyUsage(),
-          activeRuns: 0,
-        },
+        { budgets, day, month, activeRuns: 0 },
         requestedMicros,
       );
       if (violation) throw new BudgetError(violation);
-      if (upperBoundMicros === undefined && hasSpendCap(budgets))
-        throw new BudgetError('unknown-price');
       await recordRequestUsage(tx, agentId, today, requestedMicros, 1);
       const reservation =
         execution?.stage !== undefined
-          ? { stage: execution.stage, reservedMicros: requestedMicros.toString() }
+          ? {
+              stage: execution.stage,
+              reservedMicros: requestedMicros.toString(),
+              periodStart: today,
+            }
           : undefined;
       if (runRow && reservation) {
         const quotaReservations = [...(runRow.result.quotaReservations ?? []), reservation];

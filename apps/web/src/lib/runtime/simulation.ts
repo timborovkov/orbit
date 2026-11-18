@@ -68,7 +68,12 @@ export interface SimulationResult {
    * Per-stage spend/request quota already committed for this run. Retries must reuse
    * these instead of calling reserveRequestQuota again for the same stage.
    */
-  quotaReservations?: { stage: 'evaluator' | 'main'; reservedMicros: string }[];
+  quotaReservations?: {
+    stage: 'evaluator' | 'main';
+    reservedMicros: string;
+    /** Accounting day (UTC) the reservation was charged against; settlement must use this. */
+    periodStart: string;
+  }[];
   steps: SimulationStep[];
   actions: (Decision['actions'][number] & {
     intentId?: string;
