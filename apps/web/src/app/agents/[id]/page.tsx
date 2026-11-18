@@ -23,7 +23,7 @@ import { formatUtcTimestamp } from '@/lib/format';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
-import { listSkills } from '@/lib/server/skills-queries';
+import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
 
@@ -48,7 +48,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     mcpConnectionIds,
   } = workspace;
   const [{ items: librarySkills }, { items: libraryMcp }] = await Promise.all([
-    listSkills(),
+    listSkillSummaries(),
     listMcpConnections(),
   ]);
   const lifecycle = agent.lifecycle;

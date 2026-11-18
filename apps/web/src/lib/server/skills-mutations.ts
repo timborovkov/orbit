@@ -4,7 +4,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { db } from '@/lib/db';
-import { agentSkills, audit, skills } from '@/lib/schema';
+import { agents, agentSkills, audit, skills } from '@/lib/schema';
 
 export const skillSlug = z
   .string()
@@ -94,6 +94,11 @@ export async function deleteSkill(actor: string, skillId: string) {
 export async function persistAgentSkills(actor: string, agentId: string, skillIds: string[]) {
   const unique = [...new Set(skillIds)];
   return await db().transaction(async (tx) => {
+    // Serialize concurrent attachment replaces so two empty→insert saves cannot union.
+    const agent = (
+      await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update')
+    ).at(0);
+    if (!agent) return { error: 'Agent not found.' };
     if (unique.length) {
       const found = await tx
         .select({ id: skills.id })

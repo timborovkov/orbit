@@ -93,6 +93,34 @@ interface LoadedConnection {
   tools: Record<string, Tool>;
 }
 
+/** List tools with a hard deadline; `client.tools()` does not accept AbortSignal. */
+export async function listRemoteTools(client: MCPClient, signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(30_000);
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  return await new Promise<Awaited<ReturnType<MCPClient['tools']>>>((resolve, reject) => {
+    const onAbort = () => {
+      reject(
+        combined.reason instanceof Error ? combined.reason : new Error('MCP discovery aborted'),
+      );
+    };
+    if (combined.aborted) {
+      onAbort();
+      return;
+    }
+    combined.addEventListener('abort', onAbort, { once: true });
+    client.tools().then(
+      (tools) => {
+        combined.removeEventListener('abort', onAbort);
+        resolve(tools);
+      },
+      (error: unknown) => {
+        combined.removeEventListener('abort', onAbort);
+        reject(error instanceof Error ? error : new Error('MCP discovery failed'));
+      },
+    );
+  });
+}
+
 async function loadOneConnection(
   connection: McpConnectionConfig,
   options: {
@@ -115,7 +143,7 @@ async function loadOneConnection(
   let client: MCPClient | undefined;
   try {
     client = await options.connect(connection, options.signal);
-    const remote = await client.tools();
+    const remote = await listRemoteTools(client, options.signal);
     const allow = connection.toolAllowlist?.length ? new Set(connection.toolAllowlist) : null;
     const registered: string[] = [];
     const tools: Record<string, Tool> = {};

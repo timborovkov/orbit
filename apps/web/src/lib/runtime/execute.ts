@@ -661,11 +661,13 @@ async function processSimulationRun(
                     } catch {
                       throw new BudgetError('cancelled');
                     }
-                    quote = hasSpendCap(budgets)
-                      ? await call.quote?.(request.model, request.signal)
-                      : undefined;
                     const stage = request.stage === 'main' ? 'main' : 'evaluator';
                     const hasTools = Boolean(request.tools && Object.keys(request.tools).length);
+                    quote = hasSpendCap(budgets)
+                      ? await call.quote?.(request.model, request.signal, {
+                          requireTools: hasTools,
+                        })
+                      : undefined;
                     // Match openRouterInference stopWhen: structured output + room for tool steps.
                     const providerCalls = hasTools
                       ? Math.max(2, (request.maxToolSteps ?? budgets.maxToolStepsPerRun) + 1)

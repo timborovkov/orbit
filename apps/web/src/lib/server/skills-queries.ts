@@ -44,3 +44,20 @@ export async function listSkills() {
     })),
   };
 }
+
+/** Catalogue fields for Access pickers — never includes Markdown bodies. */
+export async function listSkillSummaries() {
+  const email = await requireAdmin();
+  const rows = await db()
+    .select({
+      id: skills.id,
+      name: skills.name,
+      title: skills.title,
+      description: skills.description,
+      version: skills.version,
+    })
+    .from(skills)
+    .orderBy(asc(skills.name));
+
+  return { email, items: rows };
+}

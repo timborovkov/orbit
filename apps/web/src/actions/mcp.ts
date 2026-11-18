@@ -5,6 +5,7 @@ import { createMCPClient } from '@ai-sdk/mcp';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
+import { listRemoteTools } from '@/lib/runtime/mcp';
 import {
   deleteMcpConnection,
   mcpConnectionInput,
@@ -116,7 +117,7 @@ export async function discoverMcpTools(input: {
       },
       protocolVersionDiscovery: false,
     });
-    const remote = await client.tools();
+    const remote = await listRemoteTools(client);
     return { tools: Object.keys(remote).sort((a, b) => a.localeCompare(b)) };
   } catch {
     return {

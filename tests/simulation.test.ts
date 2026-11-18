@@ -720,7 +720,27 @@ test('OpenRouter pricing needs an exact model and a compatible priced endpoint',
         },
       }),
     )
-    .mockResolvedValueOnce(Response.json({ data: { endpoints: [] } }));
+    .mockResolvedValueOnce(Response.json({ data: { endpoints: [] } }))
+    .mockResolvedValueOnce(
+      Response.json({
+        data: {
+          endpoints: [
+            {
+              tag: 'cheap/no-tools',
+              context_length: 10_000,
+              pricing: { prompt: '0.0000001', completion: '0.0000002', request: '0' },
+              supported_parameters: ['max_tokens', 'structured_outputs'],
+            },
+            {
+              tag: 'tools/ok',
+              context_length: 10_000,
+              pricing: { prompt: '0.000001', completion: '0.000002', request: '0.004' },
+              supported_parameters: ['max_tokens', 'structured_outputs', 'tools'],
+            },
+          ],
+        },
+      }),
+    );
   try {
     const call = openRouterInference('test-secret');
     const signal = AbortSignal.timeout(1000);
@@ -730,7 +750,10 @@ test('OpenRouter pricing needs an exact model and a compatible priced endpoint',
       upperBoundMicros: 20_000,
     });
     expect(await call.quote?.('test/no-price', signal)).toBeUndefined();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await call.quote?.('test/tools', signal, { requireTools: true })).toMatchObject({
+      endpoint: 'tools/ok',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   } finally {
     fetchMock.mockRestore();
   }

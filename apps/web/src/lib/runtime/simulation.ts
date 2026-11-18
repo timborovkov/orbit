@@ -56,7 +56,11 @@ export type ModelCall = ((request: {
   maxToolSteps?: number;
   telemetry?: TelemetryOptions;
 }) => Promise<ModelResult>) & {
-  quote?: (model: string, signal: AbortSignal) => Promise<InferenceQuote | undefined>;
+  quote?: (
+    model: string,
+    signal: AbortSignal,
+    options?: { requireTools?: boolean },
+  ) => Promise<InferenceQuote | undefined>;
 };
 type SimulationStep = ModelResult & { stage: 'evaluator' | 'main'; model: string };
 type ActionPolicy = 'allow' | 'deny' | 'needs-approval' | 'suppressed' | 'denied';

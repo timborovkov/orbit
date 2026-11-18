@@ -28,6 +28,7 @@ const modelEndpoints = z.object({ data: z.object({ endpoints: z.array(z.unknown(
 async function quoteOpenRouter(
   model: string,
   signal: AbortSignal,
+  options?: { requireTools?: boolean },
 ): Promise<InferenceQuote | undefined> {
   // Router aliases and suffixes can select a model with different pricing.
   if (!/^[\w.-]+\/[\w.-]+$/.test(model)) return;
@@ -44,6 +45,10 @@ async function quoteOpenRouter(
       const { tag, context_length, pricing, supported_parameters } = result.data;
       const supported = new Set(supported_parameters);
       if (!supported.has('structured_outputs') || !supported.has('max_tokens')) {
+        return [];
+      }
+      // Tool-bearing main stages pin `only` + require_parameters; skip endpoints without tools.
+      if (options?.requireTools && !supported.has('tools')) {
         return [];
       }
       // The context window bounds billed input without trusting a local tokenizer.

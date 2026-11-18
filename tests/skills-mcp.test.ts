@@ -426,6 +426,39 @@ test('tool step gate blocks further MCP and skill calls once exhausted', async (
   expect(blocked).toEqual({ error: 'Maximum tool steps for this run reached.' });
 });
 
+test('MCP discovery aborts when the run signal expires', async () => {
+  let closed = 0;
+  const connection: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000033',
+    name: 'hang',
+    url: 'http://127.0.0.1:9/mcp',
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: null,
+  };
+  const controller = new AbortController();
+  const { statuses, close } = await loadMcpToolsForAgent({
+    connections: [connection],
+    policy,
+    signal: controller.signal,
+    authorize: async () => ({ decision: 'allow', reasons: ['ok'] }),
+    connect: async () =>
+      ({
+        tools: async () =>
+          await new Promise(() => {
+            // Never resolves — discovery must be cancelled by the run signal.
+            controller.abort();
+          }),
+        close: async () => {
+          closed += 1;
+        },
+      }) as unknown as Awaited<ReturnType<typeof connectMcpClient>>,
+  });
+  expect(statuses[0]?.status).toBe('error');
+  expect(closed).toBe(1);
+  await close();
+});
+
 test('MCP discovery failure closes an initialized client', async () => {
   let closed = 0;
   const connection: McpConnectionConfig = {

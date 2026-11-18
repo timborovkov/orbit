@@ -6,7 +6,13 @@ import { z } from 'zod';
 
 import { db } from '@/lib/db';
 import { encryptSecret } from '@/lib/runtime/secrets';
-import { agentMcpConnections, audit, mcpConnections, type McpTransport } from '@/lib/schema';
+import {
+  agentMcpConnections,
+  agents,
+  audit,
+  mcpConnections,
+  type McpTransport,
+} from '@/lib/schema';
 import { skillSlug } from '@/lib/server/skills-mutations';
 
 const toolName = z
@@ -151,6 +157,11 @@ export async function persistAgentMcpConnections(
 ) {
   const unique = [...new Set(connectionIds)];
   return await db().transaction(async (tx) => {
+    // Serialize concurrent attachment replaces so two empty→insert saves cannot union.
+    const agent = (
+      await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update')
+    ).at(0);
+    if (!agent) return { error: 'Agent not found.' };
     if (unique.length) {
       const found = await tx
         .select({ id: mcpConnections.id })
