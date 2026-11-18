@@ -5,6 +5,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { db } from '@/lib/db';
+import { normalizeMcpAllowlist, type McpAllowedTool } from '@/lib/mcp-allowlist';
 import { encryptSecret } from '@/lib/runtime/secrets';
 import {
   agentMcpConnections,
@@ -22,6 +23,14 @@ const toolName = z
   .max(120)
   .regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/, 'Use a valid tool name.');
 
+const allowEntry = z.union([
+  toolName.transform((name): McpAllowedTool => ({ name, readOnly: false })),
+  z.object({
+    name: toolName,
+    readOnly: z.boolean(),
+  }),
+]);
+
 const headerRow = z.object({
   key: z
     .string()
@@ -37,12 +46,9 @@ export const mcpConnectionInput = z.object({
   url: z.url().max(2000),
   transport: z.enum(['http', 'sse']),
   toolAllowlist: z
-    .array(toolName)
+    .array(allowEntry)
     .max(200)
-    .transform((tools) => {
-      const unique = [...new Set(tools)];
-      return unique.length ? unique : null;
-    }),
+    .transform((tools) => normalizeMcpAllowlist(tools)),
   headers: z.array(headerRow).max(40),
 });
 

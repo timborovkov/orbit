@@ -8,6 +8,7 @@ import type { HeaderRow, McpEditorState } from '@/components/mcp-editor-state';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import type { McpAllowedTool } from '@/lib/mcp-allowlist';
 
 export function McpToolAllowlist({
   editor,
@@ -20,17 +21,27 @@ export function McpToolAllowlist({
 }) {
   const [toolDraft, setToolDraft] = useState('');
   const [fetching, startFetch] = useTransition();
-  const selectedTools = new Set(editor.tools);
+  const selectedTools = new Set(editor.tools.map((tool) => tool.name));
   const discoveredTools = new Set(editor.discovered);
 
-  function addTool(name: string) {
+  function addTool(name: string, readOnly = true) {
     const trimmed = name.trim();
     if (!trimmed) return;
+    setEditor((previous) => {
+      if (previous.tools.some((tool) => tool.name === trimmed)) return previous;
+      const next: McpAllowedTool = { name: trimmed, readOnly };
+      return { ...previous, tools: [...previous.tools, next] };
+    });
+    setToolDraft('');
+  }
+
+  function toggleReadOnly(name: string) {
     setEditor((previous) => ({
       ...previous,
-      tools: previous.tools.includes(trimmed) ? previous.tools : [...previous.tools, trimmed],
+      tools: previous.tools.map((tool) =>
+        tool.name === name ? { ...tool, readOnly: !tool.readOnly } : tool,
+      ),
     }));
-    setToolDraft('');
   }
 
   function fetchTools() {
@@ -58,17 +69,19 @@ export function McpToolAllowlist({
     <Field>
       <FieldLabel>Tool allowlist</FieldLabel>
       <FieldDescription>
-        Leave empty to expose every discovered tool. Fetch tools from the server, then add or remove
-        names.
+        Leave empty to register every discovered tool as mutating (suppressed until write adapters
+        exist). Mark tools Read-only so the policy gateway can allow them. Remote annotations are
+        ignored.
       </FieldDescription>
       <div className="chip-editor">
         {!!editor.tools.length && (
           <div className="chip-list" aria-live="polite">
             {editor.tools.map((tool) => {
-              const missing = editor.discovered.length > 0 && !discoveredTools.has(tool);
+              const missing = editor.discovered.length > 0 && !discoveredTools.has(tool.name);
+              const effect = tool.readOnly ? 'Read-only' : 'Mutating';
               return (
                 <span
-                  key={tool}
+                  key={tool.name}
                   className="chip"
                   title={
                     missing
@@ -76,15 +89,27 @@ export function McpToolAllowlist({
                       : undefined
                   }
                 >
-                  {missing ? `${tool} · unavailable` : tool}
+                  {missing ? `${tool.name} · unavailable` : tool.name}
                   <button
                     type="button"
-                    aria-label={`Remove ${tool}`}
+                    className="chip-effect"
+                    disabled={pending}
+                    aria-pressed={tool.readOnly}
+                    aria-label={`${tool.name} effect: ${effect}. Click to toggle.`}
+                    onClick={() => {
+                      toggleReadOnly(tool.name);
+                    }}
+                  >
+                    {effect}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${tool.name}`}
                     disabled={pending}
                     onClick={() => {
                       setEditor((previous) => ({
                         ...previous,
-                        tools: previous.tools.filter((item) => item !== tool),
+                        tools: previous.tools.filter((item) => item.name !== tool.name),
                       }));
                     }}
                   >

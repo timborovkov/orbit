@@ -17,13 +17,14 @@ import {
 } from '@/components/ui/dialog';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { formatUtcTimestamp } from '@/lib/format';
+import type { McpAllowedTool } from '@/lib/mcp-allowlist';
 
 export interface McpListItem {
   id: string;
   name: string;
   url: string;
   transport: 'http' | 'sse';
-  toolAllowlist: string[] | null;
+  toolAllowlist: McpAllowedTool[] | null;
   hasHeaders: boolean;
   agentCount: number;
   updatedAt: string;
@@ -40,16 +41,17 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
   }
 
   function openEdit(connection: McpListItem) {
+    const tools = connection.toolAllowlist ?? [];
     setEditor({
       connectionId: connection.id,
       name: connection.name,
       url: connection.url,
       transport: connection.transport,
-      tools: connection.toolAllowlist ?? [],
+      tools,
       headers: [{ id: crypto.randomUUID(), key: '', value: '' }],
       clearHeaders: false,
       hasHeaders: connection.hasHeaders,
-      discovered: connection.toolAllowlist ?? [],
+      discovered: tools.map((tool) => tool.name),
     });
     setOpen(true);
   }

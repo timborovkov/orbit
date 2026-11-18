@@ -14,6 +14,7 @@ import {
 
 import type { AgentBudgets } from '@/lib/budgets';
 import type { LifecycleState } from '@/lib/lifecycle';
+import type { McpToolAllowlistJson } from '@/lib/mcp-allowlist';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import type { AgentConfig } from '@/lib/runtime/config';
 import type { SimulationResult } from '@/lib/runtime/simulation';
@@ -216,7 +217,7 @@ export const mcpConnections = pgTable('mcp_connections', {
   url: text('url').notNull(),
   transport: text('transport').$type<McpTransport>().notNull(),
   encryptedHeaders: text('encrypted_headers'),
-  toolAllowlist: jsonb('tool_allowlist').$type<string[] | null>(),
+  toolAllowlist: jsonb('tool_allowlist').$type<McpToolAllowlistJson>(),
   actor: text('actor').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

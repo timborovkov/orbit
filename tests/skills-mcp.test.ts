@@ -1,6 +1,7 @@
 import { afterAll, expect, test } from 'bun:test';
 
 import { budgetDefaults } from '@/lib/budgets';
+import { normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
 import { evaluateActionForTest } from '@/lib/policy/gateway';
 import {
   connectMcpClient,
@@ -52,6 +53,14 @@ const execOptions = {
   messages: [] as never[],
   context: {},
 };
+
+test('MCP allowlist normalization keeps legacy strings mutating', () => {
+  expect(normalizeMcpAllowlist(['search', { name: 'get', readOnly: true }])).toEqual([
+    { name: 'search', readOnly: false },
+    { name: 'get', readOnly: true },
+  ]);
+  expect(normalizeMcpAllowlist([])).toBeNull();
+});
 
 test('skill catalogue exposes names and descriptions only', () => {
   const catalogue = formatSkillCatalog(skills);
@@ -160,7 +169,7 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
     url: 'http://127.0.0.1:9/mcp',
     transport: 'http',
     encryptedHeaders: null,
-    toolAllowlist: ['echo'],
+    toolAllowlist: [{ name: 'echo', readOnly: true }],
   };
   const decisions: { type: string; readOnly?: boolean }[] = [];
   const { tools, statuses, close } = await loadMcpToolsForAgent({
@@ -168,10 +177,8 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
     policy,
     authorize: async (_ctx, action) => {
       decisions.push({ type: action.type, readOnly: action.readOnly });
-      if (action.type === mcpToolId('demo', 'echo')) {
-        return { decision: 'allow', reasons: ['ok'] };
-      }
-      return { decision: 'deny', reasons: ['not allowed'] };
+      // Use the real gateway evaluator so allow depends on admin readOnly marks.
+      return evaluateActionForTest(policy, action);
     },
     connect: async () =>
       ({
@@ -197,7 +204,61 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
     { ...execOptions, toolCallId: 't4' },
   );
   expect(result).toEqual({ echoed: 'hi' });
-  expect(decisions).toEqual([{ type: mcpToolId('demo', 'echo'), readOnly: false }]);
+  expect(decisions).toEqual([{ type: mcpToolId('demo', 'echo'), readOnly: true }]);
+  await close();
+});
+
+test('unclassified and mutating MCP tools stay suppressed by the real gateway', async () => {
+  const connection: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000021',
+    name: 'crm',
+    url: 'http://127.0.0.1:9/mcp',
+    transport: 'http',
+    encryptedHeaders: null,
+    // Legacy string allowlist → mutating; empty allowlist tools also mutate.
+    toolAllowlist: ['search', { name: 'write', readOnly: false }],
+  };
+  const decisions: { type: string; readOnly?: boolean; decision: string }[] = [];
+  const { tools, close } = await loadMcpToolsForAgent({
+    connections: [connection],
+    policy,
+    authorize: async (_ctx, action) => {
+      const evaluated = evaluateActionForTest(policy, action);
+      decisions.push({
+        type: action.type,
+        readOnly: action.readOnly,
+        decision: evaluated.decision,
+      });
+      return evaluated;
+    },
+    connect: async () =>
+      ({
+        tools: async () => ({
+          search: fakeTool(async () => ({ hits: 1 })),
+          write: fakeTool(async () => ({ ok: true })),
+        }),
+        close: async () => undefined,
+      }) as unknown as Awaited<ReturnType<typeof connectMcpClient>>,
+  });
+
+  const search = await tools[mcpToolAlias('crm', 'search')]!.execute!(
+    { q: 'acme' },
+    { ...execOptions, toolCallId: 'm1' },
+  );
+  const write = await tools[mcpToolAlias('crm', 'write')]!.execute!(
+    { id: '1' },
+    { ...execOptions, toolCallId: 'm2' },
+  );
+  expect(search).toEqual({
+    error: expect.stringContaining('Shadow mode suppresses external writes'),
+  });
+  expect(write).toEqual({
+    error: expect.stringContaining('Shadow mode suppresses external writes'),
+  });
+  expect(decisions).toEqual([
+    { type: mcpToolId('crm', 'search'), readOnly: false, decision: 'suppressed' },
+    { type: mcpToolId('crm', 'write'), readOnly: false, decision: 'suppressed' },
+  ]);
   await close();
 });
 

@@ -2584,6 +2584,20 @@ textarea.library-field-control {
   color: var(--muted);
   cursor: pointer;
 }
+.chip button.chip-effect {
+  width: auto;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--ink);
+}
+.chip button.chip-effect[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--ink) 28%, var(--border));
+}
 .chip button:hover {
   background: var(--hover);
   color: var(--ink);

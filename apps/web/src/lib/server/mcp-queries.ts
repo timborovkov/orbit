@@ -4,6 +4,7 @@ import { asc, count, eq } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
 import { agentMcpConnections, mcpConnections } from '@/lib/schema';
 
 export async function listMcpConnections() {
@@ -41,7 +42,7 @@ export async function listMcpConnections() {
       name: row.name,
       url: row.url,
       transport: row.transport,
-      toolAllowlist: row.toolAllowlist,
+      toolAllowlist: normalizeMcpAllowlist(row.toolAllowlist),
       hasHeaders: Boolean(row.encryptedHeaders),
       updatedAt: row.updatedAt,
       actor: row.actor,

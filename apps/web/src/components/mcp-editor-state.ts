@@ -1,3 +1,5 @@
+import type { McpAllowedTool } from '@/lib/mcp-allowlist';
+
 export interface HeaderRow {
   id: string;
   key: string;
@@ -9,7 +11,7 @@ export interface McpEditorState {
   name: string;
   url: string;
   transport: 'http' | 'sse';
-  tools: string[];
+  tools: McpAllowedTool[];
   headers: HeaderRow[];
   clearHeaders: boolean;
   hasHeaders: boolean;

@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto';
 import { createMCPClient, type MCPClient } from '@ai-sdk/mcp';
 import type { Tool } from 'ai';
 
+import {
+  mcpToolIsReadOnly,
+  normalizeMcpAllowlist,
+  type McpAllowedTool,
+  type McpToolAllowlistJson,
+} from '@/lib/mcp-allowlist';
 import { authorizeAction, type CandidateAction, type PolicyContext } from '@/lib/policy/gateway';
 import { decryptSecret } from '@/lib/runtime/secrets';
 import type { ToolCallRecord } from '@/lib/runtime/skills';
@@ -14,7 +20,8 @@ export interface McpConnectionConfig {
   url: string;
   transport: McpTransport;
   encryptedHeaders: string | null;
-  toolAllowlist: string[] | null;
+  /** Structured allowlist, or legacy `string[]` (normalized at load). */
+  toolAllowlist: McpToolAllowlistJson | McpAllowedTool[] | null;
 }
 
 export interface McpConnectionStatus {
@@ -144,7 +151,8 @@ async function loadOneConnection(
   try {
     client = await options.connect(connection, options.signal);
     const remote = await listRemoteTools(client, options.signal);
-    const allow = connection.toolAllowlist?.length ? new Set(connection.toolAllowlist) : null;
+    const allowlist = normalizeMcpAllowlist(connection.toolAllowlist);
+    const allow = allowlist?.length ? new Set(allowlist.map((tool) => tool.name)) : null;
     const registered: string[] = [];
     const tools: Record<string, Tool> = {};
 
@@ -153,6 +161,8 @@ async function loadOneConnection(
       const capability = mcpToolId(connection.name, toolName);
       const alias = mcpToolAlias(connection.name, toolName);
       const originalExecute = remoteTool.execute;
+      // Remote annotations are untrusted; only admin allowlist entries may set readOnly.
+      const readOnly = mcpToolIsReadOnly(allowlist, toolName);
       registered.push(toolName);
       // Register under the provider-safe alias; policy/audit still use `capability`.
       tools[alias] = {
@@ -185,11 +195,9 @@ async function loadOneConnection(
               ].join(':'),
             )
             .digest('hex');
-          // Annotations from remote MCP servers are untrusted; treat unknown tools as
-          // mutating so pause, shadow, approval, consent and outbound budgets apply.
           const decision = await options.authorize(options.policy, {
             type: capability,
-            readOnly: false,
+            readOnly,
             executionToken: options.executionToken,
             payload: args,
             idempotencyKey,
