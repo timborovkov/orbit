@@ -443,15 +443,24 @@ export async function reserveRequestQuota(
           if (requestedMicros > reservedMicros) {
             const additional = requestedMicros - reservedMicros;
             // Request count stays idempotent; validate/top up against the original period.
-            for (const [period, used, cap] of [
-              ['daily-spend', reservationDay.spendMicros, budgets.dailySpendCents],
-              ['monthly-spend', reservationMonth.spendMicros, budgets.monthlySpendCents],
+            for (const [reached, reservation, used, cap] of [
+              [
+                'daily-spend',
+                'daily-spend-reservation',
+                reservationDay.spendMicros,
+                budgets.dailySpendCents,
+              ],
+              [
+                'monthly-spend',
+                'monthly-spend-reservation',
+                reservationMonth.spendMicros,
+                budgets.monthlySpendCents,
+              ],
             ] as const) {
               if (cap === null) continue;
               const limit = BigInt(cap) * BigInt(10_000);
-              if (used >= limit || used + additional > limit) {
-                throw new BudgetError(period);
-              }
+              if (used >= limit) throw new BudgetError(reached);
+              if (used + additional > limit) throw new BudgetError(reservation);
             }
             await recordRequestUsage(tx, agentId, periodStart, additional, 0);
             reservation = {

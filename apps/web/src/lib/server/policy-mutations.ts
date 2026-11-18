@@ -27,7 +27,11 @@ export async function recordConsent(input: {
   const { actor, agentId, scope, evidence, granted } = input;
   return db().transaction(async (tx) => {
     const agent = (
-      await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId)).for('update')
+      await tx
+        .select({ id: agents.id, name: agents.name })
+        .from(agents)
+        .where(eq(agents.id, agentId))
+        .for('update')
     ).at(0);
     if (!agent) return { error: 'Agent not found.' };
     await tx
@@ -40,7 +44,7 @@ export async function recordConsent(input: {
     // Record the decision and its evidence without including a recipient identifier in the overview audit feed.
     await tx.insert(audit).values({
       actor,
-      action: `${granted ? 'Granted' : 'Revoked'} ${scope} consent for agent ${agentId}`,
+      action: `${granted ? 'Granted' : 'Revoked'} ${scope} consent for ${agent.name}`,
     });
     return { message: granted ? 'Consent recorded.' : 'Consent revoked.' };
   });

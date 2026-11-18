@@ -71,10 +71,20 @@ test('spend caps are independent and accept an explicit no-cap setting', () => {
   const budgets = parseBudgets({ dailySpendCents: null, monthlySpendCents: 1 });
   const snapshot = { budgets, day, month, activeRuns: 0 };
   expect(checkRequestBudgets(snapshot, 2_000n)).toBeNull();
-  expect(checkRequestBudgets(snapshot, 2_001n)).toBe('monthly-spend');
+  expect(checkRequestBudgets(snapshot, 2_001n)).toBe('monthly-spend-reservation');
   expect(checkRequestBudgets({ ...snapshot, budgets: { ...budgets, dailySpendCents: 0 } })).toBe(
     'daily-spend',
   );
+  expect(
+    checkRequestBudgets(
+      {
+        ...snapshot,
+        day: { ...day, spendMicros: 6_000n },
+        budgets: { ...budgets, dailySpendCents: 1, monthlySpendCents: null },
+      },
+      39_000n,
+    ),
+  ).toBe('daily-spend-reservation');
 });
 
 test('BudgetError messages are exact trusted allowlist entries', () => {

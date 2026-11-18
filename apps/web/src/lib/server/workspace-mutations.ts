@@ -35,7 +35,7 @@ export async function persistConfiguration(
       .where(eq(agents.id, agentId));
     await tx
       .insert(audit)
-      .values({ actor, action: `Saved configuration v${version + 1} for agent ${agentId}` });
+      .values({ actor, action: `Saved configuration v${version + 1} for ${config.name}` });
     return true;
   });
 }
@@ -76,6 +76,9 @@ export async function persistCredential(
     }
   }
   await db().transaction(async (tx) => {
+    const agent = (
+      await tx.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId))
+    ).at(0);
     if (revoke) await tx.delete(credentials).where(eq(credentials.agentId, agentId));
     else
       await tx
@@ -84,7 +87,7 @@ export async function persistCredential(
         .onConflictDoUpdate({ target: credentials.agentId, set: { encryptedKey } });
     await tx.insert(audit).values({
       actor,
-      action: `${revoke ? 'Revoked' : 'Replaced'} OpenRouter credential for agent ${agentId}`,
+      action: `${revoke ? 'Revoked' : 'Replaced'} OpenRouter credential for ${agent?.name ?? 'agent'}`,
     });
   });
   if (!revoke) return { message: 'Credential saved encrypted.' };

@@ -11,7 +11,7 @@ import {
 test('lifecycle states and transitions', () => {
   expect(lifecycleSchema.parse('shadow')).toBe('shadow');
   expect(canEnqueueSimulation('shadow')).toBe(true);
-  expect(canEnqueueSimulation('paused')).toBe(true);
+  expect(canEnqueueSimulation('paused')).toBe(false);
   expect(canEnqueueSimulation('live')).toBe(true);
   expect(canEnqueueSimulation('stopped')).toBe(false);
   expect(canAcceptBackgroundWork('shadow')).toBe(true);

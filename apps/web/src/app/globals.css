@@ -1700,13 +1700,12 @@ fieldset[aria-disabled='true'] textarea {
   border-color: var(--workspace-accent, #563cc7);
   background: var(--workspace-selection, #f1edfc);
 }
-:root[data-theme='dark'] .lifecycle-option.selected,
-:root:not([data-theme='light']) .lifecycle-option.selected {
+:root[data-theme='dark'] .lifecycle-option.selected {
   background: var(--workspace-selection-dark, #241f35);
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .lifecycle-option.selected {
-    background: #241f35;
+  :root:not([data-theme='light']):not([data-theme='dark']) .lifecycle-option.selected {
+    background: var(--workspace-selection-dark, #241f35);
   }
 }
 .lifecycle-option h3 {
@@ -1741,6 +1740,12 @@ fieldset[aria-disabled='true'] textarea {
   color: var(--ink);
   padding: 10px 12px;
   font: inherit;
+}
+.budget-usage {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
 }
 .connection-status {
   display: flex;
@@ -1966,6 +1971,9 @@ fieldset[aria-disabled='true'] textarea {
   color: var(--muted);
   font-size: 0.75rem;
 }
+.suppressed-label.denied {
+  color: var(--danger, #b42318);
+}
 .run-metadata {
   color: var(--muted);
   border-top: 1px solid var(--border);
@@ -2128,11 +2136,16 @@ fieldset[aria-disabled='true'] textarea {
     height: 44px;
   }
   .agent-tabs {
-    gap: 20px;
-    margin-bottom: 20px;
+    gap: 16px;
+    margin: 0 -16px 20px;
+    padding: 0 16px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
   .agent-tabs button {
     font-size: 0.8125rem;
+    flex: 0 0 auto;
   }
   .config-editor {
     grid-template-columns: minmax(0, 1fr);

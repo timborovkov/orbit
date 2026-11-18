@@ -188,7 +188,10 @@ export async function enqueueSimulation({
     if (!agent) return { error: 'Agent not found.' as const };
     if (!canEnqueueSimulation(agent.lifecycle)) {
       return {
-        error: 'This agent is stopped. Change its lifecycle before starting a simulation.' as const,
+        error:
+          agent.lifecycle === 'paused'
+            ? ('This agent is paused. Resume it before starting a simulation.' as const)
+            : ('This agent is stopped. Change its lifecycle before starting a simulation.' as const),
       };
     }
 
@@ -401,7 +404,27 @@ async function processSimulationRun(
   if (!claimed) return;
   if (claimed.skip) return;
 
-  const { run, config, budgets, executionToken, expiresAt } = claimed;
+  const { run, config, budgets, executionToken, expiresAt, agent } = claimed;
+  // Refuse model work for paused/stopped agents even if a job was already claimed.
+  if (!canEnqueueSimulation(agent.lifecycle)) {
+    const message =
+      agent.lifecycle === 'paused'
+        ? 'Agent is paused. Resume it before starting new work.'
+        : 'Agent is stopped. Change its lifecycle before starting new work.';
+    await retryableStore(() =>
+      updateIfOwned(run.id, executionToken, {
+        status: 'failed',
+        finishedAt: new Date(),
+        deferReason: message,
+        result: {
+          steps: [],
+          actions: [],
+          error: message,
+        },
+      }),
+    );
+    return;
+  }
   // Reconstruct the original start so deadline checks accumulate across retries.
   const startedAt = new Date(expiresAt.getTime() - budgets.runDeadlineSeconds * 1000);
   const remainingMs = expiresAt.getTime() - Date.now();

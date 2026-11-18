@@ -288,13 +288,15 @@ describe('bounded manual simulation', () => {
     expect(resumed.steps).toHaveLength(2);
     expect(resumed.error).toBeNull();
   });
-  test('provider faults after the dispatch boundary keep the stage burned', async () => {
+  test('provider faults before a returned response stay retryable', async () => {
     const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+    const models: string[] = [];
     let durable: SimulationResult | undefined;
     const first = await simulate(
       config,
       'question',
-      async () => {
+      async (request) => {
+        models.push(request.model);
         throw new RetryableInfrastructureError('provider transport blip');
       },
       async (partial) => {
@@ -303,9 +305,27 @@ describe('bounded manual simulation', () => {
       { maxSteps: 2 },
     ).catch((error: unknown) => error);
     expect(first).toBeInstanceOf(RetryableInfrastructureError);
+    expect(models).toEqual(['test/evaluator']);
     expect(durable?.reservedStages).toEqual(['evaluator']);
-    expect(durable?.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.dispatchedStages).toBeUndefined();
     expect(durable?.steps).toHaveLength(0);
+    if (!durable) throw new Error('expected reservation checkpoint');
+
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        models.push(request.model);
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async (partial) => {
+        durable = structuredClone(partial);
+      },
+      { maxSteps: 2, initial: durable },
+    );
+    expect(models).toEqual(['test/evaluator', 'test/evaluator', 'test/main']);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.error).toBeNull();
   });
   test('pre-dispatch cleanup write failures remain retryable', async () => {
     const { PreDispatchInfrastructureError, RetryableInfrastructureError } =
@@ -375,7 +395,7 @@ describe('bounded manual simulation', () => {
         return { decision, inputTokens: 1, outputTokens: 1 };
       },
       async (partial) => {
-        // Dispatch is marked before the provider call. The later step-body write fails —
+        // Dispatch is marked after the provider returns. The later step-body write fails —
         // retry must still see dispatchedStages and refuse a redo.
         if (failStepCheckpoint && partial.steps.some((step) => step.stage === 'evaluator')) {
           failStepCheckpoint = false;
@@ -411,50 +431,39 @@ describe('bounded manual simulation', () => {
     expect(resumed.dispatchedStages).toEqual(['evaluator']);
     expect(resumed.error).toContain('already used this model step');
   });
-  test('dispatch checkpoint before the provider call survives a total post-call outage', async () => {
-    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
+  test('failed dispatch checkpoint after a returned response burns the stage without queue redo', async () => {
     const models: string[] = [];
     let durable: SimulationResult | undefined;
-    let failAfterDispatch = false;
+    let failDispatchOnce = false;
+    const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
     const first = await simulate(
       config,
       'question',
       async (request) => {
         models.push(request.model);
-        failAfterDispatch = true;
+        failDispatchOnce = true;
         return { decision, inputTokens: 1, outputTokens: 1 };
       },
       async (partial) => {
-        if (failAfterDispatch && (partial.dispatchedStages?.includes('evaluator') ?? false)) {
-          // Reject every write after the dispatch boundary, including the step body and
-          // the final catch checkpoint — durable state stays at pre-call dispatch mark.
-          throw new RetryableInfrastructureError('total post-call store outage');
+        if (
+          failDispatchOnce &&
+          (partial.dispatchedStages?.includes('evaluator') ?? false) &&
+          !partial.steps.some((step) => step.stage === 'evaluator')
+        ) {
+          failDispatchOnce = false;
+          // First post-return dispatch write fails — simulate converts to a terminal burn.
+          throw new RetryableInfrastructureError('dispatch checkpoint store outage');
         }
         durable = structuredClone(partial);
       },
       { maxSteps: 2 },
-    ).catch((error: unknown) => error);
-    expect(first).toBeInstanceOf(RetryableInfrastructureError);
-    expect(models).toEqual(['test/evaluator']);
-    expect(durable?.reservedStages).toEqual(['evaluator']);
-    expect(durable?.dispatchedStages).toEqual(['evaluator']);
-    expect(durable?.steps).toHaveLength(0);
-    if (!durable) throw new Error('expected pre-call dispatch checkpoint');
-
-    const resumed = await simulate(
-      config,
-      'question',
-      async (request) => {
-        models.push(request.model);
-        return { decision, inputTokens: 1, outputTokens: 1 };
-      },
-      async (partial) => {
-        durable = structuredClone(partial);
-      },
-      { maxSteps: 2, initial: durable },
     );
     expect(models).toEqual(['test/evaluator']);
-    expect(resumed.error).toContain('already used this model step');
+    expect(first.error).toContain('already used this model step');
+    expect(first.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.reservedStages).toEqual(['evaluator']);
+    expect(durable?.dispatchedStages).toEqual(['evaluator']);
+    expect(durable?.error).toContain('already used this model step');
   });
   test('ownership loss at checkpoint stops before the next model stage', async () => {
     const { BudgetError } = await import('@/lib/budgets');
@@ -469,7 +478,7 @@ describe('bounded manual simulation', () => {
       },
       async () => {
         checkpoints += 1;
-        // Allow reservation + pre-call dispatch mark; revoke once the paid step is written.
+        // Allow reservation + post-return dispatch mark; revoke once the paid step is written.
         if (checkpoints >= 3) throw new BudgetError('cancelled');
       },
     );

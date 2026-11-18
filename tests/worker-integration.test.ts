@@ -15,7 +15,10 @@ import {
 import { encryptCredential } from '@/lib/runtime/secrets';
 import { recordConsent, reviewProposedAction } from '@/lib/server/policy-mutations';
 
-const databaseUrl = 'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
+const databaseUrl =
+  process.env.TEST_DATABASE_URL ??
+  process.env.DATABASE_URL ??
+  'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
 process.env.DATABASE_URL = databaseUrl;
 process.env.APP_URL = 'http://localhost:3000';
 process.env.AUTH_DISABLED = 'false';
@@ -105,6 +108,59 @@ test('policy gateway persists deny for global pause', async () => {
   expect(result.decision).toBe('deny');
   const [intent] = await sql`SELECT * FROM action_intents WHERE idempotency_key=${`pause-${id}`}`;
   expect(intent.decision).toBe('deny');
+});
+
+test('paused agents cannot enqueue simulations and workers skip model calls', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const config = { ...preset.config, name: 'PausedGate' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'PausedGate',${config.mission},'paused',${sql.json(uncapped)},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},'test') RETURNING id`;
+  await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'secret-paused')})`;
+  await sql`UPDATE controls SET paused=false`;
+
+  const blocked = await enqueueSimulation({
+    actor: 'test@example.com',
+    agentId: id,
+    configurationId: version.id,
+    input: 'Should not queue',
+  });
+  expect(blocked).toEqual({
+    error: 'This agent is paused. Resume it before starting a simulation.',
+  });
+
+  // Pre-queued run claimed after pause must fail before inference.
+  await sql`UPDATE agents SET lifecycle='shadow' WHERE id=${id}`;
+  const queued = await enqueueSimulation({
+    actor: 'test@example.com',
+    agentId: id,
+    configurationId: version.id,
+    input: 'Queued then paused',
+  });
+  expect('runId' in queued && queued.runId).toBeTruthy();
+  const runId = queued.runId!;
+  await sql`UPDATE agents SET lifecycle='paused' WHERE id=${id}`;
+
+  let calls = 0;
+  await processSimulationJob({ runId, agentId: id }, () => async () => {
+    calls += 1;
+    return {
+      decision: { relevant: false, priority: 0, reason: 'no', actions: [] },
+      inputTokens: 1,
+      outputTokens: 1,
+    };
+  });
+  expect(calls).toBe(0);
+  const [done] =
+    await sql`SELECT status, defer_reason, result FROM simulation_runs WHERE id=${runId}`;
+  expect(done.status).toBe('failed');
+  expect(done.defer_reason).toContain('paused');
+  expect(done.result.error).toContain('paused');
 });
 
 test('reserveRequestQuota serializes concurrent reservations under the hard cap', async () => {
@@ -573,7 +629,7 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
           outputTokens: 1,
         };
       }
-      // Post-boundary fault: dispatch was already checkpointed, so main cannot be redone.
+      // Transport blip before a returned main response — stage stays retryable.
       throw new RetryableInfrastructureError('main-stage provider blip');
     }),
   ).rejects.toBeInstanceOf(RetryableInfrastructureError);
@@ -581,7 +637,7 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
   const [afterFirst] = await sql`SELECT result FROM simulation_runs WHERE id=${runId}`;
   expect(afterFirst.result.steps).toHaveLength(1);
   expect(afterFirst.result.steps[0].stage).toBe('evaluator');
-  expect(afterFirst.result.dispatchedStages).toEqual(['evaluator', 'main']);
+  expect(afterFirst.result.dispatchedStages).toEqual(['evaluator']);
 
   await processSimulationJob({ runId, agentId: id }, () => async () => {
     calls += 1;
@@ -597,12 +653,12 @@ test('queue retries resume checkpointed steps under the hard cap', async () => {
     };
   });
 
-  // Evaluator once, failed main once — retry must not re-dispatch either stage.
-  expect(calls).toBe(2);
+  // Evaluator once, failed main once, then main succeeds on retry.
+  expect(calls).toBe(3);
   const [done] = await sql`SELECT status, result FROM simulation_runs WHERE id=${runId}`;
-  expect(done.status).toBe('failed');
-  expect(done.result.steps).toHaveLength(1);
-  expect(done.result.error).toContain('already used this model step');
+  expect(done.status).toBe('completed');
+  expect(done.result.steps).toHaveLength(2);
+  expect(done.result.actions[0].draft).toBe('Here to help.');
 });
 
 test('queue retries keep reservation-only progress under the hard cap', async () => {
@@ -900,7 +956,7 @@ test('OpenRouter spend reservations serialize and missing prices require both ca
   const denied = concurrent.find((result) => result.status === 'rejected');
   expect(admitted?.status).toBe('fulfilled');
   expect(denied?.reason).toBeInstanceOf(BudgetError);
-  expect(denied?.reason.message).toBe(budgetViolationMessage('daily-spend'));
+  expect(denied?.reason.message).toBe(budgetViolationMessage('daily-spend-reservation'));
 
   await admitted?.value(1000);
   const settle = await reserveRequestQuota(id, 9000);

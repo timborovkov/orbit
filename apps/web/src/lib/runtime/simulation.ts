@@ -251,18 +251,29 @@ export async function simulate(
           throw error;
         }
       }
-      // Durably mark dispatch before the paid provider request so a post-call store outage
-      // cannot leave a pending reservation that retries would redo.
-      if (!dispatched.includes(stage)) {
-        result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), stage])];
-        await checkpoint(result);
-      }
+      // Call first so a reclaimed lease or pre-return infrastructure fault can retry.
+      // Once the provider returns, mark dispatched before the step body so a later
+      // checkpoint failure cannot free the paid slot for a redo.
       const response = await call(request);
       try {
         signal.throwIfAborted();
       } catch {
         result.error = 'Run deadline reached or the worker cancelled this simulation.';
         break;
+      }
+      if (!dispatched.includes(stage)) {
+        result.dispatchedStages = [...new Set([...(result.dispatchedStages ?? []), stage])];
+        try {
+          await checkpoint(result);
+        } catch (error) {
+          if (isRetryableInfrastructureError(error)) {
+            // Paid response is in memory but not durable — do not ask the queue to redo.
+            result.error =
+              'A previous attempt already used this model step but could not save the result. Start a new run.';
+            break;
+          }
+          throw error;
+        }
       }
       const decision = decisionSchema.parse(response.decision);
       result.steps.push({ ...response, decision, stage, model });

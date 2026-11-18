@@ -1,6 +1,44 @@
-import { Check, ChevronDown, CircleAlert, MessageSquareText } from 'lucide-react';
+import {
+  Ban,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  Clock3,
+  MessageSquareText,
+  ShieldOff,
+} from 'lucide-react';
 
+import { formatUtcTimestamp } from '@/lib/format';
 import type { runs } from '@/lib/schema';
+
+function PolicyLabel({ policy }: { policy: string | undefined }) {
+  if (policy === 'allow') {
+    return (
+      <span className="suppressed-label">
+        <Check size={13} aria-hidden="true" /> Allowed
+      </span>
+    );
+  }
+  if (policy === 'needs-approval') {
+    return (
+      <span className="suppressed-label">
+        <Clock3 size={13} aria-hidden="true" /> Needs approval
+      </span>
+    );
+  }
+  if (policy === 'deny' || policy === 'denied') {
+    return (
+      <span className="suppressed-label denied">
+        <Ban size={13} aria-hidden="true" /> Denied
+      </span>
+    );
+  }
+  return (
+    <span className="suppressed-label">
+      <ShieldOff size={13} aria-hidden="true" /> Not sent
+    </span>
+  );
+}
 
 export function RunContent({
   run,
@@ -69,16 +107,7 @@ export function RunContent({
                 <MessageSquareText size={16} aria-hidden="true" />
                 {action.type}
               </h3>
-              <span className="suppressed-label">
-                <Check size={13} aria-hidden="true" />{' '}
-                {action.policy === 'allow'
-                  ? 'Allowed'
-                  : action.policy === 'needs-approval'
-                    ? 'Needs approval'
-                    : action.policy === 'deny' || action.policy === 'denied'
-                      ? 'Denied'
-                      : 'Not sent'}
-              </span>
+              <PolicyLabel policy={action.policy} />
             </div>
             <p>{action.reason}</p>
             {action.draft && <blockquote className="preserve-text">{action.draft}</blockquote>}
@@ -90,7 +119,7 @@ export function RunContent({
         <summary>Run metadata</summary>
         <p>Run {run.id}</p>
         <p>{run.actor}</p>
-        <p>{run.createdAt.toISOString()}</p>
+        <p>{formatUtcTimestamp(run.createdAt)}</p>
       </details>
     </div>
   );

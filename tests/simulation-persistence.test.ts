@@ -7,7 +7,10 @@ import { executeSimulation } from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
 
 // Disposable PostgreSQL database only. Inference is deliberately mocked, never a live API call.
-const databaseUrl = 'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
+const databaseUrl =
+  process.env.TEST_DATABASE_URL ??
+  process.env.DATABASE_URL ??
+  'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
 process.env.DATABASE_URL = databaseUrl;
 process.env.APP_URL = 'http://localhost:3000';
 process.env.AUTH_DISABLED = 'false';

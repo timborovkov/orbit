@@ -9,6 +9,7 @@ import { CreateAgent } from '@/app/create-agent';
 import { ThemeSwitch } from '@/app/theme';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { env } from '@/lib/env';
+import { formatUtcTimestamp } from '@/lib/format';
 import { getOverview } from '@/lib/server/workspace-queries';
 
 export const dynamic = 'force-dynamic';
@@ -210,7 +211,7 @@ export default async function Home() {
                     <p className="activity-action">{e.action}</p>
                     <p className="activity-actor">{e.actor}</p>
                     <time dateTime={e.createdAt.toISOString()}>
-                      {e.createdAt.toISOString().replace('T', ' ').slice(0, 16)} UTC
+                      {formatUtcTimestamp(e.createdAt)}
                     </time>
                   </div>
                 </li>

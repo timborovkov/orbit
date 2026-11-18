@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "bun scripts/dev.ts",
     "build": "next build",
-    "start": "next start --hostname 0.0.0.0",
+    "start": "bun scripts/start-standalone.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
