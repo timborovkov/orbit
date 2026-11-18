@@ -417,12 +417,86 @@ test('reused quota reservations top up spend when the quote grows', async () => 
   expect(topped.reservation).toEqual({
     stage: 'evaluator',
     reservedMicros: '5000',
+    reservedRequests: 1,
     periodStart,
   });
   const [day] =
     await sql`SELECT spend_micros::text AS spend, requests FROM usage_counters WHERE agent_id=${id} AND period='day'`;
   expect(day.spend).toBe('5000');
   expect(day.requests).toBe(1);
+});
+
+test('reused quota reservations top up request slots when tools attach', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const budgets = {
+    ...uncapped,
+    dailyRequests: 12,
+    monthlyRequests: 12,
+  };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'QuotaRequestTopUp','Mission','shadow',${sql.json(budgets)},${sql.json([])})
+  `;
+  const [version] = await sql`INSERT INTO agent_configurations(agent_id,version,config,actor)
+      SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
+  const token = randomUUID();
+  const periodStart = new Date().toISOString().slice(0, 10);
+  const [run] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at,execution_token)
+    VALUES (
+      ${id},
+      ${version.id},
+      'quota request top up',
+      'running',
+      ${sql.json({
+        steps: [],
+        actions: [],
+        error: null,
+        quotaReservations: [
+          { stage: 'main', reservedMicros: '0', reservedRequests: 1, periodStart },
+        ],
+      })},
+      'test@example.com',
+      ${new Date(Date.now() + 120_000)},
+      ${token}
+    )
+    RETURNING id
+  `;
+  await sql`
+    INSERT INTO usage_counters(agent_id,period,period_start,spend_micros,requests)
+    VALUES
+      (${id},'day',${periodStart},0,1),
+      (${id},'month',${`${periodStart.slice(0, 7)}-01`},0,1)
+  `;
+  const topped = await reserveRequestQuota(id, 0, {
+    runId: run.id,
+    token,
+    signal: AbortSignal.timeout(5_000),
+    stage: 'main',
+    providerCalls: 11,
+  });
+  expect(topped.reused).toBe(true);
+  expect(topped.reservation).toEqual({
+    stage: 'main',
+    reservedMicros: '0',
+    reservedRequests: 11,
+    periodStart,
+  });
+  const [day] =
+    await sql`SELECT spend_micros::text AS spend, requests FROM usage_counters WHERE agent_id=${id} AND period='day'`;
+  expect(day.spend).toBe('0');
+  expect(day.requests).toBe(11);
+
+  await expect(
+    reserveRequestQuota(id, 0, {
+      runId: run.id,
+      token,
+      signal: AbortSignal.timeout(5_000),
+      stage: 'main',
+      providerCalls: 13,
+    }),
+  ).rejects.toThrow(budgetViolationMessage('daily-requests'));
 });
 
 test('stale execution tokens cannot overwrite a reclaimed run', async () => {

@@ -465,12 +465,16 @@ export async function reserveRequestQuota(
               (row) => row.period === 'month' && row.periodStart === reservationMonthStart,
             ) ?? emptyUsage();
           let reservedMicros = BigInt(existing.reservedMicros);
-          const reservedRequests = existing.reservedRequests ?? 1;
+          let reservedRequests = existing.reservedRequests ?? 1;
           let reservation = existing;
-          if (requestedMicros > reservedMicros) {
-            const additional = requestedMicros - reservedMicros;
-            // Request count stays idempotent; validate/top up against the original period.
-            for (const [reached, reservation, used, cap] of [
+          const additionalSpend =
+            requestedMicros > reservedMicros ? requestedMicros - reservedMicros : BigInt(0);
+          const additionalRequests =
+            providerCalls > reservedRequests ? providerCalls - reservedRequests : 0;
+          if (additionalSpend > BigInt(0) || additionalRequests > 0) {
+            // Top up spend and/or request slots against the original accounting period.
+            // Request slots can grow when a retry attaches tools (e.g. skill load_skill).
+            for (const [reached, reservationKind, used, cap] of [
               [
                 'daily-spend',
                 'daily-spend-reservation',
@@ -484,15 +488,25 @@ export async function reserveRequestQuota(
                 budgets.monthlySpendCents,
               ],
             ] as const) {
-              if (cap === null) continue;
+              if (cap === null || additionalSpend === BigInt(0)) continue;
               const limit = BigInt(cap) * BigInt(10_000);
               if (used >= limit) throw new BudgetError(reached);
-              if (used + additional > limit) throw new BudgetError(reservation);
+              if (used + additionalSpend > limit) throw new BudgetError(reservationKind);
             }
-            await recordRequestUsage(tx, agentId, periodStart, additional, 0);
+            if (additionalRequests > 0) {
+              if (reservationDay.requests + additionalRequests > budgets.dailyRequests) {
+                throw new BudgetError('daily-requests');
+              }
+              if (reservationMonth.requests + additionalRequests > budgets.monthlyRequests) {
+                throw new BudgetError('monthly-requests');
+              }
+            }
+            await recordRequestUsage(tx, agentId, periodStart, additionalSpend, additionalRequests);
+            reservedMicros = requestedMicros > reservedMicros ? requestedMicros : reservedMicros;
+            reservedRequests = Math.max(reservedRequests, providerCalls);
             reservation = {
               stage: execution.stage,
-              reservedMicros: requestedMicros.toString(),
+              reservedMicros: reservedMicros.toString(),
               reservedRequests,
               periodStart,
             };
@@ -506,7 +520,6 @@ export async function reserveRequestQuota(
               .update(runs)
               .set({ result: { ...runRow.result, quotaReservations } })
               .where(eq(runs.id, runRow.id));
-            reservedMicros = requestedMicros;
           }
           return {
             today: periodStart,
