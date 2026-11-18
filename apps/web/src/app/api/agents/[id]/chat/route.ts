@@ -1,10 +1,8 @@
 import { revalidatePath } from 'next/cache';
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
-import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { checkOrigin, getAdminEmail } from '@/lib/auth';
-import { db } from '@/lib/db';
 import { recipientId } from '@/lib/policy/scopes';
 import {
   createPlaygroundStreamProgress,
@@ -12,7 +10,7 @@ import {
   playgroundChunksFromResult,
 } from '@/lib/runtime/chat-ui';
 import { enqueueSimulation } from '@/lib/runtime/execute';
-import { runs } from '@/lib/schema';
+import { getSimulationRun } from '@/lib/server/playground-queries';
 
 export const maxDuration = 180;
 export const dynamic = 'force-dynamic';
@@ -99,7 +97,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           return;
         }
 
-        const run = (await db().select().from(runs).where(eq(runs.id, runId))).at(0);
+        const run = await getSimulationRun(runId);
         if (!run) {
           writer.write({ type: 'error', errorText: 'Run disappeared before completion.' });
           writer.write({ type: 'finish', finishReason: 'error' });

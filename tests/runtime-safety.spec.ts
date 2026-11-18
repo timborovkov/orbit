@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import postgres from 'postgres';
 
+import { capturePage } from './screenshot';
+import { openAccessSection, openWorkspaceTab } from './workspace-nav';
+
 const sql = postgres('postgres://orbit:orbit_dev@localhost:5432/orbit_test');
 const email = 'admin@example.com';
 const password = 'test-only-password-123456';
@@ -38,8 +41,8 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
   await expect(page.getByRole('heading', { name: 'Runtime', exact: true })).toBeVisible();
   await expect(page.getByText('Shadow', { exact: true }).first()).toBeVisible();
 
-  await page.getByRole('tab', { name: 'Access' }).click();
-  await page.getByRole('button', { name: 'Lifecycle', exact: true }).click();
+  await openWorkspaceTab(page, 'Access');
+  await openAccessSection(page, 'Lifecycle');
   await expect(page.getByRole('heading', { name: 'Lifecycle', exact: true })).toBeVisible();
   await expect(
     page.getByText('no external action adapters exist yet', { exact: false }),
@@ -56,40 +59,28 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
     page.getByText('no external action adapters exist yet', { exact: false }),
   ).toBeVisible();
 
-  await page.getByRole('button', { name: 'Budgets', exact: true }).click();
+  await openAccessSection(page, 'Budgets');
   await expect(page.getByRole('heading', { name: 'Budgets', exact: true })).toBeVisible();
   await page.getByLabel('Max tool steps', { exact: true }).fill('8');
   await page.getByRole('button', { name: 'Save budgets', exact: true }).click();
   await expect(page.getByText('Budgets saved.', { exact: false })).toBeVisible();
 
-  await page.getByRole('tab', { name: 'Playground' }).click();
+  await openWorkspaceTab(page, 'Playground');
   await expect(page.getByLabel(/^Post or question/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole('tab', { name: 'Access' }).click();
-  await page.screenshot({
-    path: 'test-results/runtime-access-desktop.png',
-    fullPage: true,
-  });
+  await openWorkspaceTab(page, 'Access');
+  await capturePage(page, 'test-results/runtime-access-desktop.png');
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({
-    path: 'test-results/runtime-access-mobile.png',
-    fullPage: true,
-  });
+  await capturePage(page, 'test-results/runtime-access-mobile.png');
 
-  await page.getByRole('tab', { name: 'History' }).click();
+  await openWorkspaceTab(page, 'History');
   await expect(page.getByRole('heading', { name: 'Run history', exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.screenshot({
-    path: 'test-results/runtime-history-desktop.png',
-    fullPage: true,
-  });
+  await capturePage(page, 'test-results/runtime-history-desktop.png');
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({
-    path: 'test-results/runtime-history-mobile.png',
-    fullPage: true,
-  });
+  await capturePage(page, 'test-results/runtime-history-mobile.png');
 });
 
 test('administrators control independent spend caps, consent and proposal review', async ({
@@ -98,8 +89,8 @@ test('administrators control independent spend caps, consent and proposal review
   await signIn(page);
   await createAgent(page, 'Review Agent');
   await page.getByRole('link', { name: 'Review Agent' }).click();
-  await page.getByRole('tab', { name: 'Access' }).click();
-  await page.getByRole('button', { name: 'Budgets', exact: true }).click();
+  await openWorkspaceTab(page, 'Access');
+  await openAccessSection(page, 'Budgets');
   const dailyCap = page.getByRole('switch', { name: /No cap for daily/ });
   await dailyCap.click();
   await expect(dailyCap).toHaveAttribute('aria-checked', 'true');
@@ -109,7 +100,7 @@ test('administrators control independent spend caps, consent and proposal review
   const [agent] = await sql`SELECT id, budgets FROM agents WHERE name='Review Agent'`;
   expect(agent.budgets).toMatchObject({ dailySpendCents: null, monthlySpendCents: 450 });
 
-  await page.getByRole('button', { name: 'Consent', exact: true }).click();
+  await openAccessSection(page, 'Consent');
   await page
     .getByLabel('Recipient ID', { exact: false })
     .filter({ visible: true })
@@ -125,7 +116,7 @@ test('administrators control independent spend caps, consent and proposal review
   await page.getByRole('button', { name: 'Save consent', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Recent consent records' })).toContainText('Revoked');
 
-  await page.getByRole('button', { name: 'Approvals', exact: true }).click();
+  await openAccessSection(page, 'Approvals');
   await page.getByRole('checkbox', { name: 'Reply', exact: true }).check();
   await page.getByRole('button', { name: 'Save approval requirements', exact: true }).click();
   await expect(page.getByText('Approval requirements saved.')).toBeVisible();
@@ -138,7 +129,7 @@ test('administrators control independent spend caps, consent and proposal review
   `;
 
   await page.reload();
-  await page.getByRole('tab', { name: /Approvals/ }).click();
+  await openWorkspaceTab(page, /Approvals/);
   const proposals = page.getByRole('list', { name: 'Proposals, pending first' });
   const toApprove = proposals.getByRole('listitem').filter({ hasText: 'First fixture' });
   await toApprove.getByRole('button', { name: 'Approve', exact: true }).click();

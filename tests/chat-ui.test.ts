@@ -66,13 +66,14 @@ describe('playground chat UI helpers', () => {
 
     const mid = playgroundChunksFromResult(result, progress, { status: 'running' });
     expect(mid.some((chunk) => chunk.type === 'reasoning-delta')).toBe(true);
-    expect(mid.some((chunk) => chunk.type === 'tool-input-available')).toBe(true);
+    expect(mid.some((chunk) => chunk.type === 'tool-input-available')).toBe(false);
     expect(mid.some((chunk) => chunk.type === 'finish')).toBe(false);
 
     const done = playgroundChunksFromResult(result, progress, {
       status: 'completed',
       runId: 'run-1',
     });
+    expect(done.some((chunk) => chunk.type === 'tool-input-available')).toBe(true);
     expect(done.some((chunk) => chunk.type === 'text-delta')).toBe(true);
     expect(done.at(-1)).toEqual({ type: 'finish', finishReason: 'stop' });
 

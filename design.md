@@ -210,14 +210,20 @@ desktop grid, with No cap Switches beside spend fields and inline unit suffixes.
 requirements use shadcn Checkbox rows (label, description, control). Consent and Playground
 version pickers use shadcn Select. Lifecycle uses radio-card rows with consistent actions.
 Playground is a single chat column: toolbar settings (version Select, recipients Collapsible),
-AI Elements Conversation with status/Loader messages, and PromptInput (attachments button +
-chips, one bordered composer, PromptInputSubmit with ArrowUp). Task tabs stay a scrollable
-tablist with edge fades on narrow viewports. Consent records pair a recipient ID with a scope, choice
-and evidence reference. Approvals shows the pending queue first, with the draft and explicit
-approve and reject controls. Lifecycle clearly labels Live as simulation-only until adapters
-are configured. Access also shows which OpenRouter key source is active—agent key, environment
-default or none—by label only, never by value or prefix. It accepts a password input
-for an agent override, clears it after submission and never reads the secret back.
+AI Elements Conversation with status/Loader messages, and PromptInput (text-only for now —
+file attachments stay off until the simulation runtime can consume them — one bordered
+composer, PromptInputSubmit with ArrowUp). The version Select keeps normal foreground/background
+contrast while selectable (not greyed as disabled). Task tabs switch to a Select at ≤600px;
+Access section nav switches to a Select at ≤900px (wider screens keep scrollable tablist/sub-nav
+with fade edges). Access panels stay mounted so drafts survive section switches. On narrow
+Budgets, each No cap Switch sits on its own row under the field label. Skip links stay
+off-screen until `:focus-visible`; screenshot helpers blur focus so captures never show them.
+Consent records pair a recipient ID with a scope, choice and evidence reference. Approvals shows
+the pending queue first, with the draft and explicit approve and reject controls. Lifecycle
+clearly labels Live as simulation-only until adapters are configured. Access also shows which
+OpenRouter key source is active—agent key, environment default or none—by label only, never by
+value or prefix. It accepts a password input for an agent override, clears it after submission
+and never reads the secret back.
 Removing an agent key falls back to the environment default when configured; otherwise
 it retains a visible missing-key state. History shows queued/running/completed/failed/
 interrupted run states and linked job status. While any run is queued or running, the

@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 import postgres from 'postgres';
 
+import { capturePage } from './screenshot';
+import { openAccessSection, openWorkspaceTab } from './workspace-nav';
+
 const sql = postgres('postgres://orbit:orbit_dev@localhost:5432/orbit_test');
 test.afterAll(async () => {
   await sql.end();
@@ -23,8 +26,8 @@ test('Access tab shows environment default and agent override without revealing 
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.getByRole('link', { name: 'Env Default Agent', exact: true }).click();
-  await page.getByRole('tab', { name: 'Access', exact: true }).click();
-  await page.getByRole('button', { name: 'OpenRouter', exact: true }).click();
+  await openWorkspaceTab(page, 'Access');
+  await openAccessSection(page, 'OpenRouter');
 
   await expect(
     page.getByRole('heading', { name: 'Using environment default', exact: true }),
@@ -34,10 +37,7 @@ test('Access tab shows environment default and agent override without revealing 
   await expect(page.getByText('OpenRouter environment default', { exact: true })).toBeVisible();
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.screenshot({
-      path: `test-results/access-environment-Light-${width}.png`,
-      fullPage: true,
-    });
+    await capturePage(page, `test-results/access-environment-Light-${width}.png`);
   }
 
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -50,10 +50,7 @@ test('Access tab shows environment default and agent override without revealing 
   await expect(page.locator('#credential')).not.toContainText('test-only-agent-override');
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.screenshot({
-      path: `test-results/access-agent-override-Light-${width}.png`,
-      fullPage: true,
-    });
+    await capturePage(page, `test-results/access-agent-override-Light-${width}.png`);
   }
 
   await page.setViewportSize({ width: 1440, height: 900 });

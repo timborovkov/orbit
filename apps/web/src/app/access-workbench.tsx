@@ -1,12 +1,19 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { KeyRound, PauseCircle, Scale, ShieldCheck, WalletCards } from 'lucide-react';
 
 import { AccessPanel } from '@/app/access-panel';
 import { BudgetSettings, type BudgetUsageView } from '@/app/budget-settings';
 import { LifecycleControls } from '@/app/lifecycle-controls';
 import { ConsentSettings, ReviewSettings } from '@/app/policy-settings';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { AgentBudgets } from '@/lib/budgets';
 import type { LifecycleState } from '@/lib/lifecycle';
 import type { OpenRouterKeySource } from '@/lib/runtime/openrouter-key';
@@ -45,6 +52,27 @@ export function AccessWorkbench({
   keySource: OpenRouterKeySource;
 }) {
   const [active, setActive] = useState<(typeof sections)[number]['id']>('lifecycle');
+  const [compact, setCompact] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 900px)');
+    const sync = () => {
+      setCompact(media.matches);
+    };
+    sync();
+    media.addEventListener('change', sync);
+    return () => {
+      media.removeEventListener('change', sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (compact) return;
+    document
+      .querySelector<HTMLButtonElement>(`.access-sections button[aria-pressed='true']`)
+      ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [active, compact]);
+
   const panels: Record<(typeof sections)[number]['id'], ReactNode> = {
     lifecycle: <LifecycleControls agentId={agentId} lifecycle={lifecycle} />,
     budgets: <BudgetSettings agentId={agentId} budgets={budgets} usage={usage} />,
@@ -62,23 +90,60 @@ export function AccessWorkbench({
 
   return (
     <div className="access-editor">
-      <nav className="access-sections" aria-label="Access sections">
-        {sections.map((section) => (
-          <button
-            key={section.id}
-            type="button"
-            aria-pressed={active === section.id}
-            className={cn(active === section.id && 'is-active')}
-            onClick={() => {
-              setActive(section.id);
+      {compact ? (
+        <div className="access-sections-compact">
+          <label className="sr-only" htmlFor="access-section-compact">
+            Access section
+          </label>
+          <Select
+            value={active}
+            onValueChange={(value) => {
+              setActive(value as (typeof sections)[number]['id']);
             }}
           >
-            <section.icon size={16} aria-hidden="true" />
-            {section.title}
-          </button>
+            <SelectTrigger
+              id="access-section-compact"
+              className="w-full"
+              aria-label="Access section"
+            >
+              <SelectValue placeholder="Section" />
+            </SelectTrigger>
+            <SelectContent>
+              {sections.map((section) => (
+                <SelectItem key={section.id} value={section.id}>
+                  {section.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : (
+        <div className="access-sections-shell">
+          <nav className="access-sections" aria-label="Access sections">
+            {sections.map((section) => (
+              <button
+                key={section.id}
+                type="button"
+                aria-pressed={active === section.id}
+                className={cn(active === section.id && 'is-active')}
+                onClick={() => {
+                  setActive(section.id);
+                }}
+              >
+                <section.icon size={16} aria-hidden="true" />
+                {section.title}
+              </button>
+            ))}
+          </nav>
+        </div>
+      )}
+      <div className="access-fields-body">
+        {sections.map((section) => (
+          <div key={section.id} className="access-section-panel" hidden={active !== section.id}>
+            {panels[section.id]}
+          </div>
         ))}
-      </nav>
-      <div className="access-fields-body">{panels[active]}</div>
+      </div>
     </div>
   );
 }

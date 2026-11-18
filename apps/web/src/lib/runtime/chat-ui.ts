@@ -84,34 +84,38 @@ export function playgroundChunksFromResult(
     chunks.push({ type: 'reasoning-end', id });
   }
 
-  for (const action of result.actions) {
-    const key = `${action.type}:${action.intentId ?? action.policy}`;
-    if (progress.emittedActions.has(key)) continue;
-    progress.emittedActions.add(key);
-    const toolCallId = `action-${action.type}-${progress.emittedActions.size}`;
-    chunks.push({
-      type: 'tool-input-available',
-      toolCallId,
-      toolName: action.type,
-      title: action.type,
-      input: {
-        reason: action.reason,
-        draft: action.draft,
-        recipients: undefined,
-      },
-    });
-    chunks.push({
-      type: 'tool-output-available',
-      toolCallId,
-      output: {
-        policy: action.policy,
-        effect: action.effect,
-        intentId: action.intentId ?? null,
-      },
-    });
+  // Only emit action tool cards from the finalized result so evaluator candidates
+  // that the main stage later drops or rewrites do not stick around as completed tools.
+  const terminal = ['completed', 'failed', 'interrupted'].includes(options.status);
+  if (terminal) {
+    for (const action of result.actions) {
+      const key = `${action.type}:${action.intentId ?? action.policy}:${action.draft ?? ''}`;
+      if (progress.emittedActions.has(key)) continue;
+      progress.emittedActions.add(key);
+      const toolCallId = `action-${action.type}-${progress.emittedActions.size}`;
+      chunks.push({
+        type: 'tool-input-available',
+        toolCallId,
+        toolName: action.type,
+        title: action.type,
+        input: {
+          reason: action.reason,
+          draft: action.draft,
+          recipients: undefined,
+        },
+      });
+      chunks.push({
+        type: 'tool-output-available',
+        toolCallId,
+        output: {
+          policy: action.policy,
+          effect: action.effect,
+          intentId: action.intentId ?? null,
+        },
+      });
+    }
   }
 
-  const terminal = ['completed', 'failed', 'interrupted'].includes(options.status);
   if (terminal && !progress.textFinished) {
     if (!progress.textStarted) {
       chunks.push({ type: 'text-start', id: 'reply' });

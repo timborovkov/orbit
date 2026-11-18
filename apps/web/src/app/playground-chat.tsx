@@ -9,7 +9,6 @@ import {
   ChevronDown,
   Eraser,
   FlaskConical,
-  Paperclip,
   ShieldCheck,
   TriangleAlert,
 } from 'lucide-react';
@@ -24,16 +23,11 @@ import { Loader } from '@/components/ai-elements/loader';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import {
   PromptInput,
-  PromptInputAttachment,
-  PromptInputAttachments,
   PromptInputBody,
-  PromptInputButton,
   PromptInputFooter,
-  PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
-  usePromptInputAttachments,
   type PromptInputMessage,
 } from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
@@ -181,10 +175,10 @@ export function PlaygroundChat({
       <div className="playground-toolbar">
         <Field className="playground-version-field gap-2">
           <FieldLabel htmlFor="run-version">Configuration version</FieldLabel>
-          <Select value={configurationId} onValueChange={setConfigurationOverride} disabled={busy}>
+          <Select value={configurationId} onValueChange={setConfigurationOverride}>
             <SelectTrigger
               id="run-version"
-              className="w-full min-w-0"
+              className="w-full min-w-0 bg-background text-foreground"
               aria-label="Configuration version"
             >
               <SelectValue placeholder="Choose a version" />
@@ -256,14 +250,7 @@ export function PlaygroundChat({
           <PromptInput
             className={cn('playground-prompt', !canSimulate && 'is-disabled')}
             onSubmit={onSubmit}
-            accept="image/*,application/pdf,text/*"
-            multiple
           >
-            <PromptInputHeader>
-              <PromptInputAttachments>
-                {(attachment) => <PromptInputAttachment data={attachment} />}
-              </PromptInputAttachments>
-            </PromptInputHeader>
             <PromptInputBody>
               <PromptInputTextarea
                 aria-label="Post or question"
@@ -275,7 +262,6 @@ export function PlaygroundChat({
             </PromptInputBody>
             <PromptInputFooter>
               <PromptInputTools>
-                <PromptInputAttachButton disabled={!canSimulate || busy} />
                 <p className="simulation-note">
                   <ShieldCheck size={15} aria-hidden="true" />
                   <span>Nothing is posted or sent. Save your configuration before testing.</span>
@@ -313,21 +299,6 @@ export function PlaygroundChat({
         </div>
       </div>
     </div>
-  );
-}
-
-function PromptInputAttachButton({ disabled }: { disabled?: boolean }) {
-  const attachments = usePromptInputAttachments();
-  return (
-    <PromptInputButton
-      aria-label="Attach files"
-      disabled={disabled}
-      onClick={() => {
-        attachments.openFileDialog();
-      }}
-    >
-      <Paperclip className="size-4" />
-    </PromptInputButton>
   );
 }
 
