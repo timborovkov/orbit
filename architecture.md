@@ -309,6 +309,8 @@ Recorded so later phases can extend without redesign:
 
 5. **Hard budgets.** Per-agent JSON budgets default to architecture §17 values (including 10 tool steps and a five-minute run deadline). When OpenRouter monetary pricing is unavailable, token usage is still recorded and spend is treated as zero for enforcement; request, concurrency, outbound, step and deadline caps still apply. Limit hits reject or defer work and surface in run history.
 
+6. **Observability is optional and off the correctness path.** `@sentry/nextjs` (App Router: `instrumentation.ts`, client/server/edge config, `global-error`) and `@sentry/bun` capture application errors and performance. Langfuse receives agent traces through the Vercel AI SDK `telemetry` option (AI SDK 7’s name for `experimental_telemetry`) and `@langfuse/otel`’s `LangfuseSpanProcessor`, with spans for evaluator/main model calls, policy gateway decisions, budget checks and tool-policy steps. Prompt/model content is omitted unless `LANGFUSE_CAPTURE_CONTENT=true`. A shared redaction layer strips secrets and refuses untrusted content as tags. Missing `SENTRY_DSN` / `LANGFUSE_*` disables exporters with no network calls. Source map upload requires `SENTRY_AUTH_TOKEN` and must not fail the web build when absent. Exporter failures are swallowed. PostgreSQL remains operational truth.
+
 
 ### Guarded local development authentication
 
