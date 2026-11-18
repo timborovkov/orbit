@@ -11,6 +11,7 @@ import {
   type BudgetViolation,
 } from '@/lib/budgets';
 import { db, type Db, type Tx } from '@/lib/db';
+import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import {
   canAcceptBackgroundWork,
   externalWritesPermitted,
@@ -155,7 +156,10 @@ export function evaluateCandidate(
     return { decision: 'deny', reasons };
   }
 
-  if (ctx.enabledTools.length > 0 && !ctx.enabledTools.includes(action.type)) {
+  const restrictTool =
+    action.type === KNOWLEDGE_SEARCH_TOOL ||
+    ctx.enabledTools.some((tool) => tool !== KNOWLEDGE_SEARCH_TOOL);
+  if (restrictTool && !ctx.enabledTools.includes(action.type)) {
     reasons.push(`Tool ${action.type} is not enabled for this agent.`);
     return { decision: 'deny', reasons };
   }
@@ -168,7 +172,8 @@ export function evaluateCandidate(
       outboundActions: ctx.usage.outboundActions,
     },
     month: ctx.usage.month,
-    activeRuns: ctx.usage.activeRuns,
+    // A search inside an already admitted run does not open another concurrency slot.
+    activeRuns: ctx.runId && action.type === KNOWLEDGE_SEARCH_TOOL ? 0 : ctx.usage.activeRuns,
   };
 
   if (!action.readOnly) {
@@ -341,6 +346,34 @@ export async function authorizeAction(
   });
 }
 
+/** Record a dispatch blocked after authorization, such as a concurrent budget reservation. */
+export async function recordBlockedDispatch(
+  ctx: PolicyContext,
+  actionType: string,
+  intentId: string,
+  error: BudgetError,
+): Promise<PolicyResult> {
+  const decision = 'deny';
+  const reasons = [error.message];
+  await db()
+    .insert(policyDecisions)
+    .values({
+      agentId: ctx.agentId,
+      runId: ctx.runId ?? null,
+      actionType,
+      decision,
+      reasons,
+      intentId,
+      actor: ctx.actor,
+    });
+  return {
+    decision,
+    reasons,
+    intentId,
+    violation: error.kind === 'cancelled' ? undefined : error.kind,
+  };
+}
+
 async function recordRequestUsage(
   store: Tx,
   agentId: string,
@@ -373,6 +406,7 @@ export async function reserveRequestQuota(
     signal: AbortSignal;
     /** When set, reservation is idempotent per run+stage across queue retries. */
     stage?: 'evaluator' | 'main';
+    requiredTool?: string;
   },
 ) {
   const requestedMicros = BigInt(upperBoundMicros ?? 0);
@@ -382,6 +416,12 @@ export async function reserveRequestQuota(
         0,
       );
       if (!agent || agent.lifecycle === 'stopped' || execution?.signal.aborted) {
+        throw new BudgetError('cancelled');
+      }
+      if (
+        execution?.requiredTool &&
+        (agent.lifecycle === 'paused' || !agent.enabledTools.includes(execution.requiredTool))
+      ) {
         throw new BudgetError('cancelled');
       }
       let runRow:

@@ -1,8 +1,13 @@
 import { sqlClient } from '@/lib/db';
-import type { EmbedOneFn } from '@/lib/knowledge/embed';
 import { mergeHybridRanks } from '@/lib/knowledge/rank';
 import { cosineSimilarityFromDistance } from '@/lib/knowledge/similarity';
 import type { KnowledgeSearchResult, RankedKnowledgeHit } from '@/lib/knowledge/types';
+import {
+  knowledgeEmbeddingDimensions,
+  knowledgeEmbeddingModelId,
+  validateKnowledgeVector,
+  type EmbedOneFn,
+} from '@/lib/runtime/knowledge/embed';
 
 function vectorLiteral(values: number[]) {
   return `[${values.join(',')}]`;
@@ -53,12 +58,31 @@ export async function searchKnowledge(input: {
   if (!query) return { query, hits: [] };
   const limit = Math.min(Math.max(input.limit ?? 8, 1), 20);
   const candidateLimit = Math.max(limit * 3, 12);
-  const embedding = await input.embedQuery(query, input.signal);
   const client = sqlClient();
-  const vectorLiteralValue = vectorLiteral(embedding);
+  const model = knowledgeEmbeddingModelId();
+  const dimensions = knowledgeEmbeddingDimensions();
+  const ready = client`EXISTS (
+    SELECT 1 FROM knowledge_documents AS document
+    WHERE document.id = knowledge_chunks.document_id
+      AND document.agent_id = knowledge_chunks.agent_id AND document.status = 'ready'
+  )`;
+  const compatible = client`embedding IS NOT NULL AND embedding_model = ${model}
+    AND embedding_dimensions = ${dimensions}`;
+  const index = (
+    await client`SELECT EXISTS (
+    SELECT 1 FROM knowledge_chunks WHERE agent_id = ${input.agentId}
+      AND ${ready} AND ${compatible}
+  ) AS searchable`
+  ).at(0);
+  const embedding = index?.searchable
+    ? vectorLiteral(
+        validateKnowledgeVector(await input.embedQuery(query, input.signal), dimensions),
+      )
+    : null;
 
   const [vectorRows, textRows] = await Promise.all([
-    client`
+    embedding
+      ? client`
       SELECT
         id,
         document_id,
@@ -70,13 +94,14 @@ export async function searchKnowledge(input: {
         section,
         start_offset,
         end_offset,
-        embedding <=> ${vectorLiteralValue}::vector AS vector_distance
+        embedding <=> ${embedding}::vector AS vector_distance
       FROM knowledge_chunks
       WHERE agent_id = ${input.agentId}
-        AND embedding IS NOT NULL
-      ORDER BY embedding <=> ${vectorLiteralValue}::vector
+        AND ${ready} AND ${compatible}
+      ORDER BY embedding <=> ${embedding}::vector
       LIMIT ${candidateLimit}
-    `,
+    `
+      : [],
     client`
       SELECT
         id,
@@ -92,6 +117,7 @@ export async function searchKnowledge(input: {
         ts_rank_cd(search_vector, plainto_tsquery('english', ${query})) AS text_score
       FROM knowledge_chunks
       WHERE agent_id = ${input.agentId}
+        AND ${ready}
         AND search_vector @@ plainto_tsquery('english', ${query})
       ORDER BY text_score DESC
       LIMIT ${candidateLimit}

@@ -28,20 +28,20 @@ docker build -f docker/worker.Dockerfile -t orbit-worker .
 
 `NEXT_PUBLIC_SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` are inlined into the browser bundle at image build. Unset, browser Sentry stays off. Setting them only on the running web container cannot enable capture. Compose forwards them from the host env as web build args. Railway injects matching service variables because the Dockerfile declares those `ARG` names. Server-side Sentry still uses runtime `SENTRY_DSN` on web and worker.
 
-The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker claims durable PostgreSQL jobs (simulation runs today), heartbeats leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
+The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker claims simulation and knowledge-processing jobs, heartbeats leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
 
 If your package registry uses a private CA, pass its PEM file with `--secret id=npm_ca,src=/path/to/ca.pem` when building. The CA is mounted only for dependency installation and is not copied into the image. TLS verification remains enabled.
 
-## RustFS profile-picture storage
+## RustFS object storage
 
 Deploy `rustfs/rustfs:1.0.6` with a persistent volume at `/data` and
 `RUSTFS_VOLUMES=/data`. Set `RUSTFS_ADDRESS=0.0.0.0:9000`,
 `RUSTFS_ACCESS_KEY` and `RUSTFS_SECRET_KEY` to strong deployment credentials.
-Use private networking between the web service and RustFS; do not expose the S3
+Use private networking between both application services and RustFS; do not expose the S3
 API or admin console publicly without TLS and access controls. The Compose defaults
 are for local development only. The console is optional in production.
 
-Configure these server-only web variables:
+Configure these server-only variables on the Railway web and worker services:
 
 | Variable               | Purpose                                                                                                    |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -54,9 +54,12 @@ Configure these server-only web variables:
 From a trusted source checkout with provisioning credentials, run
 `bun run storage:setup` once. It creates a private bucket if absent; it does not
 change existing bucket policies. Keep anonymous access disabled. The running web
-service only needs GetObject, PutObject and DeleteObject on `agents/*` in that bucket;
-HeadBucket/CreateBucket are needed only by the provisioning script.
-Apply migration `0003` before deploying the web image. Pictures are served through
+service needs GetObject, PutObject and DeleteObject on `agents/*`. The worker only needs
+GetObject on `agents/*/knowledge/*`. HeadBucket/CreateBucket are needed only by the
+provisioning script. Apply migrations before deploying both services. If overriding
+`KNOWLEDGE_EMBEDDING_MODEL`, set the same value on both services and reprocess existing
+documents. The configured vector width must be 1536.
+Pictures are served through
 an authenticated Orbit route with private, non-cacheable responses. Storage secrets
 never reach client props, prompts or application logs.
 
@@ -66,7 +69,7 @@ Replacement/removal deletes the previous object after committing its new databas
 reference. Failed deletions produce an audit entry containing the object key for
 manual cleanup. A process crash between object upload and database commit can leave
 an unreferenced object; reconcile `agents/*/pictures/*` against `agents.picture_key`
-before deleting orphans. No storage cleanup worker is scheduled in this milestone.
+and `agents/*/knowledge/*` against `knowledge_documents.object_key` before deleting orphans.
 
 ## Runtime telemetry
 

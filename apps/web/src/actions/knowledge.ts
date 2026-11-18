@@ -2,18 +2,17 @@
 
 import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
-import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { openRouterEmbedders, stubEmbedders } from '@/lib/knowledge/embed';
+import { isBudgetError } from '@/lib/budgets';
 import { maxKnowledgeBytes, maxKnowledgeUploadLabel } from '@/lib/knowledge/types';
-import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
-import { credentials } from '@/lib/schema';
+import { knowledgeUsesStub } from '@/lib/runtime/knowledge/embed';
+import { resolveKnowledgeEmbedders } from '@/lib/runtime/knowledge/provider';
 import {
   deleteKnowledgeDocument,
   inspectKnowledgeRetrieval,
+  persistKnowledgeSearchAccess,
   replaceKnowledgeDocument,
   reprocessKnowledgeDocument,
   uploadKnowledgeDocument,
@@ -95,40 +94,40 @@ export async function inspectKnowledge(form: FormData) {
   const query = z.string().max(2000).safeParse(form.get('query'));
   if (!query.success) return { error: 'Enter a retrieval query.' };
 
-  let embedQuery: (value: string, signal?: AbortSignal) => Promise<number[]>;
-  let embeddingMode: 'openrouter' | 'stub' = 'openrouter';
   try {
-    const credential = (
-      await db()
-        .select({ encryptedKey: credentials.encryptedKey })
-        .from(credentials)
-        .where(eq(credentials.agentId, parsed.agentId))
-        .limit(1)
-    ).at(0);
-    const { apiKey } = resolveOpenRouterApiKey(parsed.agentId, credential?.encryptedKey);
-    embedQuery = openRouterEmbedders(apiKey).embedOne;
-  } catch {
-    if (process.env.NODE_ENV === 'development' && process.env.KNOWLEDGE_EMBEDDING_STUB === 'true') {
-      embedQuery = stubEmbedders().embedOne;
-      embeddingMode = 'stub';
-    } else {
-      return {
-        error:
-          'OpenRouter is not connected for this agent. Add an agent key under Access or set OPENROUTER_API_KEY.',
-      };
-    }
+    const inspected = await inspectKnowledgeRetrieval(parsed.actor, parsed.agentId, query.data, {
+      embedQuery: async (value, signal) => {
+        const embedder = await resolveKnowledgeEmbedders(parsed.agentId);
+        return embedder.embedOne(value, signal);
+      },
+    });
+    if ('error' in inspected) return inspected;
+    return {
+      inspection: {
+        query: inspected.result.query,
+        hits: inspected.result.hits,
+        embeddingMode: knowledgeUsesStub() ? ('stub' as const) : ('openrouter' as const),
+        requestId: randomUUID(),
+      },
+    };
+  } catch (error) {
+    if (isBudgetError(error)) return { error: error.message };
+    return {
+      error: 'Unable to search the library. Check the OpenRouter connection and try again.',
+    };
   }
+}
 
-  const inspected = await inspectKnowledgeRetrieval(parsed.actor, parsed.agentId, query.data, {
-    embedQuery,
-  });
-  if ('error' in inspected) return inspected;
+export async function saveKnowledgeSearchAccess(form: FormData) {
+  const parsed = await agentParams(form);
+  if ('error' in parsed) return parsed;
+  const enabled = form.get('enabled');
+  if (enabled !== 'true' && enabled !== 'false')
+    return { error: 'Choose whether to enable knowledge search.' };
+  if (!(await persistKnowledgeSearchAccess(parsed.actor, parsed.agentId, enabled === 'true')))
+    return { error: 'Agent not found.' };
+  revalidatePath(`/agents/${parsed.agentId}`);
   return {
-    inspection: {
-      query: inspected.result.query,
-      hits: inspected.result.hits,
-      embeddingMode,
-      requestId: randomUUID(),
-    },
+    message: enabled === 'true' ? 'Knowledge search enabled.' : 'Knowledge search disabled.',
   };
 }

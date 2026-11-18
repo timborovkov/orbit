@@ -2,7 +2,12 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText, Output } from 'ai';
 import { z } from 'zod';
 
-import { decisionSchema, type InferenceQuote, type ModelCall } from '@/lib/runtime/simulation';
+import {
+  decisionSchema,
+  groundedDecisionSchema,
+  type InferenceQuote,
+  type ModelCall,
+} from '@/lib/runtime/simulation';
 
 const maxOutputTokens = 3000;
 const microsPerDollar = 1_000_000;
@@ -92,7 +97,7 @@ export function openRouterInference(apiKey: string): ModelCall {
       }),
       instructions: system,
       prompt: input,
-      output: Output.object({ schema: decisionSchema }),
+      output: Output.object({ schema: request.grounded ? groundedDecisionSchema : decisionSchema }),
       maxOutputTokens,
       maxRetries: 0,
       abortSignal: signal,

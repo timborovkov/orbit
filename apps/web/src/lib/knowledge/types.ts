@@ -8,8 +8,6 @@ export const DEFAULT_KNOWLEDGE_EMBEDDING_DIMENSIONS = 1536;
 /** Advertised and validated upload ceiling. Server Actions allow a little more for multipart overhead. */
 export const maxKnowledgeBytes = 10 * 1024 * 1024;
 export const maxKnowledgeUploadLabel = '10 MB';
-/** Upper-bound spend reservation for one knowledge.search embedding call (USD micros). */
-export const KNOWLEDGE_EMBEDDING_RESERVE_MICROS = 50_000;
 /** Bound chunk inserts so a large FAQ stays under Postgres' 65,535 bind parameter limit. */
 export const KNOWLEDGE_CHUNK_INSERT_BATCH = 200;
 

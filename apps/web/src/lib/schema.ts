@@ -198,6 +198,8 @@ export const knowledgeDocuments = pgTable('knowledge_documents', {
   mimeType: text('mime_type').notNull(),
   byteSize: integer('byte_size').notNull(),
   objectKey: text('object_key').notNull(),
+  revision: uuid('revision').defaultRandom().notNull(),
+  processingToken: uuid('processing_token'),
   status: text('status').$type<KnowledgeDocumentStatus>().notNull().default('pending'),
   error: text('error'),
   chunkCount: integer('chunk_count').notNull().default(0),

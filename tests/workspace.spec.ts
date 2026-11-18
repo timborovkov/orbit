@@ -13,7 +13,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
   page,
 }) => {
   test.setTimeout(120000);
-  await sql`TRUNCATE recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE knowledge_chunks, knowledge_documents, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
   await page.goto('/login');
   await page.getByLabel(/^Email/).fill('admin@example.com');
   await page.getByLabel(/^Password/).fill('test-only-password-123456');

@@ -451,10 +451,14 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
     firstGate = { continue: resolve };
   });
   let firstCalls = 0;
+  const firstStarted = Promise.withResolvers<void>();
 
   const first = processSimulationJob({ runId, agentId: id }, () => async () => {
     firstCalls += 1;
-    if (firstCalls === 1) await firstHold;
+    if (firstCalls === 1) {
+      firstStarted.resolve();
+      await firstHold;
+    }
     return {
       decision: {
         relevant: true,
@@ -467,12 +471,9 @@ test('stale execution tokens cannot overwrite a reclaimed run', async () => {
     };
   });
 
-  // Wait until the first claim has marked the run running with a token.
-  for (let i = 0; i < 50; i++) {
-    const [row] = await sql`SELECT status, execution_token FROM simulation_runs WHERE id=${runId}`;
-    if (row.status === 'running' && row.execution_token) break;
-    await new Promise((r) => setTimeout(r, 10));
-  }
+  // Wait until the first claim reaches inference so there is an actual stale response.
+  await Promise.race([firstStarted.promise, first]);
+  expect(firstCalls).toBe(1);
   const [before] = await sql`SELECT execution_token FROM simulation_runs WHERE id=${runId}`;
   expect(before.execution_token).toBeTruthy();
 

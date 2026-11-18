@@ -41,9 +41,10 @@ function splitByLength(
         if (space > cursor + Math.floor(size * 0.4)) end = space;
       }
     }
-    const content = normalized.slice(cursor, end).trim();
+    const slice = normalized.slice(cursor, end);
+    const content = slice.trim();
     if (content) {
-      const startOffset = absoluteStart + cursor;
+      const startOffset = absoluteStart + cursor + slice.length - slice.trimStart().length;
       chunks.push({
         index: chunks.length,
         content,
@@ -78,19 +79,18 @@ function chunkFaq(text: string, filename: string, title: string): KnowledgeChunk
     const question = typeof match[1] === 'string' ? match[1].trim() : '';
     const answer = typeof match[2] === 'string' ? match[2].trim() : '';
     if (!question || !answer) continue;
-    const content = `Q: ${question}\nA: ${answer}`;
-    const startOffset = typeof match.index === 'number' ? match.index : 0;
-    drafts.push({
-      index: drafts.length,
-      content,
-      contentHash: hashContent(content),
+    const raw = match[0];
+    const startOffset = match.index + raw.length - raw.trimStart().length;
+    for (const chunk of splitByLength(
+      raw,
+      startOffset,
+      null,
+      question.slice(0, 160),
       filename,
       title,
-      page: null,
-      section: question.slice(0, 160),
-      startOffset,
-      endOffset: startOffset + content.length,
-    });
+    )) {
+      drafts.push({ ...chunk, index: drafts.length });
+    }
   }
   return drafts.length ? drafts : splitByLength(normalized, 0, null, null, filename, title);
 }
@@ -103,6 +103,8 @@ function chunkMarkdownByHeadings(
   const headingSplits = [...text.matchAll(/^#{1,3}\s+.+$/gm)];
   if (!headingSplits.length) return null;
   const sectionsFromHeadings: ExtractedSection[] = [];
+  const intro = text.slice(0, headingSplits[0]?.index ?? 0).trim();
+  if (intro) sectionsFromHeadings.push({ content: intro, startOffset: text.indexOf(intro) });
   headingSplits.forEach((match, i) => {
     const start = typeof match.index === 'number' ? match.index : 0;
     const next = headingSplits.at(i + 1);
@@ -117,12 +119,11 @@ function chunkMarkdownByHeadings(
     });
   });
   if (!sectionsFromHeadings.length) return null;
-  return chunkBySections(text, 'plain', filename, title, sectionsFromHeadings);
+  return chunkBySections(text, filename, title, sectionsFromHeadings);
 }
 
 function chunkBySections(
   text: string,
-  kind: KnowledgeContentKind,
   filename: string,
   title: string,
   sections: ExtractedSection[],
@@ -168,7 +169,7 @@ export function chunkExtractedText(input: {
   }
 
   if (sections?.length) {
-    return chunkBySections(text, kind, filename, title, sections);
+    return chunkBySections(text, filename, title, sections);
   }
 
   return splitByLength(text, 0, null, null, filename, title).map((draft, index) => ({

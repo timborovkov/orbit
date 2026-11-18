@@ -14,6 +14,7 @@ import {
   type BudgetSnapshot,
 } from '@/lib/budgets';
 import { db } from '@/lib/db';
+import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
@@ -36,6 +37,7 @@ import {
   type SimulationResult,
 } from '@/lib/runtime/simulation';
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
+import { nativeTools } from '@/lib/runtime/tools/native';
 import { agents, configurations, credentials, jobs, runs, usageCounters } from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
@@ -611,6 +613,35 @@ async function processSimulationRun(
           maxSteps: budgets.maxToolStepsPerRun,
           signal,
           initial: checkpointed,
+          retrieveKnowledge: agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
+            ? async (requestSignal) => {
+                try {
+                  const { policy, result } = await nativeTools[KNOWLEDGE_SEARCH_TOOL]({
+                    actor: run.actor,
+                    agentId: run.agentId,
+                    runId: run.id,
+                    query: run.input.slice(0, 2000),
+                    limit: 4,
+                    idempotencyKey: idempotencyKey([run.id, KNOWLEDGE_SEARCH_TOOL]),
+                    execution: { runId: run.id, token: executionToken, signal: requestSignal },
+                  });
+                  return {
+                    status: policy.decision === 'allow' ? 'allow' : 'deny',
+                    reason: policy.reasons.join(' '),
+                    hits: result?.hits ?? [],
+                  };
+                } catch (error) {
+                  if (isBudgetError(error) || requestSignal.aborted) throw error;
+                  reportFailure('worker.runtime', failureCorrelation(), error);
+                  return {
+                    status: 'failed',
+                    reason:
+                      'Knowledge retrieval failed. Check the agent’s library and OpenRouter connection.',
+                    hits: [],
+                  };
+                }
+              }
+            : undefined,
           prepare: async (request, partial) => {
             try {
               await telemetry.withSpan(
@@ -663,7 +694,10 @@ async function processSimulationRun(
           },
           onActions: async (actions, partial, stage) => {
             await assertOwned(run.id, executionToken);
-            const stepLimit = checkToolStepLimit(partial.steps.length, budgets);
+            const stepLimit = checkToolStepLimit(
+              partial.steps.length + (partial.knowledge ? 1 : 0),
+              budgets,
+            );
             if (stepLimit) {
               await telemetry.withSpan(
                 'orbit.budget',

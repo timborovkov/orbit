@@ -6,7 +6,7 @@ import { evaluateActionForTest } from '@/lib/policy/gateway';
 
 const base = {
   lifecycle: 'shadow' as const,
-  enabledTools: [] as string[],
+  enabledTools: [KNOWLEDGE_SEARCH_TOOL],
   budgets: budgetDefaults,
   globalPaused: false,
 };
@@ -21,9 +21,9 @@ test('knowledge.search is allowed as a read-only tool', () => {
   expect(result.reasons.join(' ')).toContain('Read-only');
 });
 
-test('knowledge.search is denied when explicitly not enabled', () => {
+test('knowledge.search requires explicit enablement even when the tool list is empty', () => {
   const result = evaluateActionForTest(
-    { ...base, enabledTools: ['reply'] },
+    { ...base, enabledTools: [] },
     {
       type: KNOWLEDGE_SEARCH_TOOL,
       idempotencyKey: 'knowledge-2',

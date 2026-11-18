@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { knowledgeEmbeddingReuseKey } from '@/lib/knowledge/embed';
 import { KNOWLEDGE_CHUNK_INSERT_BATCH } from '@/lib/knowledge/types';
+import { knowledgeEmbeddingReuseKey } from '@/lib/runtime/knowledge/embed';
 
 test('embedding reuse keys include model and dimensions', () => {
   const sameContent = knowledgeEmbeddingReuseKey(0, 'abc', 'openai/text-embedding-3-small', 1536);

@@ -214,6 +214,9 @@ control; results open with a “Found N passages” header (plus a “Dev stub e
 Badge when the stub embedder is active). Each hit shows title, rank, combined score
 and vector/text score Badges, with raw offsets/reasons behind a Details collapsible.
 Wide layouts place the inspector beside the list; below 900px they stack.
+The Knowledge tab has a per-agent toggle for Playground retrieval. A grounded answer
+uses numbered citations. Its source card shows the filename, page or section, and
+quoted passage. History keeps the same citations with the saved run.
 History uses native details/summary for run content and exact configuration snapshots.
 History shows the provider’s recorded cost and labels missing cost explicitly.
 Access uses a Configuration-style left nav (Lifecycle, Budgets, Approvals, Consent,
@@ -232,7 +235,7 @@ desktop grid, with No cap Switches on the same heading row as spend labels (`spa
   Access section nav switches to a Select at ≤900px (wider screens keep scrollable tablist/sub-nav
   with fade edges). Access panels stay mounted so drafts survive section switches. On narrow
   Budgets, each No cap Switch sits on its own row under the field label. Skip links stay
-  off-screen until `:focus-visible`; screenshot helpers blur focus so captures never show them.
+  visually hidden until `:focus-visible`; screenshot helpers blur focus so captures never show them.
   Consent records pair a recipient ID with a scope, choice and evidence reference. Approvals shows
   the pending queue first, with the draft and explicit approve and reject controls. Lifecycle
   clearly labels Live as simulation-only until adapters are configured. Access also shows which

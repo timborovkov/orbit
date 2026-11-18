@@ -2,12 +2,7 @@ import { hostname } from 'node:os';
 import * as Sentry from '@sentry/bun';
 
 import { closeDb } from '@/lib/db';
-import {
-  finalizeFailedKnowledgeJob,
-  KNOWLEDGE_JOB_TYPE,
-  processKnowledgeDocument,
-  resolveKnowledgeEmbedder,
-} from '@/lib/knowledge/worker';
+import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { registerErrorCapture } from '@/lib/observability/errors';
 import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import { startJobWorker } from '@/lib/queue/worker';
@@ -17,6 +12,12 @@ import {
   reconcileOrphanedSimulationRuns,
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
+import {
+  finalizeFailedKnowledgeJob,
+  processKnowledgeDocument,
+  reconcileDeadKnowledgeJobs,
+} from '@/lib/runtime/knowledge/process';
+import { resolveKnowledgeEmbedders } from '@/lib/runtime/knowledge/provider';
 import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
 import { workerEnvConfig } from '@/lib/worker-env';
 
@@ -75,8 +76,15 @@ const worker = startJobWorker({
       try {
         const agentId = typeof job.payload.agentId === 'string' ? job.payload.agentId : undefined;
         if (!agentId) throw new Error('Knowledge job is missing agentId');
-        const embedMany = await resolveKnowledgeEmbedder(agentId);
-        await processKnowledgeDocument(job.payload, embedMany, signal);
+        let provider: Awaited<ReturnType<typeof resolveKnowledgeEmbedders>> | undefined;
+        await processKnowledgeDocument(
+          job.payload,
+          async (values, abortSignal) => {
+            provider ??= await resolveKnowledgeEmbedders(agentId);
+            return provider.embedMany(values, abortSignal);
+          },
+          signal,
+        );
       } catch (error) {
         reportFailure('worker.runtime', jobCorrelation(job), error);
         throw error;
@@ -94,7 +102,7 @@ const worker = startJobWorker({
     }
   },
   reconcileDeadLetters: async () => {
-    await reconcileOrphanedSimulationRuns();
+    await Promise.all([reconcileOrphanedSimulationRuns(), reconcileDeadKnowledgeJobs()]);
   },
   onError: (error) => {
     console.error('Worker queue operation failed.');

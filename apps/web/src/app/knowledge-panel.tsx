@@ -8,6 +8,7 @@ import {
   inspectKnowledge,
   replaceKnowledge,
   reprocessKnowledge,
+  saveKnowledgeSearchAccess,
   uploadKnowledge,
 } from '@/actions/knowledge';
 import { KnowledgeDocumentList, KnowledgeDropzone } from '@/app/knowledge-document-list';
@@ -29,10 +30,12 @@ export function KnowledgePanel({
   agentId,
   documents,
   storageReady,
+  searchEnabled,
 }: {
   agentId: string;
   documents: KnowledgeDoc[];
   storageReady: boolean;
+  searchEnabled: boolean;
 }) {
   const uploadInput = useRef<HTMLInputElement>(null);
   const [pending, startTransition] = useTransition();
@@ -43,10 +46,12 @@ export function KnowledgePanel({
   const [deleteTarget, setDeleteTarget] = useState<KnowledgeDoc | null>(null);
   const [query, setQuery] = useState('');
   const [inspection, setInspection] = useState<{
+    library: string;
     query: string;
     hits: InspectionHit[];
     embeddingMode: 'openrouter' | 'stub';
   } | null>(null);
+  const library = JSON.stringify(documents.map((doc) => [doc.id, doc.status, doc.updatedAt]));
 
   function run(
     documentId: string | null,
@@ -69,10 +74,13 @@ export function KnowledgePanel({
         if (result.error) setError(result.error);
         if (result.inspection) {
           setInspection({
+            library,
             query: result.inspection.query,
             hits: result.inspection.hits,
             embeddingMode: result.inspection.embeddingMode ?? 'openrouter',
           });
+        } else if (!result.error && documentId !== 'access') {
+          setInspection(null);
         }
       } catch {
         setError('Unable to complete that knowledge action. Try again.');
@@ -127,6 +135,21 @@ export function KnowledgePanel({
             />
           </div>
         </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          aria-pressed={searchEnabled}
+          disabled={pending}
+          onClick={() => {
+            const form = new FormData();
+            form.set('agentId', agentId);
+            form.set('enabled', String(!searchEnabled));
+            run('access', () => saveKnowledgeSearchAccess(form));
+          }}
+        >
+          Use knowledge in Playground
+        </Button>
 
         {!storageReady && (
           <p className="field-hint">
@@ -197,7 +220,7 @@ export function KnowledgePanel({
         query={query}
         pending={pending}
         searching={pending && busyId === 'inspect'}
-        inspection={inspection}
+        inspection={inspection?.library === library ? inspection : null}
         onQueryChange={setQuery}
         onInspect={() => {
           const form = new FormData();

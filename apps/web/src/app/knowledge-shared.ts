@@ -1,4 +1,14 @@
+import { z } from 'zod';
+
 import type { KnowledgeContentKind, KnowledgeDocumentStatus } from '@/lib/knowledge/types';
+
+export const knowledgeSourceSchema = z.object({
+  id: z.number().int().positive(),
+  sourceFilename: z.string(),
+  page: z.number().nullable(),
+  section: z.string().nullable(),
+  content: z.string(),
+});
 
 export interface KnowledgeDoc {
   id: string;
