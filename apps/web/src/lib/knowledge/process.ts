@@ -1,10 +1,15 @@
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
-import { db } from '@/lib/db';
+import { db, type Db, type Tx } from '@/lib/db';
 import { chunkExtractedText } from '@/lib/knowledge/chunk';
-import type { EmbedManyFn } from '@/lib/knowledge/embed';
+import {
+  knowledgeEmbeddingDimensions,
+  knowledgeEmbeddingModelId,
+  knowledgeEmbeddingReuseKey,
+  type EmbedManyFn,
+} from '@/lib/knowledge/embed';
 import { extractKnowledgeDocument } from '@/lib/knowledge/extract';
-import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
+import { KNOWLEDGE_CHUNK_INSERT_BATCH, KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { knowledgeChunks, knowledgeDocuments } from '@/lib/schema';
 import { getObject } from '@/lib/storage/objects';
 
@@ -12,6 +17,20 @@ export { KNOWLEDGE_JOB_TYPE };
 
 function vectorLiteral(values: number[]) {
   return `[${values.join(',')}]`;
+}
+
+async function insertChunkBatches(store: Db | Tx, rows: (typeof knowledgeChunks.$inferInsert)[]) {
+  const batches: (typeof knowledgeChunks.$inferInsert)[][] = [];
+  for (let offset = 0; offset < rows.length; offset += KNOWLEDGE_CHUNK_INSERT_BATCH) {
+    batches.push(rows.slice(offset, offset + KNOWLEDGE_CHUNK_INSERT_BATCH));
+  }
+  // Sequential inserts stay under Postgres' bind-parameter limit; order does not matter
+  // beyond completing every batch before returning.
+  await batches.reduce<Promise<void>>(
+    (previous, batch) =>
+      previous.then(() => store.insert(knowledgeChunks).values(batch)).then(() => undefined),
+    Promise.resolve(),
+  );
 }
 
 async function markFailed(documentId: string, agentId: string, error: string) {
@@ -72,45 +91,69 @@ export async function processKnowledgeDocument(
     });
     if (!drafts.length) throw new Error('No searchable chunks were produced from this document');
 
+    const model = knowledgeEmbeddingModelId();
+    const dimensions = knowledgeEmbeddingDimensions();
+
     const existing = await db()
       .select({
         chunkIndex: knowledgeChunks.chunkIndex,
         contentHash: knowledgeChunks.contentHash,
         embedding: knowledgeChunks.embedding,
+        embeddingModel: knowledgeChunks.embeddingModel,
+        embeddingDimensions: knowledgeChunks.embeddingDimensions,
       })
       .from(knowledgeChunks)
       .where(eq(knowledgeChunks.documentId, documentId));
     const reusable = new Map<string, number[]>();
     for (const row of existing) {
-      if (row.embedding) reusable.set(`${row.chunkIndex}:${row.contentHash}`, row.embedding);
+      if (
+        !row.embedding ||
+        row.embeddingModel !== model ||
+        row.embeddingDimensions !== dimensions
+      ) {
+        continue;
+      }
+      reusable.set(
+        knowledgeEmbeddingReuseKey(row.chunkIndex, row.contentHash, model, dimensions),
+        row.embedding,
+      );
     }
+
+    const insertRows = drafts.map((draft) => {
+      const reuseKey = knowledgeEmbeddingReuseKey(
+        draft.index,
+        draft.contentHash,
+        model,
+        dimensions,
+      );
+      const embedding = reusable.get(reuseKey) ?? null;
+      return {
+        documentId,
+        agentId,
+        chunkIndex: draft.index,
+        content: draft.content,
+        contentHash: draft.contentHash,
+        sourceFilename: draft.filename,
+        sourceTitle: draft.title,
+        page: draft.page ?? null,
+        section: draft.section ?? null,
+        startOffset: draft.startOffset,
+        endOffset: draft.endOffset,
+        embedding,
+        embeddingModel: embedding ? model : null,
+        embeddingDimensions: embedding ? dimensions : null,
+      };
+    });
 
     await db().transaction(async (tx) => {
       await tx.delete(knowledgeChunks).where(eq(knowledgeChunks.documentId, documentId));
-      await tx.insert(knowledgeChunks).values(
-        drafts.map((draft) => ({
-          documentId,
-          agentId,
-          chunkIndex: draft.index,
-          content: draft.content,
-          contentHash: draft.contentHash,
-          sourceFilename: draft.filename,
-          sourceTitle: draft.title,
-          page: draft.page ?? null,
-          section: draft.section ?? null,
-          startOffset: draft.startOffset,
-          endOffset: draft.endOffset,
-          embedding: reusable.get(`${draft.index}:${draft.contentHash}`) ?? null,
-        })),
-      );
+      await insertChunkBatches(tx, insertRows);
       await tx
         .update(knowledgeDocuments)
         .set({
           contentHash: extracted.contentHash,
           chunkCount: drafts.length,
-          embeddedCount: drafts.filter((draft) =>
-            reusable.has(`${draft.index}:${draft.contentHash}`),
-          ).length,
+          embeddedCount: insertRows.filter((row) => row.embedding).length,
           updatedAt: new Date(),
         })
         .where(eq(knowledgeDocuments.id, documentId));
@@ -142,7 +185,9 @@ export async function processKnowledgeDocument(
           if (!embedding) throw new Error('Embedding provider returned an unexpected batch size');
           await db().execute(sql`
             UPDATE knowledge_chunks
-            SET embedding = ${vectorLiteral(embedding)}::vector
+            SET embedding = ${vectorLiteral(embedding)}::vector,
+                embedding_model = ${model},
+                embedding_dimensions = ${dimensions}
             WHERE id = ${row.id}
           `);
         }),

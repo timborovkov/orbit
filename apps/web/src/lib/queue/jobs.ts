@@ -354,12 +354,19 @@ export async function recoverExpiredLeases(store: Store = db()): Promise<JobReco
 export async function cancelPendingJobsForAgent(
   agentId: string,
   store: Store = db(),
-  options: { includeClaimed?: boolean } = {},
+  options: { includeClaimed?: boolean; excludeTypes?: string[] } = {},
 ): Promise<string[]> {
   const now = new Date().toISOString();
   const statusFilter = options.includeClaimed
     ? sql`status IN ('pending', 'claimed')`
     : sql`status = 'pending'`;
+  const excludeTypes = options.excludeTypes?.filter(Boolean) ?? [];
+  const typeFilter = excludeTypes.length
+    ? sql`AND type NOT IN (${sql.join(
+        excludeTypes.map((type) => sql`${type}`),
+        sql`, `,
+      )})`
+    : sql``;
   const result = await store.execute(sql`
     UPDATE jobs
     SET
@@ -370,6 +377,7 @@ export async function cancelPendingJobsForAgent(
       updated_at = ${now}::timestamptz
     WHERE ${statusFilter}
       AND payload->>'agentId' = ${agentId}
+      ${typeFilter}
     RETURNING id
   `);
   if (!Array.isArray(result)) return [];

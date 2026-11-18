@@ -3,15 +3,24 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 
+import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { validateKnowledgeUpload } from '@/lib/knowledge/extract';
-import { KNOWLEDGE_JOB_TYPE, maxKnowledgeBytes } from '@/lib/knowledge/types';
+import {
+  KNOWLEDGE_JOB_TYPE,
+  maxKnowledgeBytes,
+  maxKnowledgeUploadLabel,
+} from '@/lib/knowledge/types';
 import { enqueueJob } from '@/lib/queue/jobs';
 import { agents, audit, knowledgeChunks, knowledgeDocuments } from '@/lib/schema';
 import { deleteObject, putObject, storageConfigured } from '@/lib/storage/objects';
 
 async function requireAgent(agentId: string) {
   return (await db().select({ id: agents.id }).from(agents).where(eq(agents.id, agentId))).at(0);
+}
+
+async function requireKnowledgeAdmin() {
+  return requireAdmin();
 }
 
 async function cleanupObject(key: string, actor: string) {
@@ -35,6 +44,7 @@ export async function uploadKnowledgeDocument(
   agentId: string,
   file: { name: string; type: string; size: number; bytes: Uint8Array },
 ) {
+  await requireKnowledgeAdmin();
   if (!(await requireAgent(agentId))) return { error: 'Agent not found.' };
   if (!storageConfigured()) {
     return {
@@ -42,7 +52,7 @@ export async function uploadKnowledgeDocument(
     };
   }
   if (file.bytes.byteLength > maxKnowledgeBytes || file.size > maxKnowledgeBytes) {
-    return { error: 'Choose a file smaller than 10 MB.' };
+    return { error: `Choose a file smaller than ${maxKnowledgeUploadLabel}.` };
   }
   const validated = validateKnowledgeUpload(file);
   if ('error' in validated) return validated;
@@ -92,6 +102,7 @@ export async function replaceKnowledgeDocument(
   documentId: string,
   file: { name: string; type: string; size: number; bytes: Uint8Array },
 ) {
+  await requireKnowledgeAdmin();
   if (!(await requireAgent(agentId))) return { error: 'Agent not found.' };
   if (!storageConfigured()) {
     return {
@@ -101,7 +112,7 @@ export async function replaceKnowledgeDocument(
   const validated = validateKnowledgeUpload(file);
   if ('error' in validated) return validated;
   if (file.bytes.byteLength > maxKnowledgeBytes) {
-    return { error: 'Choose a file smaller than 10 MB.' };
+    return { error: `Choose a file smaller than ${maxKnowledgeUploadLabel}.` };
   }
 
   const current = (
@@ -113,7 +124,8 @@ export async function replaceKnowledgeDocument(
   ).at(0);
   if (!current) return { error: 'Document not found.' };
 
-  const objectKey = `agents/${agentId}/knowledge/${documentId}/${file.name}`;
+  // Always write under a unique key so a failed DB commit cannot delete the live object.
+  const objectKey = `agents/${agentId}/knowledge/${documentId}/${randomUUID()}/${file.name}`;
   try {
     await putObject(objectKey, file.bytes, validated.mimeType);
   } catch {
@@ -165,6 +177,7 @@ export async function reprocessKnowledgeDocument(
   agentId: string,
   documentId: string,
 ) {
+  await requireKnowledgeAdmin();
   const current = (
     await db()
       .select({ id: knowledgeDocuments.id })
@@ -198,6 +211,7 @@ export async function reprocessKnowledgeDocument(
 }
 
 export async function deleteKnowledgeDocument(actor: string, agentId: string, documentId: string) {
+  await requireKnowledgeAdmin();
   const current = (
     await db()
       .select()
@@ -227,6 +241,7 @@ export async function inspectKnowledgeRetrieval(
     limit?: number;
   },
 ) {
+  await requireKnowledgeAdmin();
   if (!(await requireAgent(agentId))) return { error: 'Agent not found.' as const };
   const trimmed = query.trim();
   if (!trimmed) return { error: 'Enter a retrieval query.' as const };

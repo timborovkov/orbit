@@ -4,13 +4,9 @@ import { Search } from 'lucide-react';
 
 import type { InspectionHit } from '@/app/knowledge-shared';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from '@/components/ui/input-group';
+import { Input } from '@/components/ui/input';
 
 export function KnowledgeInspectorPanel({
   query,
@@ -50,8 +46,8 @@ export function KnowledgeInspectorPanel({
         <label className="sr-only" htmlFor="knowledge-query">
           Query
         </label>
-        <InputGroup>
-          <InputGroupInput
+        <div className="knowledge-inspector-query">
+          <Input
             id="knowledge-query"
             name="query"
             maxLength={2000}
@@ -61,19 +57,19 @@ export function KnowledgeInspectorPanel({
             }}
             placeholder="Ask about a product detail, policy or FAQ…"
             disabled={searching}
+            className="knowledge-inspector-query-input"
           />
-          <InputGroupAddon align="inline-end">
-            <InputGroupButton
-              type="submit"
-              variant="default"
-              size="sm"
-              disabled={pending || !query.trim()}
-              aria-disabled={pending || !query.trim()}
-            >
-              {searching ? 'Searching…' : 'Inspect'}
-            </InputGroupButton>
-          </InputGroupAddon>
-        </InputGroup>
+          <Button
+            type="submit"
+            variant="default"
+            size="sm"
+            disabled={pending || !query.trim()}
+            aria-disabled={pending || !query.trim()}
+            className="knowledge-inspector-query-button"
+          >
+            {searching ? 'Searching…' : 'Inspect'}
+          </Button>
+        </div>
       </form>
 
       {!inspection ? (

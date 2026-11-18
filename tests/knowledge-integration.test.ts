@@ -112,6 +112,22 @@ test('knowledge pipeline extracts, embeds once, and hybrid-searches with citatio
   await processKnowledgeDocument({ documentId, agentId }, countingEmbedMany);
   expect(embedCalls).toBe(1);
 
+  const [stored] =
+    await sql`SELECT embedding_model, embedding_dimensions FROM knowledge_chunks WHERE document_id=${documentId} LIMIT 1`;
+  expect(stored.embedding_model).toBeTruthy();
+  expect(Number(stored.embedding_dimensions)).toBeGreaterThan(0);
+
+  // A model change must invalidate reuse and re-embed.
+  const previousModel = process.env.KNOWLEDGE_EMBEDDING_MODEL;
+  process.env.KNOWLEDGE_EMBEDDING_MODEL = 'openai/text-embedding-3-large';
+  try {
+    await processKnowledgeDocument({ documentId, agentId }, countingEmbedMany);
+  } finally {
+    if (previousModel === undefined) delete process.env.KNOWLEDGE_EMBEDDING_MODEL;
+    else process.env.KNOWLEDGE_EMBEDDING_MODEL = previousModel;
+  }
+  expect(embedCalls).toBe(2);
+
   const result = await searchKnowledge({
     agentId,
     query: 'reset password',

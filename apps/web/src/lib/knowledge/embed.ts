@@ -9,12 +9,12 @@ import {
 export type EmbedManyFn = (values: string[], signal?: AbortSignal) => Promise<number[][]>;
 export type EmbedOneFn = (value: string, signal?: AbortSignal) => Promise<number[]>;
 
-function knowledgeEmbeddingModelId() {
+export function knowledgeEmbeddingModelId() {
   const configured = process.env.KNOWLEDGE_EMBEDDING_MODEL?.trim();
   return configured ?? DEFAULT_KNOWLEDGE_EMBEDDING_MODEL;
 }
 
-function knowledgeEmbeddingDimensions() {
+export function knowledgeEmbeddingDimensions() {
   const raw = process.env.KNOWLEDGE_EMBEDDING_DIMENSIONS?.trim();
   if (!raw) return DEFAULT_KNOWLEDGE_EMBEDDING_DIMENSIONS;
   const parsed = Number(raw);
@@ -22,6 +22,16 @@ function knowledgeEmbeddingDimensions() {
     throw new Error('KNOWLEDGE_EMBEDDING_DIMENSIONS must be a positive integer');
   }
   return parsed;
+}
+
+/** Cache identity for reusable vectors — content alone is not enough across model changes. */
+export function knowledgeEmbeddingReuseKey(
+  chunkIndex: number,
+  contentHash: string,
+  model: string,
+  dimensions: number,
+) {
+  return `${chunkIndex}:${contentHash}:${model}:${dimensions}`;
 }
 
 export function openRouterEmbedders(apiKey: string): {

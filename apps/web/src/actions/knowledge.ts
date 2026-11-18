@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { checkOrigin, requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { openRouterEmbedders, stubEmbedders } from '@/lib/knowledge/embed';
-import { maxKnowledgeBytes } from '@/lib/knowledge/types';
+import { maxKnowledgeBytes, maxKnowledgeUploadLabel } from '@/lib/knowledge/types';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { credentials } from '@/lib/schema';
 import {
@@ -30,7 +30,8 @@ async function agentParams(form: FormData) {
 function readUpload(form: FormData, field = 'file') {
   const file = form.get(field);
   if (!(file instanceof File) || !file.size) return { error: 'Choose a file to upload.' as const };
-  if (file.size > maxKnowledgeBytes) return { error: 'Choose a file smaller than 10 MB.' as const };
+  if (file.size > maxKnowledgeBytes)
+    return { error: `Choose a file smaller than ${maxKnowledgeUploadLabel}.` as const };
   return { file };
 }
 

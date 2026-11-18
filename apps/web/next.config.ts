@@ -6,7 +6,8 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   // Keep screenshots and review captures free of the Next.js corner badge.
   devIndicators: false,
-  experimental: { serverActions: { bodySizeLimit: '6mb' } },
+  // 10 MB knowledge + multipart overhead for knowledge uploads through Server Actions.
+  experimental: { serverActions: { bodySizeLimit: '12mb' } },
   outputFileTracingRoot: join(import.meta.dirname, '../..'),
   turbopack: { root: join(import.meta.dirname, '../..') },
   serverExternalPackages: [

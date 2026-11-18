@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatRelativeTime, formatUtcTimestamp } from '@/lib/format';
+import { maxKnowledgeUploadLabel } from '@/lib/knowledge/types';
 import { cn } from '@/lib/utils';
 
 export function KnowledgeDropzone({
@@ -53,7 +54,9 @@ export function KnowledgeDropzone({
     >
       <BookOpen size={28} strokeWidth={1.25} aria-hidden="true" />
       <h3>No documents yet</h3>
-      <p>Drop files or browse. PDF, Markdown, plain text or FAQ · up to 10 MB.</p>
+      <p>
+        Drop files or browse. PDF, Markdown, plain text or FAQ · up to {maxKnowledgeUploadLabel}.
+      </p>
       <Button type="button" variant="outline" disabled={disabled} onClick={onBrowse}>
         Browse files
       </Button>

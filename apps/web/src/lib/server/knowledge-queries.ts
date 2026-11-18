@@ -2,10 +2,12 @@ import 'server-only';
 
 import { desc, eq } from 'drizzle-orm';
 
+import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { knowledgeDocuments } from '@/lib/schema';
 
 export async function listKnowledgeDocuments(agentId: string) {
+  await requireAdmin();
   const rows = await db()
     .select({
       id: knowledgeDocuments.id,

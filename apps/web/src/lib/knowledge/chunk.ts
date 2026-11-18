@@ -95,6 +95,63 @@ function chunkFaq(text: string, filename: string, title: string): KnowledgeChunk
   return drafts.length ? drafts : splitByLength(normalized, 0, null, null, filename, title);
 }
 
+function chunkMarkdownByHeadings(
+  text: string,
+  filename: string,
+  title: string,
+): KnowledgeChunkDraft[] | null {
+  const headingSplits = [...text.matchAll(/^#{1,3}\s+.+$/gm)];
+  if (!headingSplits.length) return null;
+  const sectionsFromHeadings: ExtractedSection[] = [];
+  headingSplits.forEach((match, i) => {
+    const start = typeof match.index === 'number' ? match.index : 0;
+    const next = headingSplits.at(i + 1);
+    const end = next && typeof next.index === 'number' ? next.index : text.length;
+    const heading = match[0].replace(/^#+\s*/, '').trim();
+    const content = text.slice(start, end).trim();
+    if (!content) return;
+    sectionsFromHeadings.push({
+      content,
+      section: heading.slice(0, 160),
+      startOffset: start,
+    });
+  });
+  if (!sectionsFromHeadings.length) return null;
+  return chunkBySections(text, 'plain', filename, title, sectionsFromHeadings);
+}
+
+function chunkBySections(
+  text: string,
+  kind: KnowledgeContentKind,
+  filename: string,
+  title: string,
+  sections: ExtractedSection[],
+): KnowledgeChunkDraft[] {
+  const drafts: KnowledgeChunkDraft[] = [];
+  for (const section of sections) {
+    const part = splitByLength(
+      section.content,
+      section.startOffset,
+      section.page,
+      section.section,
+      filename,
+      title,
+    );
+    for (const draft of part) {
+      drafts.push({ ...draft, index: drafts.length });
+    }
+  }
+  if (drafts.length) return drafts;
+  return splitByLength(text, 0, null, null, filename, title).map((draft, index) => ({
+    ...draft,
+    index,
+  }));
+}
+
+/**
+ * Prefer kind-aware splits before caller-supplied sections so a synthetic
+ * whole-document section cannot skip Markdown heading detection.
+ */
 export function chunkExtractedText(input: {
   text: string;
   kind: KnowledgeContentKind;
@@ -105,51 +162,13 @@ export function chunkExtractedText(input: {
   const { text, kind, filename, title, sections } = input;
   if (kind === 'faq') return chunkFaq(text, filename, title);
 
-  if (sections?.length) {
-    const drafts: KnowledgeChunkDraft[] = [];
-    for (const section of sections) {
-      const part = splitByLength(
-        section.content,
-        section.startOffset,
-        section.page,
-        section.section,
-        filename,
-        title,
-      );
-      for (const draft of part) {
-        drafts.push({ ...draft, index: drafts.length });
-      }
-    }
-    if (drafts.length) return drafts;
+  if (kind === 'markdown') {
+    const byHeadings = chunkMarkdownByHeadings(text, filename, title);
+    if (byHeadings) return byHeadings;
   }
 
-  if (kind === 'markdown') {
-    const headingSplits = [...text.matchAll(/^#{1,3}\s+.+$/gm)];
-    if (headingSplits.length) {
-      const sectionsFromHeadings: ExtractedSection[] = [];
-      headingSplits.forEach((match, i) => {
-        const start = typeof match.index === 'number' ? match.index : 0;
-        const next = headingSplits.at(i + 1);
-        const end = next && typeof next.index === 'number' ? next.index : text.length;
-        const heading = match[0].replace(/^#+\s*/, '').trim();
-        const content = text.slice(start, end).trim();
-        if (!content) return;
-        sectionsFromHeadings.push({
-          content,
-          section: heading.slice(0, 160),
-          startOffset: start,
-        });
-      });
-      if (sectionsFromHeadings.length) {
-        return chunkExtractedText({
-          text,
-          kind: 'plain',
-          filename,
-          title,
-          sections: sectionsFromHeadings,
-        });
-      }
-    }
+  if (sections?.length) {
+    return chunkBySections(text, kind, filename, title, sections);
   }
 
   return splitByLength(text, 0, null, null, filename, title).map((draft, index) => ({

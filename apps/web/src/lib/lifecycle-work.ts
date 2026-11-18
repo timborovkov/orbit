@@ -1,6 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
 import { db, type Db, type Tx } from '@/lib/db';
+import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
 import { runs } from '@/lib/schema';
 
@@ -9,6 +10,7 @@ type Store = Db | Tx;
 /**
  * Cancel jobs for a pause/stop transition and interrupt linked non-terminal runs.
  * Pause keeps claimed work running; stop cancels claims and interrupts all active runs.
+ * Knowledge ingestion jobs are excluded so documents are not left stuck in pending.
  */
 export async function cancelWorkForLifecycle(
   agentId: string,
@@ -16,7 +18,10 @@ export async function cancelWorkForLifecycle(
   store: Store = db(),
 ): Promise<string[]> {
   const includeClaimed = next === 'stopped';
-  const cancelledIds = await cancelPendingJobsForAgent(agentId, store, { includeClaimed });
+  const cancelledIds = await cancelPendingJobsForAgent(agentId, store, {
+    includeClaimed,
+    excludeTypes: [KNOWLEDGE_JOB_TYPE],
+  });
   if (next === 'stopped') {
     await store
       .update(runs)

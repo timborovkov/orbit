@@ -30,6 +30,20 @@ test('chunks markdown by headings when present', () => {
   expect(chunks.some((chunk) => chunk.section === 'Limits')).toBe(true);
 });
 
+test('markdown heading splits win over a synthetic whole-document section', () => {
+  const text = `# Pricing\n\nOrbit is free for local use.\n\n## Limits\n\nDaily spend caps apply.`;
+  const chunks = chunkExtractedText({
+    text,
+    kind: 'markdown',
+    filename: 'pricing.md',
+    title: 'Pricing',
+    sections: [{ content: text, startOffset: 0 }],
+  });
+  expect(chunks.length).toBeGreaterThanOrEqual(2);
+  expect(chunks.some((chunk) => chunk.section === 'Pricing')).toBe(true);
+  expect(chunks.some((chunk) => chunk.section === 'Limits')).toBe(true);
+});
+
 test('chunks FAQ into question/answer pairs', () => {
   const text = `Q: How do I reset my password?\nA: Use the account settings page.\n\nQ: Where are invoices?\nA: Open Billing → Invoices.`;
   const chunks = chunkExtractedText({

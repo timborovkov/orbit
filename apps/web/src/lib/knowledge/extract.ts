@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 
 import type { ExtractedSection } from '@/lib/knowledge/chunk';
-import { maxKnowledgeBytes, type KnowledgeContentKind } from '@/lib/knowledge/types';
+import {
+  maxKnowledgeBytes,
+  maxKnowledgeUploadLabel,
+  type KnowledgeContentKind,
+} from '@/lib/knowledge/types';
 
 export interface ExtractedDocument {
   text: string;
@@ -34,7 +38,8 @@ export function validateKnowledgeUpload(file: {
   size: number;
 }): { kind: KnowledgeContentKind; mimeType: string } | { error: string } {
   if (!file.size) return { error: 'Choose a non-empty file.' };
-  if (file.size > maxKnowledgeBytes) return { error: 'Choose a file smaller than 10 MB.' };
+  if (file.size > maxKnowledgeBytes)
+    return { error: `Choose a file smaller than ${maxKnowledgeUploadLabel}.` };
   const kind = detectKnowledgeKind(file.name, file.type || 'application/octet-stream');
   if (!kind) return { error: 'Upload a PDF, Markdown, plain text or FAQ file.' };
   const mimeType =
@@ -99,9 +104,12 @@ export async function extractKnowledgeDocument(
   if (kind === 'pdf') return extractPdf(bytes);
   const text = decodeText(bytes).replace(/\r\n/g, '\n').trim();
   if (!text) throw new Error('The file did not contain readable text.');
+  // Leave sections empty for markdown/plain/faq so the chunker can apply kind-aware
+  // splits (Markdown headings, FAQ pairs). A synthetic whole-document section would
+  // short-circuit heading detection.
   return {
     text,
     contentHash: hashBytes(bytes),
-    sections: [{ content: text, startOffset: 0 }],
+    sections: [],
   };
 }

@@ -1,10 +1,16 @@
 import { eq } from 'drizzle-orm';
 
+import { isBudgetError } from '@/lib/budgets';
 import { db } from '@/lib/db';
-import { openRouterEmbedders } from '@/lib/knowledge/embed';
+import { openRouterEmbedders, stubEmbedders } from '@/lib/knowledge/embed';
 import { searchKnowledge } from '@/lib/knowledge/search';
-import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
-import { authorizeAction, loadPolicyContext, type PolicyResult } from '@/lib/policy/gateway';
+import { KNOWLEDGE_EMBEDDING_RESERVE_MICROS, KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
+import {
+  authorizeAction,
+  loadPolicyContext,
+  reserveRequestQuota,
+  type PolicyResult,
+} from '@/lib/policy/gateway';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { credentials } from '@/lib/schema';
 
@@ -16,6 +22,12 @@ export interface KnowledgeSearchToolInput {
   runId?: string | null;
   idempotencyKey: string;
   signal?: AbortSignal;
+  execution?: {
+    runId: string;
+    token: string;
+    signal: AbortSignal;
+    stage?: 'evaluator' | 'main';
+  };
 }
 
 export async function executeKnowledgeSearchTool(input: KnowledgeSearchToolInput): Promise<{
@@ -36,21 +48,56 @@ export async function executeKnowledgeSearchTool(input: KnowledgeSearchToolInput
     return { policy };
   }
 
-  const credential = (
-    await db()
-      .select({ encryptedKey: credentials.encryptedKey })
-      .from(credentials)
-      .where(eq(credentials.agentId, input.agentId))
-      .limit(1)
-  ).at(0);
-  const { apiKey } = resolveOpenRouterApiKey(input.agentId, credential?.encryptedKey);
-  const { embedOne } = openRouterEmbedders(apiKey);
-  const result = await searchKnowledge({
-    agentId: input.agentId,
-    query: input.query,
-    limit: input.limit,
-    embedQuery: embedOne,
-    signal: input.signal,
-  });
-  return { policy, result };
+  let settle: ((billedMicros: number) => Promise<void>) | null = null;
+  try {
+    settle = await reserveRequestQuota(
+      input.agentId,
+      KNOWLEDGE_EMBEDDING_RESERVE_MICROS,
+      input.execution,
+    );
+  } catch (error) {
+    if (isBudgetError(error)) {
+      return {
+        policy: {
+          ...policy,
+          decision: 'deny',
+          reasons: [error.message],
+          violation: error.kind === 'cancelled' ? undefined : error.kind,
+        },
+      };
+    }
+    throw error;
+  }
+
+  try {
+    let embedOne: (value: string, signal?: AbortSignal) => Promise<number[]>;
+    if (process.env.KNOWLEDGE_EMBEDDING_STUB === 'true') {
+      embedOne = stubEmbedders().embedOne;
+    } else {
+      const credential = (
+        await db()
+          .select({ encryptedKey: credentials.encryptedKey })
+          .from(credentials)
+          .where(eq(credentials.agentId, input.agentId))
+          .limit(1)
+      ).at(0);
+      const { apiKey } = resolveOpenRouterApiKey(input.agentId, credential?.encryptedKey);
+      embedOne = openRouterEmbedders(apiKey).embedOne;
+    }
+
+    const result = await searchKnowledge({
+      agentId: input.agentId,
+      query: input.query,
+      limit: input.limit,
+      embedQuery: embedOne,
+      signal: input.signal ?? input.execution?.signal,
+    });
+    // Embedding providers do not yet report a settled USD cost here; release the spend
+    // reservation while keeping the request counter increment from reserveRequestQuota.
+    await settle(0);
+    return { policy, result };
+  } catch (error) {
+    await settle(0);
+    throw error;
+  }
 }

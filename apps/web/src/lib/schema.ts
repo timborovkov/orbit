@@ -228,6 +228,8 @@ export const knowledgeChunks = pgTable(
     startOffset: integer('start_offset').notNull(),
     endOffset: integer('end_offset').notNull(),
     embedding: vector('embedding', { dimensions: KNOWLEDGE_EMBEDDING_DIMENSIONS }),
+    embeddingModel: text('embedding_model'),
+    embeddingDimensions: integer('embedding_dimensions'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [unique().on(table.documentId, table.chunkIndex)],

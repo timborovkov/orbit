@@ -1932,11 +1932,24 @@ fieldset[aria-disabled='true'] textarea {
 .knowledge-inspector-form {
   margin-top: 16px;
 }
-.knowledge-inspector-form [data-slot='input-group'] {
-  background: var(--surface);
+.knowledge-inspector-query {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
 }
-.knowledge-inspector-form [data-slot='input-group'] button:disabled,
-.knowledge-inspector-form [data-slot='input-group'] button[aria-disabled='true'] {
+.knowledge-inspector-query-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  min-height: 36px;
+}
+.knowledge-inspector-query-button {
+  height: 36px;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+.knowledge-inspector-query-button:disabled,
+.knowledge-inspector-query-button[aria-disabled='true'] {
   opacity: 0.45;
   color: var(--button-ink);
   background: var(--button);
