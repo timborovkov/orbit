@@ -34,7 +34,7 @@ test.afterAll(async () => {
 });
 
 test('skills and MCP library UI across empty, create, data and themes', async ({ page }) => {
-  test.setTimeout(180000);
+  test.setTimeout(240000);
   await signIn(page);
 
   for (const mode of ['light', 'dark'] as const) {
@@ -43,8 +43,14 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
     await page.goto('/skills');
     await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'No skills yet' })).toBeVisible();
+    await expect(page.getByLabel('Breadcrumb').getByText('Skills', { exact: true })).toBeVisible();
     await shot(page, `skills-empty-desktop-${mode}`, { width: 1440, height: 900 });
     await shot(page, `skills-empty-mobile-${mode}`, { width: 390, height: 844 });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('button', { name: 'Workspace navigation' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Skills' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'MCP' })).toBeVisible();
+    await page.keyboard.press('Escape');
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByRole('button', { name: 'New skill', exact: true }).first().click();
@@ -55,6 +61,9 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
     await page.goto('/mcp');
     await expect(page.getByRole('heading', { name: 'MCP connections', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'No MCP connections yet' })).toBeVisible();
+    await expect(
+      page.getByLabel('Breadcrumb').getByText('MCP connections', { exact: true }),
+    ).toBeVisible();
     await shot(page, `mcp-empty-desktop-${mode}`, { width: 1440, height: 900 });
     await shot(page, `mcp-empty-mobile-${mode}`, { width: 390, height: 844 });
 
@@ -79,7 +88,7 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
   await expect(page.locator('.markdown-preview h1')).toContainText('Research brief');
   await page.getByRole('tab', { name: 'Write' }).click();
   await page.getByRole('button', { name: 'Create skill', exact: true }).click();
-  await expect(page.getByRole('cell', { name: /Research brief/ })).toBeVisible();
+  await expect(page.getByText('Research brief').first()).toBeVisible();
 
   await page.goto('/mcp');
   await page.getByRole('button', { name: 'New connection', exact: true }).first().click();
@@ -89,32 +98,52 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
   await page.getByRole('option', { name: 'HTTP', exact: true }).click();
   await page.getByLabel(/^Tool name/).fill('search');
   await page.getByRole('button', { name: 'Add', exact: true }).click();
-  await expect(page.getByText('search', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remove search' })).toBeVisible();
+  await expect(page.getByLabel('Selected tools')).toContainText('search');
   await page.getByLabel(/Header 1 name/).fill('Authorization');
   await page.getByLabel(/Header 1 value/).fill('Bearer test-token');
   await page.getByRole('button', { name: 'Create connection', exact: true }).click();
-  await expect(page.getByRole('cell', { name: /docs-mcp/ })).toBeVisible();
+  await expect(page.getByText('docs-mcp').first()).toBeVisible();
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create agent', exact: true }).click();
+  await page.getByLabel('Template', { exact: true }).selectOption({ label: 'Customer Support' });
+  await page.getByLabel(/^Name/).fill('Support desk');
+  await page.getByRole('button', { name: 'Create shadow agent' }).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await page.getByRole('link', { name: 'Support desk', exact: true }).click();
+  await expect(page).toHaveURL(/\/agents\//);
+  const agentUrl = page.url();
 
   for (const mode of ['light', 'dark'] as const) {
     await setTheme(page, mode);
 
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/skills');
-    await expect(page.getByText('Research brief')).toBeVisible();
+    await expect(
+      page.locator('.library-table-wrap .library-primary', { hasText: 'Research brief' }),
+    ).toBeVisible();
     await shot(page, `skills-list-desktop-${mode}`, { width: 1440, height: 900 });
     await shot(page, `skills-list-mobile-${mode}`, { width: 390, height: 844 });
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.getByRole('button', { name: /Edit Research brief/ }).click();
     await expect(page.getByRole('heading', { name: 'Edit skill' })).toBeVisible();
     await shot(page, `skills-edit-desktop-${mode}`, { width: 1440, height: 900 });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: `test-results/skills-edit-mobile-${mode}.png`, fullPage: true });
     await page.keyboard.press('Escape');
 
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/mcp');
-    await expect(page.getByText('docs-mcp')).toBeVisible();
+    await expect(
+      page.locator('.library-table-wrap .library-primary', { hasText: 'docs-mcp' }),
+    ).toBeVisible();
     await shot(page, `mcp-list-desktop-${mode}`, { width: 1440, height: 900 });
     await shot(page, `mcp-list-mobile-${mode}`, { width: 390, height: 844 });
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.getByRole('button', { name: /Edit docs-mcp/ }).click();
     await expect(page.getByRole('heading', { name: 'Edit connection' })).toBeVisible();
+    await expect(page.getByText('Clear stored headers')).toBeVisible();
     await shot(page, `mcp-edit-desktop-${mode}`, { width: 1440, height: 900 });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({
@@ -124,7 +153,18 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
     await page.keyboard.press('Escape');
   }
 
-  // Keep the original filenames for earlier review continuity.
+  for (const mode of ['light', 'dark'] as const) {
+    await setTheme(page, mode);
+    await page.goto(agentUrl);
+    await page.getByRole('tab', { name: 'Access', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'MCP connections', exact: true })).toBeVisible();
+    await expect(page.getByText('Research brief').first()).toBeVisible();
+    await expect(page.getByText('docs-mcp').first()).toBeVisible();
+    await shot(page, `access-pickers-desktop-${mode}`, { width: 1440, height: 900 });
+    await shot(page, `access-pickers-mobile-${mode}`, { width: 390, height: 844 });
+  }
+
   await setTheme(page, 'light');
   await page.goto('/skills');
   await shot(page, 'skills-desktop-1440x900', { width: 1440, height: 900 });

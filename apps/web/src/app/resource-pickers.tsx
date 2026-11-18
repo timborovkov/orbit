@@ -1,8 +1,19 @@
 'use client';
 
+import { useState } from 'react';
+
 import { saveAgentMcpConnections } from '@/actions/mcp';
 import { saveAgentSkills } from '@/actions/skills';
 import { WorkspaceForm } from '@/app/workspace-form';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from '@/components/ui/field';
 
 export function SkillPicker({
   agentId,
@@ -13,7 +24,11 @@ export function SkillPicker({
   skills: { id: string; name: string; title: string; description: string; version: number }[];
   selectedIds: string[];
 }) {
-  const selected = new Set(selectedIds);
+  const [checked, setChecked] = useState<Record<string, boolean>>(() => {
+    const selected = new Set(selectedIds);
+    return Object.fromEntries(skills.map((skill) => [skill.id, selected.has(skill.id)]));
+  });
+
   return (
     <section id="skills" className="access-workbench">
       <div className="editor-section-heading">
@@ -30,29 +45,41 @@ export function SkillPicker({
       ) : (
         <WorkspaceForm action={saveAgentSkills} label="Save skill selection" saveState>
           <input type="hidden" name="agentId" value={agentId} />
-          <ul className="resource-picker-list">
-            {skills.map((skill) => (
-              <li key={skill.id}>
-                <label className="resource-checkbox">
-                  <input
-                    type="checkbox"
-                    name="skillId"
-                    value={skill.id}
-                    defaultChecked={selected.has(skill.id)}
-                  />
-                  <span>
-                    <strong>{skill.title}</strong>
-                    <span className="muted">
-                      {' '}
-                      · {skill.name} · v{skill.version}
-                    </span>
-                    <br />
-                    <span className="muted">{skill.description}</span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
+          {skills.map((skill) =>
+            checked[skill.id] ? (
+              <input key={`hidden-${skill.id}`} type="hidden" name="skillId" value={skill.id} />
+            ) : null,
+          )}
+          <FieldSet>
+            <FieldLegend variant="label">Library skills</FieldLegend>
+            <FieldDescription>Select the skills this agent may load during a run.</FieldDescription>
+            <FieldGroup className="resource-picker-list gap-0" data-slot="checkbox-group">
+              {skills.map((skill) => {
+                const id = `skill-${skill.id}`;
+                return (
+                  <Field key={skill.id} orientation="horizontal" className="resource-picker-row">
+                    <div className="resource-picker-copy">
+                      <FieldLabel htmlFor={id} className="font-medium">
+                        {skill.title}
+                      </FieldLabel>
+                      <FieldDescription>
+                        {skill.name} · v{skill.version}
+                      </FieldDescription>
+                      <FieldDescription>{skill.description}</FieldDescription>
+                    </div>
+                    <Checkbox
+                      id={id}
+                      checked={checked[skill.id]}
+                      onCheckedChange={(value) => {
+                        setChecked((previous) => ({ ...previous, [skill.id]: value === true }));
+                      }}
+                      aria-label={skill.title}
+                    />
+                  </Field>
+                );
+              })}
+            </FieldGroup>
+          </FieldSet>
         </WorkspaceForm>
       )}
     </section>
@@ -68,7 +95,13 @@ export function McpPicker({
   connections: { id: string; name: string; url: string; transport: string }[];
   selectedIds: string[];
 }) {
-  const selected = new Set(selectedIds);
+  const [checked, setChecked] = useState<Record<string, boolean>>(() => {
+    const selected = new Set(selectedIds);
+    return Object.fromEntries(
+      connections.map((connection) => [connection.id, selected.has(connection.id)]),
+    );
+  });
+
   return (
     <section id="mcp-connections" className="access-workbench">
       <div className="editor-section-heading">
@@ -85,26 +118,54 @@ export function McpPicker({
       ) : (
         <WorkspaceForm action={saveAgentMcpConnections} label="Save MCP selection" saveState>
           <input type="hidden" name="agentId" value={agentId} />
-          <ul className="resource-picker-list">
-            {connections.map((connection) => (
-              <li key={connection.id}>
-                <label className="resource-checkbox">
-                  <input
-                    type="checkbox"
-                    name="connectionId"
-                    value={connection.id}
-                    defaultChecked={selected.has(connection.id)}
-                  />
-                  <span>
-                    <strong>{connection.name}</strong>
-                    <span className="muted"> · {connection.transport.toUpperCase()}</span>
-                    <br />
-                    <span className="muted">{connection.url}</span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
+          {connections.map((connection) =>
+            checked[connection.id] ? (
+              <input
+                key={`hidden-${connection.id}`}
+                type="hidden"
+                name="connectionId"
+                value={connection.id}
+              />
+            ) : null,
+          )}
+          <FieldSet>
+            <FieldLegend variant="label">Library connections</FieldLegend>
+            <FieldDescription>
+              Select the MCP servers this agent may call during a run.
+            </FieldDescription>
+            <FieldGroup className="resource-picker-list gap-0" data-slot="checkbox-group">
+              {connections.map((connection) => {
+                const id = `mcp-${connection.id}`;
+                return (
+                  <Field
+                    key={connection.id}
+                    orientation="horizontal"
+                    className="resource-picker-row"
+                  >
+                    <div className="resource-picker-copy">
+                      <FieldLabel htmlFor={id} className="font-medium">
+                        {connection.name}
+                      </FieldLabel>
+                      <FieldDescription>
+                        {connection.transport.toUpperCase()} · {connection.url}
+                      </FieldDescription>
+                    </div>
+                    <Checkbox
+                      id={id}
+                      checked={checked[connection.id]}
+                      onCheckedChange={(value) => {
+                        setChecked((previous) => ({
+                          ...previous,
+                          [connection.id]: value === true,
+                        }));
+                      }}
+                      aria-label={connection.name}
+                    />
+                  </Field>
+                );
+              })}
+            </FieldGroup>
+          </FieldSet>
         </WorkspaceForm>
       )}
     </section>

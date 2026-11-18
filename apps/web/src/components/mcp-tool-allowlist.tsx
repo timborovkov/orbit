@@ -23,6 +23,7 @@ export function McpToolAllowlist({
   const [fetching, startFetch] = useTransition();
   const selectedTools = new Set(editor.tools.map((tool) => tool.name));
   const discoveredTools = new Set(editor.discovered);
+  const availableDiscovered = editor.discovered.filter((tool) => !selectedTools.has(tool));
 
   function addTool(name: string, readOnly = true) {
     const trimmed = name.trim();
@@ -58,8 +59,6 @@ export function McpToolAllowlist({
       }
       setEditor((previous) => ({
         ...previous,
-        // Keep existing selections even when the server no longer advertises them —
-        // filtering them out would empty the allowlist and save as null (all tools).
         discovered: result.tools,
       }));
     });
@@ -75,21 +74,23 @@ export function McpToolAllowlist({
       </FieldDescription>
       <div className="chip-editor">
         {!!editor.tools.length && (
-          <div className="chip-list" aria-live="polite">
+          <div className="chip-list" role="group" aria-label="Selected tools">
             {editor.tools.map((tool) => {
-              const missing = editor.discovered.length > 0 && !discoveredTools.has(tool.name);
+              const missing = discoveredTools.size > 0 && !discoveredTools.has(tool.name);
               const effect = tool.readOnly ? 'Read-only' : 'Mutating';
               return (
                 <span
                   key={tool.name}
-                  className="chip"
+                  className="chip chip-selected"
                   title={
                     missing
                       ? 'Not in the last Fetch tools response; kept so the allowlist stays restrictive.'
                       : undefined
                   }
                 >
-                  {missing ? `${tool.name} · unavailable` : tool.name}
+                  <span className="chip-name">
+                    {missing ? `${tool.name} · unavailable` : tool.name}
+                  </span>
                   <button
                     type="button"
                     className="chip-effect"
@@ -162,24 +163,22 @@ export function McpToolAllowlist({
             {editor.discoverError}
           </p>
         )}
-        {!!editor.discovered.length && (
-          <div className="chip-list" aria-label="Discovered tools">
-            {editor.discovered.map((tool) => {
-              const selected = selectedTools.has(tool);
-              return (
-                <button
-                  key={tool}
-                  type="button"
-                  className="chip"
-                  disabled={pending || selected}
-                  onClick={() => {
-                    addTool(tool);
-                  }}
-                >
-                  {selected ? `${tool} · added` : `+ ${tool}`}
-                </button>
-              );
-            })}
+        {!!availableDiscovered.length && (
+          <div className="chip-list" role="group" aria-label="Available tools">
+            {availableDiscovered.map((tool) => (
+              <button
+                key={tool}
+                type="button"
+                className="chip chip-choice"
+                disabled={pending}
+                aria-label={`Add ${tool}`}
+                onClick={() => {
+                  addTool(tool);
+                }}
+              >
+                {tool}
+              </button>
+            ))}
           </div>
         )}
       </div>

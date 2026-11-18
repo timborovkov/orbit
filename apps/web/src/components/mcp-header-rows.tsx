@@ -6,6 +6,7 @@ import { newHeaderRow, type McpEditorState } from '@/components/mcp-editor-state
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 
 export function McpHeaderRows({
   editor,
@@ -25,20 +26,25 @@ export function McpHeaderRows({
           : 'Optional key/value pairs. Values are masked and encrypted at rest.'}
       </FieldDescription>
       {editor.hasHeaders && (
-        <label className="resource-checkbox">
-          <input
-            type="checkbox"
+        <Field orientation="horizontal" className="library-switch-row">
+          <div className="library-switch-copy">
+            <FieldLabel htmlFor="clear-stored-headers">Clear stored headers</FieldLabel>
+            <FieldDescription>
+              Remove the encrypted headers currently saved for this connection.
+            </FieldDescription>
+          </div>
+          <Switch
+            id="clear-stored-headers"
             checked={editor.clearHeaders}
             disabled={pending}
-            onChange={(event) => {
+            onCheckedChange={(checked) => {
               setEditor((previous) => ({
                 ...previous,
-                clearHeaders: event.target.checked,
+                clearHeaders: checked,
               }));
             }}
           />
-          Clear stored headers
-        </label>
+        </Field>
       )}
       {!editor.clearHeaders && (
         <div className="kv-rows">
