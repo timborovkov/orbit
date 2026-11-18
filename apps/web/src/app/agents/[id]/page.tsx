@@ -19,6 +19,8 @@ import { env } from '@/lib/env';
 import { formatUtcTimestamp } from '@/lib/format';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
+import { listMcpConnections } from '@/lib/server/mcp-queries';
+import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
 
@@ -39,7 +41,13 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     reviews,
     consents,
     usage,
+    skillIds,
+    mcpSelections,
   } = workspace;
+  const [{ items: librarySkills }, { items: libraryMcp }] = await Promise.all([
+    listSkillSummaries(),
+    listMcpConnections(),
+  ]);
   const lifecycle = agent.lifecycle;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const viewedHistory = history;
@@ -84,6 +92,18 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       consents={consents}
       hasAgentCredential={hasAgentCredential}
       keySource={keySource}
+      skills={librarySkills}
+      skillIds={skillIds}
+      mcpConnections={libraryMcp.map(({ id, name, url, transport, toolAllowlist, updatedAt }) => ({
+        id,
+        name,
+        url,
+        transport,
+        revision: updatedAt.toISOString(),
+        readOnlyTools:
+          toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [],
+      }))}
+      mcpSelections={mcpSelections}
     />
   );
   const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;

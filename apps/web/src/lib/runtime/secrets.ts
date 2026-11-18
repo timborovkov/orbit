@@ -7,10 +7,12 @@ function key() {
   if (!parsed.success) throw new Error('Credential encryption is not configured.');
   return Buffer.from(parsed.data, 'hex');
 }
-export function encryptCredential(agentId: string, secret: string) {
+
+/** AES-256-GCM with subject id as AAD. Used for agent keys and MCP header blobs. */
+export function encryptSecret(subjectId: string, secret: string) {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key(), iv);
-  cipher.setAAD(Buffer.from(agentId));
+  cipher.setAAD(Buffer.from(subjectId));
   const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
   return [
     'v1',
@@ -19,13 +21,22 @@ export function encryptCredential(agentId: string, secret: string) {
     encrypted.toString('hex'),
   ].join(':');
 }
-export function decryptCredential(agentId: string, value: string) {
+
+export function decryptSecret(subjectId: string, value: string) {
   const [version, iv, tag, data] = value.split(':');
   if (version !== 'v1' || !iv || !tag || !data) throw new Error('Invalid credential');
   const decipher = createDecipheriv('aes-256-gcm', key(), Buffer.from(iv, 'hex'));
-  decipher.setAAD(Buffer.from(agentId));
+  decipher.setAAD(Buffer.from(subjectId));
   decipher.setAuthTag(Buffer.from(tag, 'hex'));
   return Buffer.concat([decipher.update(Buffer.from(data, 'hex')), decipher.final()]).toString(
     'utf8',
   );
+}
+
+export function encryptCredential(agentId: string, secret: string) {
+  return encryptSecret(agentId, secret);
+}
+
+export function decryptCredential(agentId: string, value: string) {
+  return decryptSecret(agentId, value);
 }

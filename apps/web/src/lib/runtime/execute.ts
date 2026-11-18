@@ -29,6 +29,7 @@ import {
 } from '@/lib/runtime/errors';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
+import { prepareRunTools } from '@/lib/runtime/resources';
 import {
   hasSimulationProgress,
   simulate,
@@ -100,6 +101,10 @@ async function updateIfOwned(
     if (!current) return [];
     const result: SimulationResult = {
       ...incoming,
+      dispatchedStages: current.result.dispatchedStages?.length
+        ? [...new Set([...current.result.dispatchedStages, ...(incoming.dispatchedStages ?? [])])]
+        : incoming.dispatchedStages,
+      providerDispatches: current.result.providerDispatches ?? incoming.providerDispatches,
       quotaReservations: mergeQuotaReservations(
         current.result.quotaReservations,
         incoming.quotaReservations,
@@ -140,14 +145,14 @@ async function assertOwned(runId: string, executionToken: string) {
 }
 
 /**
- * Burn a paid stage as soon as the provider returns, before later ownership checks
- * that may throw Retryable and would otherwise leave only a pending reservation.
- * Reclaim while a call is still in flight still works — nothing is marked until return.
+ * Record a generation before dispatch so another claim cannot replay it against
+ * the same reservation. A request whose outcome is unknown keeps its reservation.
  */
 async function markStageDispatchedIfOwned(
   runId: string,
   executionToken: string,
   stage: 'evaluator' | 'main',
+  generation?: number,
 ) {
   return await db().transaction(async (tx) => {
     const current = (
@@ -159,15 +164,36 @@ async function markStageDispatchedIfOwned(
             eq(runs.id, runId),
             eq(runs.status, 'running'),
             eq(runs.executionToken, executionToken),
+            sql`${runs.expiresAt} > now()`,
           ),
         )
         .for('update')
     ).at(0);
     if (!current) return [];
     const dispatchedStages = [...new Set([...(current.result.dispatchedStages ?? []), stage])];
+    const providerDispatches = current.result.providerDispatches;
+    if (generation !== undefined) {
+      const reservation = current.result.quotaReservations?.find((entry) => entry.stage === stage);
+      if (
+        !reservation ||
+        generation > (reservation.reservedRequests ?? 1) ||
+        generation !== (providerDispatches?.[stage] ?? 0) + 1
+      ) {
+        throw new BudgetError('cancelled');
+      }
+    }
     return await tx
       .update(runs)
-      .set({ result: { ...current.result, dispatchedStages } })
+      .set({
+        result: {
+          ...current.result,
+          dispatchedStages,
+          providerDispatches:
+            generation === undefined
+              ? providerDispatches
+              : { ...providerDispatches, [stage]: generation },
+        },
+      })
       .where(
         and(
           eq(runs.id, runId),
@@ -543,253 +569,312 @@ async function processSimulationRun(
       );
       return;
     }
-    let settle!: (billedMicros: number) => Promise<void>;
-    let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
-    const result = await telemetry.inRunContext(() =>
-      simulate(
-        config.config,
-        run.input,
-        async (request) => {
-          const response = await telemetry.callModel(call, { ...request, quote });
-          const stage = request.stage === 'main' ? 'main' : 'evaluator';
-          // Persist the dispatch burn before assertOwned / settlement. A Retryable blip after
-          // a paid return must not requeue with only a pending reservation (double-spend).
-          // We intentionally do not mark before the provider call: that blocked reclaim and
-          // pre-return infrastructure retries in smoke tests.
-          await telemetry.withSpan(
-            'orbit.runtime',
-            {
-              stage,
-              agent_id: run.agentId,
-              run_id: run.id,
-              job_id: claim?.jobId,
-              lifecycle: agent.lifecycle,
-            },
-            async () => {
-              try {
+
+    const basePolicy = await retryableStore(() =>
+      loadPolicyContext(run.agentId, run.actor, run.id),
+    );
+    if (!basePolicy) {
+      await retryableStore(() =>
+        updateIfOwned(run.id, executionToken, {
+          status: 'failed',
+          finishedAt: new Date(),
+          result: { steps: [], actions: [], error: 'Agent unavailable for policy checks.' },
+        }),
+      );
+      return;
+    }
+
+    const resources = await prepareRunTools({
+      agentId: run.agentId,
+      policy: basePolicy,
+      executionToken,
+      signal,
+      maxToolSteps: budgets.maxToolStepsPerRun,
+    });
+    try {
+      let settle!: ((billedMicros: number, actualProviderCalls?: number) => Promise<void>) & {
+        reservedMicros?: bigint;
+      };
+      let quote: Awaited<ReturnType<NonNullable<typeof call.quote>>> | undefined;
+      const result = await telemetry.inRunContext(() =>
+        simulate(
+          config.config,
+          run.input,
+          async (request) => {
+            const stage = request.stage === 'main' ? 'main' : 'evaluator';
+            const dispatch = { recorded: false };
+            const response = await telemetry.callModel(call, {
+              ...request,
+              quote,
+              beforeProviderCall: async (stepNumber) => {
+                if (request.signal.aborted) throw new BudgetError('cancelled');
                 const marked = await retryableStore(() =>
-                  markStageDispatchedIfOwned(run.id, executionToken, stage),
+                  markStageDispatchedIfOwned(run.id, executionToken, stage, stepNumber + 1),
                 );
                 if (!marked.length) throw new BudgetError('cancelled');
-              } catch (error) {
-                if (isBudgetError(error)) throw error;
-                if (isRetryableInfrastructureError(error)) {
-                  throw new PaidStepUnpersistedError(stage);
-                }
-                throw error;
-              }
-            },
-          );
-          if (response.costMicros !== undefined) {
-            // Failure leaves the conservative reservation in place. Never repeat a paid call
-            // solely because the adjustment could not be recorded.
-            try {
-              await settle(response.costMicros);
-            } catch {
-              reportFailure('worker.settlement', failureCorrelation({ stage }));
-              console.warn('OpenRouter cost settlement failed', { runId: run.id });
-            }
-          }
-          if (checkRunDeadline(startedAt, new Date(), budgets)) {
-            throw new BudgetError('run-deadline');
-          }
-          try {
-            signal.throwIfAborted();
-          } catch {
-            throw new BudgetError('cancelled');
-          }
-          await assertOwned(run.id, executionToken);
-          return response;
-        },
-        async (partial) => {
-          const updated = await retryableStore(() =>
-            updateIfOwned(run.id, executionToken, { result: partial }),
-          );
-          if (!updated.length) throw new BudgetError('cancelled');
-        },
-        {
-          maxSteps: budgets.maxToolStepsPerRun,
-          signal,
-          initial: checkpointed,
-          prepare: async (request, partial) => {
-            try {
+                dispatch.recorded = true;
+              },
+            });
+            // Persist the dispatch burn before assertOwned / settlement. A Retryable blip after
+            // a paid return must not requeue with only a pending reservation (double-spend).
+            // Injected inference implementations can omit the per-request hook.
+            if (!dispatch.recorded)
               await telemetry.withSpan(
-                'orbit.budget',
+                'orbit.runtime',
                 {
-                  stage: request.stage ?? 'main',
+                  stage,
                   agent_id: run.agentId,
                   run_id: run.id,
                   job_id: claim?.jobId,
                   lifecycle: agent.lifecycle,
                 },
                 async () => {
-                  if (checkRunDeadline(startedAt, new Date(), budgets)) {
-                    throw new BudgetError('run-deadline');
-                  }
                   try {
-                    signal.throwIfAborted();
-                  } catch {
-                    throw new BudgetError('cancelled');
+                    const marked = await retryableStore(() =>
+                      markStageDispatchedIfOwned(run.id, executionToken, stage),
+                    );
+                    if (!marked.length) throw new BudgetError('cancelled');
+                  } catch (error) {
+                    if (isBudgetError(error)) throw error;
+                    if (isRetryableInfrastructureError(error)) {
+                      throw new PaidStepUnpersistedError(stage);
+                    }
+                    throw error;
                   }
-                  quote = hasSpendCap(budgets)
-                    ? await call.quote?.(request.model, request.signal)
-                    : undefined;
-                  const stage = request.stage === 'main' ? 'main' : 'evaluator';
-                  const reserved = await reserveRequestQuota(run.agentId, quote?.upperBoundMicros, {
-                    runId: run.id,
-                    token: executionToken,
-                    signal: request.signal,
-                    stage,
-                  });
-                  settle = reserved;
-                  if (reserved.reservation) {
-                    const others =
-                      partial.quotaReservations?.filter((entry) => entry.stage !== stage) ?? [];
-                    partial.quotaReservations = [...others, reserved.reservation];
-                  }
-                  await assertOwned(run.id, executionToken);
-                  if (request.signal.aborted) throw new BudgetError('cancelled');
                 },
               );
-            } catch (error) {
-              // Quota/store faults here never reached the provider — mark so simulate can
-              // release the step reservation and let the queue retry the stage.
-              if (isBudgetError(error)) throw error;
-              if (isRetryableInfrastructureError(error)) {
-                throw new PreDispatchInfrastructureError(error.message);
-              }
-              throw error;
+            // Settle spend when priced; always pass actual provider calls so unused
+            // request slots from a conservative tool-loop reservation are released.
+            try {
+              const billed = response.costMicros ?? Number(settle.reservedMicros ?? 0);
+              await settle(billed, response.providerCalls ?? 1);
+            } catch {
+              reportFailure('worker.settlement', failureCorrelation({ stage }));
+              console.warn('OpenRouter cost settlement failed', { runId: run.id });
             }
-          },
-          onActions: async (actions, partial, stage) => {
+            if (checkRunDeadline(startedAt, new Date(), budgets)) {
+              throw new BudgetError('run-deadline');
+            }
+            try {
+              signal.throwIfAborted();
+            } catch {
+              throw new BudgetError('cancelled');
+            }
             await assertOwned(run.id, executionToken);
-            const stepLimit = checkToolStepLimit(partial.steps.length, budgets);
-            if (stepLimit) {
-              await telemetry.withSpan(
-                'orbit.budget',
-                {
-                  stage,
-                  budget_violation: stepLimit,
-                  agent_id: run.agentId,
-                  run_id: run.id,
-                },
-                () => undefined,
-              );
-              return actions.map((action) => ({
-                ...action,
-                policy: 'denied' as const,
-                effect: budgetViolationMessage(stepLimit),
-              }));
-            }
-            const ctx = await retryableStore(() =>
-              loadPolicyContext(run.agentId, run.actor, run.id),
+            return response;
+          },
+          async (partial) => {
+            const updated = await retryableStore(() =>
+              updateIfOwned(run.id, executionToken, { result: partial }),
             );
-            if (!ctx) {
-              return actions.map((action) => ({
-                ...action,
-                policy: 'denied' as const,
-                effect: 'Agent unavailable for policy checks.',
-              }));
-            }
-            return await Promise.all(
-              actions.map(async (action, index) => {
-                const decision = await telemetry.withSpan(
-                  'orbit.policy',
+            if (!updated.length) throw new BudgetError('cancelled');
+          },
+          {
+            maxToolSteps: budgets.maxToolStepsPerRun,
+            signal,
+            initial: checkpointed,
+            skillCatalog: resources.skillCatalog,
+            tools: resources.tools,
+            skillVersions: resources.skillVersions,
+            mcpConnections: resources.mcpConnections,
+            toolCalls: resources.toolCalls,
+            prepare: async (request, partial) => {
+              try {
+                await telemetry.withSpan(
+                  'orbit.budget',
                   {
-                    tool: action.type,
-                    stage,
+                    stage: request.stage ?? 'main',
                     agent_id: run.agentId,
                     run_id: run.id,
                     job_id: claim?.jobId,
                     lifecycle: agent.lifecycle,
                   },
-                  async () =>
-                    retryableStore(() =>
-                      authorizeAction(ctx, {
-                        type: action.type,
-                        recipients: run.recipients,
-                        preliminary: stage === 'evaluator',
-                        executionToken,
-                        payload: { draft: action.draft, reason: action.reason },
-                        idempotencyKey: idempotencyKey([
-                          run.id,
-                          stage,
-                          action.type,
-                          String(index),
-                          action.reason,
-                        ]),
-                      }),
-                    ),
+                  async () => {
+                    if (checkRunDeadline(startedAt, new Date(), budgets)) {
+                      throw new BudgetError('run-deadline');
+                    }
+                    try {
+                      signal.throwIfAborted();
+                    } catch {
+                      throw new BudgetError('cancelled');
+                    }
+                    const stage = request.stage === 'main' ? 'main' : 'evaluator';
+                    const hasTools = Boolean(request.tools && Object.keys(request.tools).length);
+                    quote = hasSpendCap(budgets)
+                      ? await call.quote?.(request.model, request.signal, {
+                          requireTools: hasTools,
+                        })
+                      : undefined;
+                    // Match openRouterInference stopWhen: structured output + room for tool steps.
+                    const providerCalls = hasTools
+                      ? (request.maxToolSteps ?? budgets.maxToolStepsPerRun) + 1
+                      : 1;
+                    const upperBound =
+                      quote?.upperBoundMicros !== undefined
+                        ? quote.upperBoundMicros * providerCalls
+                        : undefined;
+                    const reserved = await reserveRequestQuota(run.agentId, upperBound, {
+                      runId: run.id,
+                      token: executionToken,
+                      signal: request.signal,
+                      stage,
+                      providerCalls,
+                    });
+                    settle = reserved;
+                    if (reserved.reservation) {
+                      const others =
+                        partial.quotaReservations?.filter((entry) => entry.stage !== stage) ?? [];
+                      partial.quotaReservations = [...others, reserved.reservation];
+                    }
+                    await assertOwned(run.id, executionToken);
+                    if (request.signal.aborted) throw new BudgetError('cancelled');
+                  },
                 );
+              } catch (error) {
+                // Quota/store faults here never reached the provider — mark so simulate can
+                // release the step reservation and let the queue retry the stage.
+                if (isBudgetError(error)) throw error;
+                if (isRetryableInfrastructureError(error)) {
+                  throw new PreDispatchInfrastructureError(error.message);
+                }
+                throw error;
+              }
+            },
+            onActions: async (actions, partial, stage) => {
+              await assertOwned(run.id, executionToken);
+              // Tool invocations are gated separately from paid inference stages
+              // (evaluator/main). Do not add steps.length — that double-counts.
+              const stepLimit = checkToolStepLimit(partial.toolCalls?.length ?? 0, budgets);
+              if (stepLimit) {
                 await telemetry.withSpan(
-                  'orbit.tool',
+                  'orbit.budget',
                   {
-                    tool: action.type,
                     stage,
-                    policy_decision: decision.decision,
+                    budget_violation: stepLimit,
                     agent_id: run.agentId,
                     run_id: run.id,
                   },
                   () => undefined,
                 );
-                return {
+                return actions.map((action) => ({
                   ...action,
-                  intentId: decision.intentId,
-                  policy: decision.decision,
-                  effect: decision.reasons.join(' '),
-                };
-              }),
-            );
+                  policy: 'denied' as const,
+                  effect: budgetViolationMessage(stepLimit),
+                }));
+              }
+              const ctx = await retryableStore(() =>
+                loadPolicyContext(run.agentId, run.actor, run.id),
+              );
+              if (!ctx) {
+                return actions.map((action) => ({
+                  ...action,
+                  policy: 'denied' as const,
+                  effect: 'Agent unavailable for policy checks.',
+                }));
+              }
+              return await Promise.all(
+                actions.map(async (action, index) => {
+                  const decision = await telemetry.withSpan(
+                    'orbit.policy',
+                    {
+                      tool: action.type,
+                      stage,
+                      agent_id: run.agentId,
+                      run_id: run.id,
+                      job_id: claim?.jobId,
+                      lifecycle: agent.lifecycle,
+                    },
+                    async () =>
+                      retryableStore(() =>
+                        authorizeAction(ctx, {
+                          type: action.type,
+                          recipients: run.recipients,
+                          preliminary: stage === 'evaluator',
+                          executionToken,
+                          payload: { draft: action.draft, reason: action.reason },
+                          idempotencyKey: idempotencyKey([
+                            run.id,
+                            stage,
+                            action.type,
+                            String(index),
+                            action.reason,
+                          ]),
+                        }),
+                      ),
+                  );
+                  await telemetry.withSpan(
+                    'orbit.tool',
+                    {
+                      tool: action.type,
+                      stage,
+                      policy_decision: decision.decision,
+                      agent_id: run.agentId,
+                      run_id: run.id,
+                    },
+                    () => undefined,
+                  );
+                  return {
+                    ...action,
+                    intentId: decision.intentId,
+                    policy: decision.decision,
+                    effect: decision.reasons.join(' '),
+                  };
+                }),
+              );
+            },
           },
-        },
-      ),
-    );
-
-    const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
-    if (result.error && isTrustedBudgetMessage(result.error)) statusMessage = result.error;
-    else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
-    try {
-      await retryableStore(() =>
-        updateIfOwned(run.id, executionToken, {
-          status: terminalStatus,
-          finishedAt: new Date(),
-          result: { ...result, traceId: telemetry.traceId },
-          deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
-        }),
+        ),
       );
-    } catch (error) {
-      // Paid-step burn: never complete the job while the run is still running. Persist the burn
-      // markers when possible, then Retryable so the queue retries finalization only (simulate
-      // will refuse to redispatch once dispatchedStages/error are durable).
-      if (isRetryableInfrastructureError(error) && result.error === PAID_STEP_BURN_MESSAGE) {
-        const burned: SimulationResult = {
-          ...result,
-          traceId: telemetry.traceId,
-          error: PAID_STEP_BURN_MESSAGE,
-        };
-        try {
-          await db()
-            .update(runs)
-            .set({
-              status: 'failed',
-              finishedAt: new Date(),
-              result: burned,
-            })
-            .where(
-              and(
-                eq(runs.id, run.id),
-                eq(runs.status, 'running'),
-                eq(runs.executionToken, executionToken),
-              ),
-            );
-          return;
-        } catch {
+
+      // Preserve checkpointed attribution only when main was already paid; otherwise use
+      // the resources that actually fed this attempt's main inference.
+      const mainWasCheckpointed = checkpointed?.steps.some((step) => step.stage === 'main');
+      if (mainWasCheckpointed && result.skillVersions?.length) {
+        for (const entry of result.skillVersions) {
+          const live = resources.skillVersions.find(
+            (row) => row.skillId === entry.skillId && row.version === entry.version,
+          );
+          if (live?.loaded) entry.loaded = true;
+        }
+      } else {
+        result.skillVersions = resources.skillVersions;
+      }
+      result.mcpConnections =
+        mainWasCheckpointed && result.mcpConnections?.length
+          ? result.mcpConnections
+          : resources.mcpConnections;
+      result.toolCalls = resources.toolCalls;
+
+      const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
+      if (result.error && isTrustedBudgetMessage(result.error)) statusMessage = result.error;
+      else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
+      try {
+        await retryableStore(() =>
+          updateIfOwned(run.id, executionToken, {
+            status: terminalStatus,
+            finishedAt: new Date(),
+            result: { ...result, traceId: telemetry.traceId },
+            deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
+          }),
+        );
+      } catch (error) {
+        // Paid-step burn: never complete the job while the run is still running. Persist the burn
+        // markers when possible, then Retryable so the queue retries finalization only (simulate
+        // will refuse to redispatch once dispatchedStages/error are durable).
+        if (isRetryableInfrastructureError(error) && result.error === PAID_STEP_BURN_MESSAGE) {
+          const burned: SimulationResult = {
+            ...result,
+            traceId: telemetry.traceId,
+            error: PAID_STEP_BURN_MESSAGE,
+          };
           try {
-            // Burn markers must be durable before an ordinary queue retry, or the next
-            // attempt would redispatch the paid stage.
             await db()
               .update(runs)
-              .set({ result: burned })
+              .set({
+                status: 'failed',
+                finishedAt: new Date(),
+                result: burned,
+              })
               .where(
                 and(
                   eq(runs.id, run.id),
@@ -797,20 +882,38 @@ async function processSimulationRun(
                   eq(runs.executionToken, executionToken),
                 ),
               );
+            return;
           } catch {
-            reportFailure('worker.settlement', failureCorrelation());
-            // Not durable — do not Retryable-requeue (that would redispatch). Fall through to
-            // the non-retryable failure path which best-effort marks the run failed.
-            throw new Error(PAID_STEP_BURN_MESSAGE);
+            try {
+              // Burn markers must be durable before an ordinary queue retry, or the next
+              // attempt would redispatch the paid stage.
+              await db()
+                .update(runs)
+                .set({ result: burned })
+                .where(
+                  and(
+                    eq(runs.id, run.id),
+                    eq(runs.status, 'running'),
+                    eq(runs.executionToken, executionToken),
+                  ),
+                );
+            } catch {
+              reportFailure('worker.settlement', failureCorrelation());
+              // Not durable — do not Retryable-requeue (that would redispatch). Fall through to
+              // the non-retryable failure path which best-effort marks the run failed.
+              throw new Error(PAID_STEP_BURN_MESSAGE);
+            }
+            throw new RetryableInfrastructureError(
+              'Paid step burn finalization pending; will retry without redistributing the call.',
+            );
           }
-          throw new RetryableInfrastructureError(
-            'Paid step burn finalization pending; will retry without redistributing the call.',
-          );
         }
+        throw error;
       }
-      throw error;
+      didComplete = !result.error;
+    } finally {
+      await resources.close();
     }
-    didComplete = !result.error;
   } catch (error) {
     // Leave the run non-terminal so a reclaimed job can resume after failJob retries.
     if (isRetryableInfrastructureError(error)) throw error;

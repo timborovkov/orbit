@@ -16,16 +16,20 @@ import {
   externalWritesPermitted,
   type LifecycleState,
 } from '@/lib/lifecycle';
+import { mcpToolId, mcpToolIsReadOnly, normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
 import { missingRecipientConsent } from '@/lib/policy/consent';
 import { consentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
 import {
   actionIntents,
+  agentMcpConnections,
   agents,
   controls,
+  mcpConnections,
   policyDecisions,
   runs,
   usageCounters,
+  type McpTransport,
 } from '@/lib/schema';
 
 export type PolicyDecision = 'allow' | 'deny' | 'needs-approval' | 'suppressed';
@@ -39,6 +43,7 @@ export interface CandidateAction {
   recipients?: string[];
   preliminary?: boolean;
   executionToken?: string;
+  mcp?: { connectionId: string; name: string; url: string; transport: McpTransport };
 }
 
 export interface PolicyContext {
@@ -87,10 +92,19 @@ export async function loadPolicyContext(
     .where(eq(usageCounters.agentId, agentId));
   const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
   const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
-  const active = await store.execute(sql`
-    SELECT count(*)::int AS count FROM simulation_runs
-    WHERE agent_id = ${agentId} AND status IN ('queued','running')
-  `);
+  // Exclude the already-admitted run so in-run tool authorization does not trip
+  // maxConcurrentRuns (defaults to 1). Admission still counts other runs.
+  const active = runId
+    ? await store.execute(sql`
+        SELECT count(*)::int AS count FROM simulation_runs
+        WHERE agent_id = ${agentId}
+          AND status IN ('queued','running')
+          AND id <> ${runId}
+      `)
+    : await store.execute(sql`
+        SELECT count(*)::int AS count FROM simulation_runs
+        WHERE agent_id = ${agentId} AND status IN ('queued','running')
+      `);
   const activeRows = Array.isArray(active) ? active : [];
   const first = activeRows[0] as { count?: number } | undefined;
   const activeRuns = first?.count ?? 0;
@@ -128,6 +142,7 @@ export function evaluateCandidate(
   ctx: PolicyContext,
   action: CandidateAction,
   consentFailure: string | null = null,
+  mcpGranted = false,
 ): {
   decision: PolicyDecision;
   reasons: string[];
@@ -155,7 +170,14 @@ export function evaluateCandidate(
     return { decision: 'deny', reasons };
   }
 
-  if (ctx.enabledTools.length > 0 && !ctx.enabledTools.includes(action.type)) {
+  const isMcp = action.type.startsWith('mcp:');
+  if (
+    isMcp
+      ? !mcpGranted
+      : action.type !== 'load_skill' &&
+        ctx.enabledTools.length > 0 &&
+        !ctx.enabledTools.includes(action.type)
+  ) {
     reasons.push(`Tool ${action.type} is not enabled for this agent.`);
     return { decision: 'deny', reasons };
   }
@@ -201,7 +223,12 @@ export function evaluateCandidate(
     return { decision: 'suppressed', reasons };
   }
 
-  const requestLimit = checkRequestBudgets(snapshot);
+  // load_skill and authorized MCP tools add neither inference requests nor spend —
+  // the stage reservation already covers them (and may exactly fill the spend cap).
+  const inRunTool = action.type === 'load_skill' || isMcp;
+  const requestLimit = inRunTool
+    ? checkRequestBudgets(snapshot, BigInt(0), 0, { checkSpend: false })
+    : checkRequestBudgets(snapshot);
   if (requestLimit) {
     reasons.push(budgetViolationMessage(requestLimit));
     return { decision: 'deny', reasons, violation: requestLimit };
@@ -242,6 +269,7 @@ export async function authorizeAction(
               eq(runs.agentId, ctx.agentId),
               eq(runs.executionToken, action.executionToken),
               eq(runs.status, 'running'),
+              sql`${runs.expiresAt} > now()`,
             ),
           )
       ).at(0);
@@ -251,7 +279,36 @@ export async function authorizeAction(
     const consentFailure = action.readOnly
       ? null
       : await missingRecipientConsent(tx, ctx.agentId, action.type, recipients);
-    const evaluated = evaluateCandidate(current, action, consentFailure);
+    const mcp = action.type.startsWith('mcp:') && action.readOnly ? action.mcp : undefined;
+    const grant =
+      mcp &&
+      (
+        await tx
+          .select({
+            name: mcpConnections.name,
+            allowlist: mcpConnections.toolAllowlist,
+            toolNames: agentMcpConnections.toolNames,
+          })
+          .from(agentMcpConnections)
+          .innerJoin(mcpConnections, eq(mcpConnections.id, agentMcpConnections.connectionId))
+          .where(
+            and(
+              eq(agentMcpConnections.agentId, ctx.agentId),
+              eq(mcpConnections.id, mcp.connectionId),
+              eq(mcpConnections.url, mcp.url),
+              eq(mcpConnections.transport, mcp.transport),
+            ),
+          )
+          .for('share', { of: mcpConnections })
+      ).at(0);
+    const mcpGranted = Boolean(
+      mcp &&
+      grant &&
+      action.type === mcpToolId(grant.name, mcp.name) &&
+      grant.toolNames.includes(mcp.name) &&
+      mcpToolIsReadOnly(normalizeMcpAllowlist(grant.allowlist), mcp.name),
+    );
+    const evaluated = evaluateCandidate(current, action, consentFailure, mcpGranted);
     const existing = (
       await tx
         .select()
@@ -368,20 +425,27 @@ export async function reserveRequestQuota(
   agentId: string,
   upperBoundMicros?: number,
   execution?: {
-    runId: string;
-    token: string;
-    signal: AbortSignal;
+    /** When set with token, reservation is scoped to an owned running simulation. */
+    runId?: string;
+    token?: string;
+    signal?: AbortSignal;
     /** When set, reservation is idempotent per run+stage across queue retries. */
     stage?: 'evaluator' | 'main';
+    /**
+     * Provider calls covered by this reservation (tool loops may issue several).
+     * Defaults to 1. Request counters and request-cap checks use this value.
+     */
+    providerCalls?: number;
   },
 ) {
   const requestedMicros = BigInt(upperBoundMicros ?? 0);
+  const providerCalls = Math.max(1, execution?.providerCalls ?? 1);
   const outcome = await retryableStore(() =>
     db().transaction(async (tx) => {
       const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
         0,
       );
-      if (!agent || agent.lifecycle === 'stopped' || execution?.signal.aborted) {
+      if (!agent || agent.lifecycle === 'stopped' || execution?.signal?.aborted) {
         throw new BudgetError('cancelled');
       }
       let runRow:
@@ -390,7 +454,7 @@ export async function reserveRequestQuota(
             result: (typeof runs)['$inferSelect']['result'];
           }
         | undefined;
-      if (execution) {
+      if (execution?.runId && execution.token) {
         runRow = (
           await tx
             .select({ id: runs.id, result: runs.result })
@@ -439,11 +503,16 @@ export async function reserveRequestQuota(
               (row) => row.period === 'month' && row.periodStart === reservationMonthStart,
             ) ?? emptyUsage();
           let reservedMicros = BigInt(existing.reservedMicros);
+          let reservedRequests = existing.reservedRequests ?? 1;
           let reservation = existing;
-          if (requestedMicros > reservedMicros) {
-            const additional = requestedMicros - reservedMicros;
-            // Request count stays idempotent; validate/top up against the original period.
-            for (const [reached, reservation, used, cap] of [
+          const additionalSpend =
+            requestedMicros > reservedMicros ? requestedMicros - reservedMicros : BigInt(0);
+          const additionalRequests =
+            providerCalls > reservedRequests ? providerCalls - reservedRequests : 0;
+          if (additionalSpend > BigInt(0) || additionalRequests > 0) {
+            // Top up spend and/or request slots against the original accounting period.
+            // Request slots can grow when a retry attaches tools (e.g. skill load_skill).
+            for (const [reached, reservationKind, used, cap] of [
               [
                 'daily-spend',
                 'daily-spend-reservation',
@@ -457,15 +526,26 @@ export async function reserveRequestQuota(
                 budgets.monthlySpendCents,
               ],
             ] as const) {
-              if (cap === null) continue;
+              if (cap === null || additionalSpend === BigInt(0)) continue;
               const limit = BigInt(cap) * BigInt(10_000);
               if (used >= limit) throw new BudgetError(reached);
-              if (used + additional > limit) throw new BudgetError(reservation);
+              if (used + additionalSpend > limit) throw new BudgetError(reservationKind);
             }
-            await recordRequestUsage(tx, agentId, periodStart, additional, 0);
+            if (additionalRequests > 0) {
+              if (reservationDay.requests + additionalRequests > budgets.dailyRequests) {
+                throw new BudgetError('daily-requests');
+              }
+              if (reservationMonth.requests + additionalRequests > budgets.monthlyRequests) {
+                throw new BudgetError('monthly-requests');
+              }
+            }
+            await recordRequestUsage(tx, agentId, periodStart, additionalSpend, additionalRequests);
+            reservedMicros = requestedMicros > reservedMicros ? requestedMicros : reservedMicros;
+            reservedRequests = Math.max(reservedRequests, providerCalls);
             reservation = {
               stage: execution.stage,
-              reservedMicros: requestedMicros.toString(),
+              reservedMicros: reservedMicros.toString(),
+              reservedRequests,
               periodStart,
             };
             const quotaReservations = [
@@ -478,11 +558,11 @@ export async function reserveRequestQuota(
               .update(runs)
               .set({ result: { ...runRow.result, quotaReservations } })
               .where(eq(runs.id, runRow.id));
-            reservedMicros = requestedMicros;
           }
           return {
             today: periodStart,
             reservedMicros,
+            reservedRequests,
             reservation,
             reused: true as const,
           };
@@ -492,14 +572,16 @@ export async function reserveRequestQuota(
       const violation = checkRequestBudgets(
         { budgets, day, month, activeRuns: 0 },
         requestedMicros,
+        providerCalls,
       );
       if (violation) throw new BudgetError(violation);
-      await recordRequestUsage(tx, agentId, today, requestedMicros, 1);
+      await recordRequestUsage(tx, agentId, today, requestedMicros, providerCalls);
       const reservation =
         execution?.stage !== undefined
           ? {
               stage: execution.stage,
               reservedMicros: requestedMicros.toString(),
+              reservedRequests: providerCalls,
               periodStart: today,
             }
           : undefined;
@@ -513,6 +595,7 @@ export async function reserveRequestQuota(
       return {
         today,
         reservedMicros: requestedMicros,
+        reservedRequests: providerCalls,
         reservation,
         reused: false as const,
       };
@@ -522,15 +605,24 @@ export async function reserveRequestQuota(
   // Keep the full reservation after ambiguous failures or missing costs. Settlement is attempted
   // once per dispatch, so a connection loss during commit cannot double-apply the adjustment.
   return Object.assign(
-    async (billedMicros: number) => {
-      const adjustment = BigInt(billedMicros) - outcome.reservedMicros;
-      if (adjustment !== BigInt(0)) {
+    async (billedMicros: number, actualProviderCalls?: number) => {
+      const spendAdjustment = BigInt(billedMicros) - outcome.reservedMicros;
+      // Release unused request slots once the generation-step count is known.
+      const requestAdjustment =
+        actualProviderCalls === undefined
+          ? 0
+          : Math.max(1, actualProviderCalls) - outcome.reservedRequests;
+      if (spendAdjustment !== BigInt(0) || requestAdjustment !== 0) {
         await db().transaction((tx) =>
-          recordRequestUsage(tx, agentId, outcome.today, adjustment, 0),
+          recordRequestUsage(tx, agentId, outcome.today, spendAdjustment, requestAdjustment),
         );
       }
     },
-    { reservation: outcome.reservation, reused: outcome.reused },
+    {
+      reservation: outcome.reservation,
+      reused: outcome.reused,
+      reservedMicros: outcome.reservedMicros,
+    },
   );
 }
 
