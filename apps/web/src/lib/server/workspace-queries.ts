@@ -166,9 +166,9 @@ export async function getAgentWorkspace(id: string) {
     : [];
   const jobsById = new Map(linkedJobs.map((job) => [job.id, job]));
   const viewedHistory = history.map((run) => {
+    // awaiting_approval waits on reviewExpiresAt, not the execution deadline.
     const expired =
-      (run.status === 'running' || run.status === 'queued' || run.status === 'awaiting_approval') &&
-      run.expiresAt < new Date();
+      (run.status === 'running' || run.status === 'queued') && run.expiresAt < new Date();
     const deferred = Boolean(run.deferReason) && (run.status === 'failed' || expired);
     return {
       ...run,
