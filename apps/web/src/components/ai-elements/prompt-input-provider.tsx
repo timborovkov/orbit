@@ -14,7 +14,7 @@ import {
 import type { FileUIPart } from 'ai';
 import { nanoid } from 'nanoid';
 
-import { createBlobUrl } from '@/components/ai-elements/prompt-input-object-url';
+import { readFileAsDataUrl } from './file-data-url';
 
 export interface AttachmentsContext {
   files: (FileUIPart & { id: string })[];
@@ -89,56 +89,25 @@ export function PromptInputProvider({
       return;
     }
 
-    setAttachmentFiles((prev) =>
-      prev.concat(
-        incoming.map((file) => {
-          const { url } = createBlobUrl(file);
-          return {
-            id: nanoid(),
-            type: 'file' as const,
-            url,
-            mediaType: file.type,
-            filename: file.name,
-          };
-        }),
-      ),
-    );
+    void Promise.all(
+      incoming.map(async (file) => ({
+        id: nanoid(),
+        type: 'file' as const,
+        url: await readFileAsDataUrl(file),
+        mediaType: file.type,
+        filename: file.name,
+      })),
+    ).then((next) => {
+      setAttachmentFiles((prev) => prev.concat(next));
+    });
   }, []);
 
   const remove = useCallback((id: string) => {
-    setAttachmentFiles((prev) => {
-      const found = prev.find((f) => f.id === id);
-      if (found?.url) {
-        URL.revokeObjectURL(found.url);
-      }
-      return prev.filter((f) => f.id !== id);
-    });
+    setAttachmentFiles((prev) => prev.filter((f) => f.id !== id));
   }, []);
 
   const clear = useCallback(() => {
-    setAttachmentFiles((prev) => {
-      for (const f of prev) {
-        if (f.url) {
-          URL.revokeObjectURL(f.url);
-        }
-      }
-      return [];
-    });
-  }, []);
-
-  const attachmentsRef = useRef(attachmentFiles);
-  useEffect(() => {
-    attachmentsRef.current = attachmentFiles;
-  }, [attachmentFiles]);
-
-  useEffect(() => {
-    return () => {
-      for (const f of attachmentsRef.current) {
-        if (f.url) {
-          URL.revokeObjectURL(f.url);
-        }
-      }
-    };
+    setAttachmentFiles([]);
   }, []);
 
   const openFileDialog = useCallback(() => {

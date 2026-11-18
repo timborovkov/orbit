@@ -58,12 +58,9 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
-import {
-  LocalAttachmentsContext,
-  PromptInputForm,
-  type PromptInputFormProps,
-  type PromptInputMessage,
-} from '@/components/ai-elements/prompt-input-form';
+import { PromptInputForm, type PromptInputFormProps } from '@/components/ai-elements/prompt-input-form';
+import { LocalAttachmentsContext } from '@/components/ai-elements/prompt-input-local-context';
+import type { PromptInputMessage } from '@/components/ai-elements/prompt-input-types';
 import {
   useOptionalPromptInputController,
   useOptionalProviderAttachments,
@@ -227,7 +224,7 @@ export const PromptInputActionAddAttachments = ({
   );
 };
 
-export type { PromptInputMessage };
+export type { PromptInputMessage } from '@/components/ai-elements/prompt-input-types';
 export type PromptInputProps = PromptInputFormProps;
 export const PromptInput = PromptInputForm;
 

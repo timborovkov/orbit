@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  createContext,
   useCallback,
   useEffect,
   useMemo,
@@ -21,15 +20,13 @@ import {
   useOptionalPromptInputController,
   type AttachmentsContext,
 } from '@/components/ai-elements/prompt-input-provider';
+import { LocalAttachmentsContext } from '@/components/ai-elements/prompt-input-local-context';
+import type { PromptInputMessage } from '@/components/ai-elements/prompt-input-types';
 import {
   convertBlobUrlToDataUrl,
   usePromptInputLocalFiles,
 } from '@/components/ai-elements/use-prompt-input-local-files';
 
-export interface PromptInputMessage {
-  text: string;
-  files: FileUIPart[];
-}
 
 export type PromptInputFormProps = Omit<HTMLAttributes<HTMLFormElement>, 'onSubmit' | 'onError'> & {
   accept?: string;
@@ -44,8 +41,6 @@ export type PromptInputFormProps = Omit<HTMLAttributes<HTMLFormElement>, 'onSubm
     event: SyntheticEvent<HTMLFormElement>,
   ) => void | Promise<void>;
 };
-
-export const LocalAttachmentsContext = createContext<AttachmentsContext | null>(null);
 
 function usePromptInputDropTargets(
   add: (files: File[] | FileList) => void,
@@ -158,17 +153,6 @@ export function PromptInputForm({
   }, [files, syncHiddenInput]);
 
   usePromptInputDropTargets(add, formRef, globalDrop);
-
-  useEffect(
-    () => () => {
-      if (!usingProvider) {
-        for (const f of filesRef.current) {
-          if (f.url) URL.revokeObjectURL(f.url);
-        }
-      }
-    },
-    [usingProvider],
-  );
 
   const handleChange: ChangeEventHandler<HTMLInputElement> = (event) => {
     if (event.currentTarget.files) {

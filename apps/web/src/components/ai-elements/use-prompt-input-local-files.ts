@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 import type { FileUIPart } from 'ai';
 import { nanoid } from 'nanoid';
 
-import { createBlobUrl } from '@/components/ai-elements/prompt-input-object-url';
+import { readFileAsDataUrl } from './file-data-url';
 
 interface PromptInputError {
   code: 'max_files' | 'max_file_size' | 'accept';
@@ -43,7 +43,7 @@ export function usePromptInputLocalFiles(options: {
   );
 
   const addLocal = useCallback(
-    (fileList: File[] | FileList) => {
+    async (fileList: File[] | FileList) => {
       const incoming = Array.from(fileList);
       const accepted = incoming.filter((f) => matchesAccept(f));
       if (incoming.length && accepted.length === 0) {
@@ -68,20 +68,16 @@ export function usePromptInputLocalFiles(options: {
       const capped = typeof capacity === 'number' ? sized.slice(0, capacity) : sized;
       const tooMany = typeof capacity === 'number' && sized.length > capacity;
 
-      setItems((prev) => {
-        const next: (FileUIPart & { id: string })[] = [];
-        for (const file of capped) {
-          const { url } = createBlobUrl(file);
-          next.push({
-            id: nanoid(),
-            type: 'file',
-            url,
-            mediaType: file.type,
-            filename: file.name,
-          });
-        }
-        return prev.concat(next);
-      });
+      const next = await Promise.all(
+        capped.map(async (file) => ({
+          id: nanoid(),
+          type: 'file' as const,
+          url: await readFileAsDataUrl(file),
+          mediaType: file.type,
+          filename: file.name,
+        })),
+      );
+      setItems((prev) => prev.concat(next));
 
       if (tooMany) {
         onError?.({
@@ -94,24 +90,11 @@ export function usePromptInputLocalFiles(options: {
   );
 
   const removeLocal = useCallback((id: string) => {
-    setItems((prev) => {
-      const found = prev.find((file) => file.id === id);
-      if (found?.url) {
-        URL.revokeObjectURL(found.url);
-      }
-      return prev.filter((file) => file.id !== id);
-    });
+    setItems((prev) => prev.filter((file) => file.id !== id));
   }, []);
 
   const clearLocal = useCallback(() => {
-    setItems((prev) => {
-      for (const file of prev) {
-        if (file.url) {
-          URL.revokeObjectURL(file.url);
-        }
-      }
-      return [];
-    });
+    setItems([]);
   }, []);
 
   return { items, setItems, addLocal, removeLocal, clearLocal };
