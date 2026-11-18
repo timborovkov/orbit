@@ -24,6 +24,12 @@ export function WorkspaceHeader({ name }: { name: string }) {
           <Link href="/templates" className="templates-link">
             Templates
           </Link>
+          <Link href="/skills" className="templates-link">
+            Skills
+          </Link>
+          <Link href="/mcp" className="templates-link">
+            MCP
+          </Link>
           <ThemeSwitch />
         </div>
       </div>

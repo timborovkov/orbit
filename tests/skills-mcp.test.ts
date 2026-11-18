@@ -1,0 +1,337 @@
+import { afterAll, expect, test } from 'bun:test';
+
+import { budgetDefaults } from '@/lib/budgets';
+import { evaluateActionForTest } from '@/lib/policy/gateway';
+import {
+  connectMcpClient,
+  loadMcpToolsForAgent,
+  mcpToolId,
+  type McpConnectionConfig,
+} from '@/lib/runtime/mcp';
+import {
+  createLoadSkillTool,
+  formatSkillCatalog,
+  LOAD_SKILL_TOOL,
+  skillVersionsAttached,
+  type SkillSummary,
+} from '@/lib/runtime/skills';
+
+const policy = {
+  actor: 'test@example.com',
+  agentId: '00000000-0000-4000-8000-000000000001',
+  runId: '00000000-0000-4000-8000-000000000002',
+  lifecycle: 'shadow' as const,
+  enabledTools: [] as string[],
+  approvalTools: [] as string[],
+  budgets: budgetDefaults,
+  globalPaused: false,
+  usage: {
+    spendMicros: BigInt(0),
+    requests: 0,
+    outboundActions: 0,
+    month: { spendMicros: BigInt(0), requests: 0, outboundActions: 0 },
+    activeRuns: 0,
+  },
+};
+
+const skills: SkillSummary[] = [
+  {
+    id: '00000000-0000-4000-8000-000000000010',
+    name: 'research-brief',
+    title: 'Research brief',
+    description: 'Use when drafting a research summary.',
+    version: 3,
+    body: '# Research brief\n\nCollect sources first.',
+  },
+];
+
+const execOptions = {
+  toolCallId: 't1',
+  messages: [] as never[],
+  context: {},
+};
+
+test('skill catalogue exposes names and descriptions only', () => {
+  const catalogue = formatSkillCatalog(skills);
+  expect(catalogue).toContain('research-brief');
+  expect(catalogue).toContain('Use when drafting a research summary.');
+  expect(catalogue).not.toContain('Collect sources first');
+});
+
+test('load_skill returns body through policy allow and records version load', async () => {
+  const versions = skillVersionsAttached(skills);
+  const calls: unknown[] = [];
+  const loadSkill = createLoadSkillTool({
+    skills,
+    policy,
+    versions,
+    authorize: async (_ctx, action) => {
+      expect(action.type).toBe(LOAD_SKILL_TOOL);
+      expect(action.readOnly).toBe(true);
+      return { decision: 'allow', reasons: ['ok'] };
+    },
+    onCall: async (record) => {
+      calls.push(record);
+    },
+  });
+  expect(loadSkill.execute).toBeDefined();
+  const result = await loadSkill.execute!(
+    { name: 'research-brief' },
+    { ...execOptions, toolCallId: 't1' },
+  );
+  expect(result).toMatchObject({
+    name: 'research-brief',
+    version: 3,
+    body: skills[0].body,
+  });
+  expect(versions[0]?.loaded).toBe(true);
+  expect(calls).toHaveLength(1);
+});
+
+test('load_skill refuses unattached skills and policy denials', async () => {
+  const versions = skillVersionsAttached(skills);
+  const missing = createLoadSkillTool({
+    skills,
+    policy,
+    versions,
+    authorize: async () => ({ decision: 'allow', reasons: ['ok'] }),
+  });
+  const missingResult = await missing.execute!(
+    { name: 'missing-skill' },
+    { ...execOptions, toolCallId: 't2' },
+  );
+  expect(missingResult).toMatchObject({ error: expect.stringContaining('not attached') });
+
+  const denied = createLoadSkillTool({
+    skills,
+    policy,
+    versions,
+    authorize: async () => ({ decision: 'deny', reasons: ['blocked'] }),
+  });
+  const deniedResult = await denied.execute!(
+    { name: 'research-brief' },
+    { ...execOptions, toolCallId: 't3' },
+  );
+  expect(deniedResult).toMatchObject({ error: 'blocked' });
+});
+
+test('policy gateway permits load_skill and mcp tools when proposal allowlist is set', () => {
+  const base = {
+    lifecycle: 'shadow' as const,
+    enabledTools: ['like'],
+    budgets: budgetDefaults,
+    globalPaused: false,
+  };
+  expect(
+    evaluateActionForTest(base, {
+      type: LOAD_SKILL_TOOL,
+      idempotencyKey: 's1',
+      readOnly: true,
+    }).decision,
+  ).toBe('allow');
+  expect(
+    evaluateActionForTest(base, {
+      type: mcpToolId('crm', 'search'),
+      idempotencyKey: 'm1',
+      readOnly: true,
+    }).decision,
+  ).toBe('allow');
+  expect(evaluateActionForTest(base, { type: 'reply', idempotencyKey: 'r1' }).decision).toBe(
+    'deny',
+  );
+});
+
+function fakeTool<INPUT extends Record<string, unknown>, OUTPUT>(
+  execute: (input: INPUT) => Promise<OUTPUT>,
+) {
+  return {
+    description: 'test',
+    inputSchema: { jsonSchema: { type: 'object' } },
+    execute,
+  };
+}
+
+test('MCP tools register through the policy gateway and honour allowlists', async () => {
+  const connection: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000020',
+    name: 'demo',
+    url: 'http://127.0.0.1:9/mcp',
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: ['echo'],
+  };
+  const decisions: string[] = [];
+  const { tools, statuses, close } = await loadMcpToolsForAgent({
+    connections: [connection],
+    policy,
+    authorize: async (_ctx, action) => {
+      decisions.push(action.type);
+      if (action.type === mcpToolId('demo', 'echo')) {
+        return { decision: 'allow', reasons: ['ok'] };
+      }
+      return { decision: 'deny', reasons: ['not allowed'] };
+    },
+    connect: async () =>
+      ({
+        tools: async () => ({
+          echo: fakeTool(async (input: { text: string }) => ({ echoed: input.text })),
+          secret_admin: fakeTool(async () => ({ ok: true })),
+        }),
+        close: async () => undefined,
+      }) as unknown as Awaited<ReturnType<typeof connectMcpClient>>,
+  });
+
+  expect(statuses).toEqual([
+    {
+      connectionId: connection.id,
+      name: 'demo',
+      status: 'ready',
+      tools: ['echo'],
+    },
+  ]);
+  expect(Object.keys(tools)).toEqual([mcpToolId('demo', 'echo')]);
+  const result = await tools[mcpToolId('demo', 'echo')]!.execute!(
+    { text: 'hi' },
+    { ...execOptions, toolCallId: 't4' },
+  );
+  expect(result).toEqual({ echoed: 'hi' });
+  expect(decisions).toEqual([mcpToolId('demo', 'echo')]);
+  await close();
+});
+
+test('MCP connection failures degrade without aborting the tool set', async () => {
+  const ok: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000021',
+    name: 'ok',
+    url: 'http://127.0.0.1:9/ok',
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: null,
+  };
+  const bad: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000022',
+    name: 'bad',
+    url: 'http://127.0.0.1:9/bad',
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: null,
+  };
+  const { tools, statuses, close } = await loadMcpToolsForAgent({
+    connections: [bad, ok],
+    policy,
+    authorize: async () => ({ decision: 'allow', reasons: ['ok'] }),
+    connect: async (connection) => {
+      if (connection.name === 'bad') throw new Error('boom');
+      return {
+        tools: async () => ({
+          ping: fakeTool(async () => ({ ok: true })),
+        }),
+        close: async () => undefined,
+      } as unknown as Awaited<ReturnType<typeof connectMcpClient>>;
+    },
+  });
+  expect(statuses.map((row) => row.status)).toEqual(['error', 'ready']);
+  expect(Object.keys(tools)).toEqual([mcpToolId('ok', 'ping')]);
+  await close();
+});
+
+let fakeServer: ReturnType<typeof Bun.serve> | undefined;
+
+afterAll(() => {
+  fakeServer?.stop(true);
+});
+
+test('MCP HTTP fake server tools register and execute through policy', async () => {
+  fakeServer = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      if (request.method !== 'POST') return new Response('method', { status: 405 });
+      const message = (await request.json()) as {
+        jsonrpc: string;
+        id?: string | number;
+        method?: string;
+        params?: { name?: string; arguments?: Record<string, unknown> };
+      };
+      if (message.method === 'initialize') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: {
+            protocolVersion: '2025-11-25',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'orbit-fake', version: '1.0.0' },
+          },
+        });
+      }
+      if (message.method === 'notifications/initialized') {
+        return new Response(null, { status: 202 });
+      }
+      if (message.method === 'tools/list') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: {
+            tools: [
+              {
+                name: 'echo',
+                description: 'Echo text',
+                inputSchema: {
+                  type: 'object',
+                  properties: { text: { type: 'string' } },
+                  required: ['text'],
+                },
+              },
+            ],
+          },
+        });
+      }
+      if (message.method === 'tools/call') {
+        return Response.json({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: {
+            content: [
+              {
+                type: 'text',
+                text: String(message.params?.arguments?.text ?? ''),
+              },
+            ],
+          },
+        });
+      }
+      return Response.json({
+        jsonrpc: '2.0',
+        id: message.id,
+        error: { code: -32601, message: `Unknown method ${message.method}` },
+      });
+    },
+  });
+
+  const url = `http://127.0.0.1:${fakeServer.port}/mcp`;
+  const connection: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000030',
+    name: 'local-fake',
+    url,
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: ['echo'],
+  };
+  const { tools, statuses, close } = await loadMcpToolsForAgent({
+    connections: [connection],
+    policy,
+    authorize: async (_ctx, action) => {
+      expect(action.type).toBe(mcpToolId('local-fake', 'echo'));
+      return { decision: 'allow', reasons: ['ok'] };
+    },
+  });
+  expect(statuses[0]?.status).toBe('ready');
+  expect(Object.keys(tools)).toEqual([mcpToolId('local-fake', 'echo')]);
+  const result = await tools[mcpToolId('local-fake', 'echo')]!.execute!(
+    { text: 'orbit' },
+    { ...execOptions, toolCallId: 't5' },
+  );
+  expect(result).toMatchObject({
+    content: [{ type: 'text', text: 'orbit' }],
+  });
+  await close();
+});

@@ -182,3 +182,55 @@ export const recipientConsents = pgTable(
   },
   (table) => [primaryKey({ columns: [table.agentId, table.recipient, table.scope] })],
 );
+
+export const skills = pgTable('skills', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull().unique(),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  body: text('body').notNull(),
+  version: integer('version').notNull().default(1),
+  actor: text('actor').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const agentSkills = pgTable(
+  'agent_skills',
+  {
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    skillId: uuid('skill_id')
+      .notNull()
+      .references(() => skills.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.skillId] })],
+);
+
+export type McpTransport = 'http' | 'sse';
+
+export const mcpConnections = pgTable('mcp_connections', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull().unique(),
+  url: text('url').notNull(),
+  transport: text('transport').$type<McpTransport>().notNull(),
+  encryptedHeaders: text('encrypted_headers'),
+  toolAllowlist: jsonb('tool_allowlist').$type<string[] | null>(),
+  actor: text('actor').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const agentMcpConnections = pgTable(
+  'agent_mcp_connections',
+  {
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    connectionId: uuid('connection_id')
+      .notNull()
+      .references(() => mcpConnections.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.connectionId] })],
+);

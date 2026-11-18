@@ -11,6 +11,7 @@ import { LifecycleControls } from '@/app/lifecycle-controls';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { ConsentSettings, ProposalReview, ReviewSettings } from '@/app/policy-settings';
 import { ProfilePictureEditor } from '@/app/profile-picture-editor';
+import { McpPicker, SkillPicker } from '@/app/resource-pickers';
 import { RunContent } from '@/app/run-content';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
@@ -21,6 +22,8 @@ import { env } from '@/lib/env';
 import { formatUtcTimestamp } from '@/lib/format';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
+import { listMcpConnections } from '@/lib/server/mcp-queries';
+import { listSkills } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
 
@@ -41,7 +44,13 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     reviews,
     consents,
     usage,
+    skillIds,
+    mcpConnectionIds,
   } = workspace;
+  const [{ items: librarySkills }, { items: libraryMcp }] = await Promise.all([
+    listSkills(),
+    listMcpConnections(),
+  ]);
   const lifecycle = agent.lifecycle;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const viewedHistory = history;
@@ -82,6 +91,8 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       <BudgetSettings agentId={id} budgets={agent.budgets} usage={usage} />
       <ReviewSettings agentId={id} approvalTools={agent.approvalTools} />
       <ConsentSettings agentId={id} consents={consents} />
+      <SkillPicker agentId={id} skills={librarySkills} selectedIds={skillIds} />
+      <McpPicker agentId={id} connections={libraryMcp} selectedIds={mcpConnectionIds} />
       <AccessPanel
         agentId={id}
         agentName={agent.name}

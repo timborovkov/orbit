@@ -201,8 +201,8 @@ result and explicitly names paid inference and suppressed external actions. Empt
 results explain what will appear; failures and interrupted runs show actual state.
 History uses native details/summary for run content and exact configuration snapshots.
 History shows the provider’s recorded cost and labels missing cost explicitly.
-Access stacks lifecycle, budget, approval requirements, recipient consent and
-OpenRouter connection settings in one column. Daily and monthly spend limits use
+Access stacks lifecycle, budget, approval requirements, recipient consent, skill and
+MCP pickers, and OpenRouter connection settings in one column. Daily and monthly spend limits use
 numeric fields paired with independently labelled No cap checkboxes. Consent
 records pair a recipient ID with a scope, choice and evidence reference. Playground
 accepts the same IDs for consent checks in an optional disclosure. Approvals shows
@@ -219,8 +219,11 @@ results without a manual reload. No loading skeletons on Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents
-unchanged. Appearance, sign-in and the native create dialog retain the behavior in
-Layout and the historical decisions below.
+unchanged. Skills and MCP connections use the same disclosure-row pattern on their
+own pages (`/skills`, `/mcp`), with a create form above the list. MCP headers are
+write-only; stored secrets are never echoed. Overview and workspace headers link to
+Templates, Skills and MCP. Appearance, sign-in and the native create dialog retain
+the behavior in Layout and the historical decisions below.
 
 ## Do's and Don'ts
 
@@ -241,6 +244,7 @@ This file is the single design reference for Orbit. Keep the lowercase filename 
 
 | Date       | Source                                                                                                         | Decision                                                                                                                                                                      |
 | ---------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-18 | User: shared skill library + generic MCP connections with agent opt-in                                         | Add `/skills` and `/mcp` library pages (Templates-style rows) and Access multi-select pickers; keep UI scoped to those surfaces to reduce conflict with concurrent UI work.   |
 | 2026-11-16 | User: “dark and light mode, a mode switch, auto, responsive design. Use the logos.”                            | Support Light, Dark and Auto, responsive layouts, the supplied logo and a matching favicon.                                                                                   |
 | 2026-11-16 | User rejected the first dashboard and chose “Vercel inspired”.                                                 | Use the Vercel-inspired direction documented above as the design brief. Generic marketing copy and a large promotional hero are rejected precedents for this admin interface. |
 | 2026-11-16 | User: “Let's also use all of these. Install them” and “capture our decisions and style guidance in design.md”. | Use the installed design collections as complementary guidance; record decisions and relevant implementation guidance here after UI changes.                                  |

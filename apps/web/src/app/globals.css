@@ -2026,6 +2026,46 @@ fieldset[aria-disabled='true'] textarea {
   margin-top: 8px;
   max-width: 70ch;
 }
+.resource-create {
+  margin-bottom: 28px;
+  padding: 20px;
+}
+.resource-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.resource-delete {
+  margin: 0 0 24px;
+}
+.resource-checkbox {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+.resource-checkbox input {
+  margin-top: 3px;
+}
+.resource-picker-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.resource-meta-list {
+  margin: 0 0 12px;
+  padding-inline-start: 18px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+@media (max-width: 600px) {
+  .resource-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .template-list {
   border-top: 1px solid var(--border);
 }

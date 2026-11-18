@@ -1,5 +1,5 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { generateText, Output } from 'ai';
+import { generateText, isStepCount, Output } from 'ai';
 import { z } from 'zod';
 
 import { decisionSchema, type InferenceQuote, type ModelCall } from '@/lib/runtime/simulation';
@@ -76,7 +76,8 @@ async function quoteOpenRouter(
 
 export function openRouterInference(apiKey: string): ModelCall {
   const provider = createOpenRouter({ apiKey });
-  const call: ModelCall = async ({ model, system, input, signal, quote }) => {
+  const call: ModelCall = async ({ model, system, input, signal, quote, tools, maxToolSteps }) => {
+    const hasTools = Boolean(tools && Object.keys(tools).length);
     const response = await generateText({
       model: provider(model, {
         usage: { include: true },
@@ -91,6 +92,9 @@ export function openRouterInference(apiKey: string): ModelCall {
       }),
       instructions: system,
       prompt: input,
+      tools: hasTools ? tools : undefined,
+      // Structured output counts as a step; leave room for tool calls when attached.
+      stopWhen: hasTools ? isStepCount(Math.max(2, (maxToolSteps ?? 10) + 1)) : undefined,
       output: Output.object({ schema: decisionSchema }),
       maxOutputTokens,
       maxRetries: 0,

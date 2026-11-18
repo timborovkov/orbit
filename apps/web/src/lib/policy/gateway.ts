@@ -156,8 +156,13 @@ export function evaluateCandidate(
   }
 
   if (ctx.enabledTools.length > 0 && !ctx.enabledTools.includes(action.type)) {
-    reasons.push(`Tool ${action.type} is not enabled for this agent.`);
-    return { decision: 'deny', reasons };
+    // Proposal allowlists must not block skill/MCP tools granted by Access membership.
+    // Unregistered MCP tools never reach execute; names still go through this choke point.
+    const resourceTool = action.type === 'load_skill' || action.type.startsWith('mcp:');
+    if (!resourceTool) {
+      reasons.push(`Tool ${action.type} is not enabled for this agent.`);
+      return { decision: 'deny', reasons };
+    }
   }
 
   const snapshot: BudgetSnapshot = {
