@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { expect, test, type Page } from '@playwright/test';
 import postgres from 'postgres';
@@ -125,11 +124,7 @@ test('saved Skills and authenticated MCP grants reach the worker and run history
         ${email}, now() + interval '5 minutes' FROM agent_configurations WHERE agent_id=${agent.id} RETURNING id`;
     await promisify(execFile)(
       'bun',
-      [
-        '--no-env-file',
-        fileURLToPath(new URL('./fixtures/run-resource-simulation.ts', import.meta.url)),
-        run.id,
-      ],
+      ['--no-env-file', require.resolve('./fixtures/run-resource-simulation.ts'), run.id],
       {
         env: {
           ...process.env,
@@ -151,6 +146,22 @@ test('saved Skills and authenticated MCP grants reach the worker and run history
     await expect(history).toContainText('release-check · v1 · loaded');
     await expect(history).toContainText('mcp:http-fixture:http_lookup · allow');
     await expect(history).toContainText('mcp:sse-fixture:sse_lookup · allow');
+
+    await page.goto('/mcp');
+    await page.getByRole('button', { name: /Edit http-fixture/ }).click();
+    await page.getByRole('button', { name: 'Save connection', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeHidden();
+    await page.getByRole('button', { name: /Edit http-fixture/ }).click();
+    await page.getByLabel(/^URL/).fill(`${fixture.url}/different`);
+    await page.getByRole('switch', { name: 'Clear stored headers' }).check();
+    await page.getByRole('button', { name: 'Save connection', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeHidden();
+    const grants = await sql`SELECT m.name, a.tool_names FROM agent_mcp_connections a
+      JOIN mcp_connections m ON m.id=a.connection_id WHERE a.agent_id=${agent.id} ORDER BY m.name`;
+    expect(grants).toEqual([
+      { name: 'http-fixture', tool_names: [] },
+      { name: 'sse-fixture', tool_names: ['sse_lookup'] },
+    ]);
   } finally {
     fixture.close();
   }

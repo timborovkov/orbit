@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { db } from '@/lib/db';
@@ -126,34 +126,23 @@ export async function persistMcpConnection(
       } catch {
         return { error: 'That connection name is already in use.' as const };
       }
-      if (endpointChanged) {
-        await tx
-          .update(agentMcpConnections)
-          .set({ toolNames: [] })
-          .where(eq(agentMcpConnections.connectionId, connectionId));
-      } else {
-        const remainingReadOnly =
-          input.toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [];
-        // Dropped or reclassified entries require a fresh grant if enabled again later.
-        const attachments = await tx
-          .select()
-          .from(agentMcpConnections)
-          .where(eq(agentMcpConnections.connectionId, connectionId));
-        for (const attachment of attachments) {
-          const toolNames = attachment.toolNames.filter((name) => remainingReadOnly.includes(name));
-          if (toolNames.length !== attachment.toolNames.length) {
-            await tx
-              .update(agentMcpConnections)
-              .set({ toolNames })
-              .where(
-                and(
-                  eq(agentMcpConnections.agentId, attachment.agentId),
-                  eq(agentMcpConnections.connectionId, connectionId),
-                ),
-              );
-          }
-        }
-      }
+      const retainedGrants = endpointChanged
+        ? []
+        : (input.toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => sql`${tool.name}`) ??
+          []);
+      const retainedNames = sql`ARRAY[${sql.join(retainedGrants, sql`, `)}]::text[]`;
+      // Remove grants when the endpoint changes or the tool loses its read-only classification.
+      await tx
+        .update(agentMcpConnections)
+        .set({
+          toolNames: sql`ARRAY(SELECT tool FROM unnest(${agentMcpConnections.toolNames}) AS granted(tool) WHERE tool = ANY(${retainedNames}))`,
+        })
+        .where(
+          and(
+            eq(agentMcpConnections.connectionId, connectionId),
+            sql`NOT (${agentMcpConnections.toolNames} <@ ${retainedNames})`,
+          ),
+        );
       await tx.insert(audit).values({
         actor,
         action: `Updated MCP connection ${input.name}`,

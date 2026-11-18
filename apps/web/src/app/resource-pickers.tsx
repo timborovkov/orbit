@@ -118,8 +118,10 @@ export function McpPicker({
   connections: McpPickerConnection[];
   selections: AgentMcpSelection[];
 }) {
-  const [selected, setSelected] = useState<Record<string, string[] | undefined>>(() =>
-    Object.fromEntries(selections.map(({ connectionId, toolNames }) => [connectionId, toolNames])),
+  const [selected, setSelected] = useState<Record<string, Set<string> | undefined>>(() =>
+    Object.fromEntries(
+      selections.map(({ connectionId, toolNames }) => [connectionId, new Set(toolNames)]),
+    ),
   );
   const submitted = connections.flatMap(({ id, revision, readOnlyTools }) => {
     const toolNames = selected[id];
@@ -128,7 +130,7 @@ export function McpPicker({
           {
             connectionId: id,
             revision,
-            toolNames: readOnlyTools.filter((name) => toolNames.includes(name)),
+            toolNames: readOnlyTools.filter((name) => toolNames.has(name)),
           },
         ]
       : [];
@@ -181,7 +183,7 @@ export function McpPicker({
                             onCheckedChange={(value) => {
                               setSelected((previous) => ({
                                 ...previous,
-                                [connection.id]: value === true ? [] : undefined,
+                                [connection.id]: value === true ? new Set<string>() : undefined,
                               }));
                             }}
                             aria-label={connection.name}
@@ -204,17 +206,13 @@ export function McpPicker({
                                 <FieldLabel htmlFor={`${id}-tool-${index}`}>{name}</FieldLabel>
                                 <Checkbox
                                   id={`${id}-tool-${index}`}
-                                  checked={grants.includes(name)}
+                                  checked={grants.has(name)}
                                   onCheckedChange={(value) => {
                                     setSelected((previous) => {
-                                      const current = previous[connection.id] ?? [];
-                                      return {
-                                        ...previous,
-                                        [connection.id]:
-                                          value === true
-                                            ? [...current, name]
-                                            : current.filter((tool) => tool !== name),
-                                      };
+                                      const next = new Set(previous[connection.id]);
+                                      if (value === true) next.add(name);
+                                      else next.delete(name);
+                                      return { ...previous, [connection.id]: next };
                                     });
                                   }}
                                 />
