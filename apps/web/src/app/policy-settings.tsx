@@ -1,7 +1,17 @@
-import { reviewProposal, saveApprovalTools, saveConsent } from '@/actions/policy';
+import { Inbox } from 'lucide-react';
+
+import { reviewProposal, saveConsent } from '@/actions/policy';
+import { ApprovalToolsForm } from '@/app/approval-tools-form';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
-import { proposalTypes } from '@/lib/policy/scopes';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
+import { FieldGroup } from '@/components/ui/field';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
 type Workspace = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>;
@@ -29,7 +39,6 @@ export function ReviewSettings({
   approvalOnReject: 'continue' | 'end';
   approvalSpendCents: number | null;
 }) {
-  const requiredTools = new Set(approvalTools);
   return (
     <section className="access-workbench" data-testid="approval-settings">
       <div className="editor-section-heading">
@@ -39,65 +48,13 @@ export function ReviewSettings({
           Introductions and escalations always require consent and approval.
         </p>
       </div>
-      <WorkspaceForm action={saveApprovalTools} label="Save approval requirements">
-        <input type="hidden" name="agentId" value={agentId} />
-        <fieldset className="policy-options" aria-label="Other actions requiring approval">
-          <legend className="sr-only">Other actions requiring approval</legend>
-          {proposalTypes
-            .filter((tool) => tool !== 'introduce' && tool !== 'escalate')
-            .map((tool) => (
-              <label key={tool} className="policy-option">
-                <input
-                  type="checkbox"
-                  name="tool"
-                  value={tool}
-                  defaultChecked={requiredTools.has(tool)}
-                />
-                <span>{actionLabels[tool]}</span>
-              </label>
-            ))}
-        </fieldset>
-        <ul className="approval-fields">
-          <li>
-            <label htmlFor="approval-spend">Spend threshold (USD cents, optional)</label>
-            <input
-              id="approval-spend"
-              name="approvalSpendCents"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={100000000}
-              defaultValue={approvalSpendCents ?? undefined}
-            />
-            <p className="field-hint">
-              When set, write actions need approval once today’s recorded spend reaches this amount.
-            </p>
-          </li>
-          <li>
-            <label htmlFor="approval-expiry">Auto-reject after (hours, optional)</label>
-            <input
-              id="approval-expiry"
-              name="approvalExpiresAfterHours"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={720}
-              defaultValue={approvalExpiresAfterHours ?? undefined}
-            />
-            <p className="field-hint">Leave blank to keep pending items until reviewed.</p>
-          </li>
-        </ul>
-        <WorkspaceSelect
-          id="approval-on-reject"
-          name="approvalOnReject"
-          label="When a proposal is rejected"
-          initialValue={approvalOnReject}
-          options={[
-            { value: 'continue', label: 'Continue the run with the decline recorded' },
-            { value: 'end', label: 'End the run' },
-          ]}
-        />
-      </WorkspaceForm>
+      <ApprovalToolsForm
+        agentId={agentId}
+        approvalTools={approvalTools}
+        approvalExpiresAfterHours={approvalExpiresAfterHours}
+        approvalOnReject={approvalOnReject}
+        approvalSpendCents={approvalSpendCents}
+      />
     </section>
   );
 }
@@ -119,40 +76,42 @@ export function ConsentSettings({
       </div>
       <WorkspaceForm action={saveConsent} label="Save consent">
         <input type="hidden" name="agentId" value={agentId} />
-        <WorkspaceField
-          id="consent-recipient"
-          name="recipient"
-          label="Recipient ID"
-          maxLength={120}
-          required
-        />
-        <WorkspaceSelect
-          id="consent-scope"
-          name="scope"
-          label="Consent scope"
-          initialValue="introduce"
-          options={[
-            { value: 'introduce', label: 'Introductions' },
-            { value: 'escalate', label: 'Escalations' },
-          ]}
-        />
-        <WorkspaceSelect
-          id="consent-outcome"
-          name="outcome"
-          label="Recipient decision"
-          initialValue="grant"
-          options={[
-            { value: 'grant', label: 'Grant' },
-            { value: 'revoke', label: 'Revoke' },
-          ]}
-        />
-        <WorkspaceField
-          id="consent-evidence"
-          name="evidence"
-          label="Evidence reference"
-          maxLength={1000}
-          required
-        />
+        <FieldGroup className="gap-5">
+          <WorkspaceField
+            id="consent-recipient"
+            name="recipient"
+            label="Recipient ID"
+            maxLength={120}
+            required
+          />
+          <WorkspaceSelect
+            id="consent-scope"
+            name="scope"
+            label="Consent scope"
+            initialValue="introduce"
+            options={[
+              { value: 'introduce', label: 'Introductions' },
+              { value: 'escalate', label: 'Escalations' },
+            ]}
+          />
+          <WorkspaceSelect
+            id="consent-outcome"
+            name="outcome"
+            label="Recipient decision"
+            initialValue="grant"
+            options={[
+              { value: 'grant', label: 'Grant' },
+              { value: 'revoke', label: 'Revoke' },
+            ]}
+          />
+          <WorkspaceField
+            id="consent-evidence"
+            name="evidence"
+            label="Evidence reference"
+            maxLength={1000}
+            required
+          />
+        </FieldGroup>
       </WorkspaceForm>
       {consents.length > 0 && (
         <ul className="policy-records" aria-label="Recent consent records">
@@ -186,7 +145,17 @@ export function ProposalReview({
         </p>
       </div>
       {reviews.length === 0 ? (
-        <p className="muted">No proposals awaiting review.</p>
+        <Empty className="border border-border py-10 md:py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Inbox aria-hidden="true" />
+            </EmptyMedia>
+            <EmptyTitle>No proposals awaiting review</EmptyTitle>
+            <EmptyDescription>
+              When an agent action needs approval, it will appear here.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <ul className="policy-records" aria-label="Proposals, pending first">
           {reviews.map((proposal) => (

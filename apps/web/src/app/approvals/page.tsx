@@ -2,11 +2,10 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { z } from 'zod';
 
+import { ApprovalsFilter } from '@/app/approvals-filter';
 import { ApprovalsInbox } from '@/app/approvals-inbox';
 import { ThemeSwitch } from '@/app/theme';
-import { Button } from '@/components/ui/button';
 import { requireAdmin } from '@/lib/auth';
-import { env } from '@/lib/env';
 import { getApprovalsInbox } from '@/lib/server/workspace-queries';
 
 export const dynamic = 'force-dynamic';
@@ -19,10 +18,9 @@ export default async function ApprovalsPage({
   await requireAdmin();
   const params = await searchParams;
   const filter = z.uuid().safeParse(params.agent);
-  const { email, team, items, pendingCount, filterAgentId } = await getApprovalsInbox(
+  const { team, items, pendingCount, filterAgentId } = await getApprovalsInbox(
     filter.success ? filter.data : null,
   );
-  const localAuth = env().AUTH_DISABLED;
   const pending = items.filter((item) => item.status === 'pending');
   const resolved = items.filter((item) => item.status !== 'pending');
 
@@ -59,11 +57,6 @@ export default async function ApprovalsPage({
         </nav>
       </header>
       <main id="main" className="dashboard approvals-dashboard">
-        {localAuth && (
-          <p className="local-auth-notice" role="status">
-            Authentication disabled · Local development · {email}
-          </p>
-        )}
         <div className="page-heading">
           <div>
             <h1>Approvals</h1>
@@ -76,28 +69,7 @@ export default async function ApprovalsPage({
           </span>
         </div>
 
-        <form className="approvals-filter" method="get">
-          <div className="approvals-filter-field">
-            <label htmlFor="approvals-agent-filter">Filter by agent</label>
-            <select id="approvals-agent-filter" name="agent" defaultValue={filterAgentId ?? ''}>
-              <option value="">All agents</option>
-              {team.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Button type="submit" variant="outline">
-            Apply filter
-          </Button>
-          {filterAgentId && (
-            <Link href="/approvals" className="button button-ghost">
-              Clear
-            </Link>
-          )}
-        </form>
-
+        <ApprovalsFilter agents={team} filterAgentId={filterAgentId} />
         <ApprovalsInbox pending={pending} resolved={resolved} />
       </main>
     </div>

@@ -23,7 +23,7 @@ export async function saveApprovalTools(form: FormData) {
   if (!tools.success) return { error: 'Choose valid action types.' };
 
   const expiresValue = form.get('approvalExpiresAfterHours');
-  const spendValue = form.get('approvalSpendCents');
+  const spendValue = form.get('approvalSpendDollars') ?? form.get('approvalSpendCents');
   const expiresRaw = typeof expiresValue === 'string' ? expiresValue.trim() : '';
   const spendRaw = typeof spendValue === 'string' ? spendValue.trim() : '';
   const onReject = z
@@ -40,9 +40,15 @@ export async function saveApprovalTools(form: FormData) {
 
   let approvalSpendCents: number | null = null;
   if (spendRaw) {
-    const parsed = z.coerce.number().int().min(1).max(100_000_000).safeParse(spendRaw);
-    if (!parsed.success) return { error: 'Spend threshold must be a positive cent amount.' };
-    approvalSpendCents = parsed.data;
+    if (form.has('approvalSpendDollars')) {
+      const dollars = z.coerce.number().min(0.01).max(1_000_000).safeParse(spendRaw);
+      if (!dollars.success) return { error: 'Spend threshold must be a positive dollar amount.' };
+      approvalSpendCents = Math.round(dollars.data * 100);
+    } else {
+      const parsed = z.coerce.number().int().min(1).max(100_000_000).safeParse(spendRaw);
+      if (!parsed.success) return { error: 'Spend threshold must be a positive cent amount.' };
+      approvalSpendCents = parsed.data;
+    }
   }
 
   const saved = await persistApprovalTools(actor, agentId, [...new Set(tools.data)], {
