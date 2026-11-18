@@ -150,16 +150,38 @@ export function startJobWorker(options: WorkerOptions) {
       },
       options.heartbeatIntervalMs ?? Math.max(1_000, Math.floor(leaseMs / 3)),
     );
-    const deadLetter = async (errorMessage: string, force = false) => {
+    const deadLetter = async (errorMessage: string) => {
       try {
-        const failed = force
-          ? await forceDead(job.id, options.workerId, errorMessage)
-          : await fail(job.id, options.workerId, errorMessage);
+        const failed = await fail(job.id, options.workerId, errorMessage);
         if (failed?.status === 'dead') {
           await notifyDeadLetter(job, errorMessage);
         }
       } catch (failError: unknown) {
         options.onError?.(failError);
+      }
+    };
+
+    /**
+     * Force-dead until durable while the lease heartbeat is still running.
+     * Ordinary failJob / lease recovery must not reclaim this job — that would redispatch
+     * a paid model step that never burned.
+     */
+    const forceDeadUntilDurable = async (errorMessage: string) => {
+      let delayMs = 250;
+      for (;;) {
+        try {
+          const failed = await forceDead(job.id, options.workerId, errorMessage);
+          if (failed?.status === 'dead') {
+            await notifyDeadLetter(job, errorMessage);
+            return;
+          }
+          // Claim is no longer ours (cancelled, reclaimed, or already finalized).
+          return;
+        } catch (failError: unknown) {
+          options.onError?.(failError);
+        }
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        delayMs = Math.min(delayMs * 2, 10_000);
       }
     };
 
@@ -173,8 +195,7 @@ export function startJobWorker(options: WorkerOptions) {
       }
     } catch (error: unknown) {
       if (isUnrecoverablePaidStepFinalizationError(error)) {
-        // Paid response without a durable burn — never ordinary-retry (redispatch risk).
-        await deadLetter(error.message, true);
+        await forceDeadUntilDurable(error.message);
       } else {
         const message = 'Worker could not process the job';
         await deadLetter(message);

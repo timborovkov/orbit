@@ -491,6 +491,66 @@ test('unrecoverable paid-step finalization force-deads instead of ordinary retry
   expect(deadLetterCalls).toBe(1);
 });
 
+test('unrecoverable paid-step finalization retries force-dead until durable', async () => {
+  const { startJobWorker } = await import('@/lib/queue/worker');
+  const { UnrecoverablePaidStepFinalizationError } = await import('@/lib/runtime/errors');
+  const store = new FakeJobStore();
+  const job = store.enqueue({
+    type: 'paid-burn-retry',
+    payload: { runId: 'run-burn-retry' },
+    idempotencyKey: 'burn-retry-1',
+    maxAttempts: 5,
+  });
+  let forceAttempts = 0;
+  let deadLetterCalls = 0;
+  let failCalls = 0;
+  let heartbeatCalls = 0;
+
+  const worker = startJobWorker({
+    workerId: 'w-burn-retry',
+    pollMs: 20,
+    recoveryMs: 60_000,
+    leaseMs: 5_000,
+    heartbeatIntervalMs: 50,
+    claimJobs: async () => store.claim('w-burn-retry', 'paid-burn-retry', 5_000),
+    completeJob: async () => {
+      throw new Error('should not complete');
+    },
+    failJob: async (id, workerId, error) => {
+      failCalls += 1;
+      return store.fail(id, workerId, error);
+    },
+    deadLetterJob: async (id, workerId, error) => {
+      forceAttempts += 1;
+      if (forceAttempts < 3) throw new Error('transient dead-letter outage');
+      return store.deadLetter(id, workerId, error);
+    },
+    recoverExpiredLeases: async () => {
+      throw new Error('recovery must not reclaim while force-dead retries');
+    },
+    heartbeat: async () => {
+      heartbeatCalls += 1;
+      return true;
+    },
+    onDeadLetter: async () => {
+      deadLetterCalls += 1;
+    },
+    handlers: {
+      'paid-burn-retry': async () => {
+        throw new UnrecoverablePaidStepFinalizationError();
+      },
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  await worker.stop();
+  expect(store.get(job.id)?.status).toBe('dead');
+  expect(forceAttempts).toBeGreaterThanOrEqual(3);
+  expect(failCalls).toBe(0);
+  expect(deadLetterCalls).toBe(1);
+  expect(heartbeatCalls).toBeGreaterThan(0);
+});
+
 test('recovery tick reconciles orphaned dead letters after onDeadLetter failure', async () => {
   const { startJobWorker } = await import('@/lib/queue/worker');
   const store = new FakeJobStore();
