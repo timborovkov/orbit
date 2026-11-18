@@ -219,11 +219,17 @@ results without a manual reload. No loading skeletons on Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents
-unchanged. Skills and MCP connections use the same disclosure-row pattern on their
-own pages (`/skills`, `/mcp`), with a create form above the list. MCP headers are
-write-only; stored secrets are never echoed. Overview and workspace headers link to
-Templates, Skills and MCP. Appearance, sign-in and the native create dialog retain
-the behavior in Layout and the historical decisions below.
+unchanged. Skills and MCP connections are list-first library pages (`/skills`,
+`/mcp`): a heading with a primary New action, a bordered table (name, description
+or URL, agent count, updated-at, actions) when data exists, and an illustration-free
+empty card with the same primary CTA when not. Create and edit open a shadcn Dialog
+with Field spacing, descriptions under labels, and Orbit control styling. Skill
+bodies use Write/Preview Markdown tabs; the slug auto-derives from the title until
+edited. MCP transport uses the shadcn Select. Tool allowlists are chip rows with an
+optional Fetch tools action; auth headers are key/value rows with masked values and
+never echo stored secrets. Overview and workspace headers link to Templates, Skills
+and MCP. Appearance, sign-in and the native create dialog retain the behavior in
+Layout and the historical decisions below.
 
 ## Do's and Don'ts
 
@@ -242,12 +248,13 @@ Verify desktop (1440), laptop (1024), tablet (768), phone (390) and narrow phone
 
 This file is the single design reference for Orbit. Keep the lowercase filename `design.md`; do not create a competing `DESIGN.md` or move the guidance into a skill's private context file.
 
-| Date       | Source                                                                                                         | Decision                                                                                                                                                                      |
-| ---------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-11-18 | User: shared skill library + generic MCP connections with agent opt-in                                         | Add `/skills` and `/mcp` library pages (Templates-style rows) and Access multi-select pickers; keep UI scoped to those surfaces to reduce conflict with concurrent UI work.   |
-| 2026-11-16 | User: “dark and light mode, a mode switch, auto, responsive design. Use the logos.”                            | Support Light, Dark and Auto, responsive layouts, the supplied logo and a matching favicon.                                                                                   |
-| 2026-11-16 | User rejected the first dashboard and chose “Vercel inspired”.                                                 | Use the Vercel-inspired direction documented above as the design brief. Generic marketing copy and a large promotional hero are rejected precedents for this admin interface. |
-| 2026-11-16 | User: “Let's also use all of these. Install them” and “capture our decisions and style guidance in design.md”. | Use the installed design collections as complementary guidance; record decisions and relevant implementation guidance here after UI changes.                                  |
+| Date       | Source                                                                                                         | Decision                                                                                                                                                                       |
+| ---------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-11-18 | User: shared skill library + generic MCP connections with agent opt-in                                         | Add `/skills` and `/mcp` library pages and Access multi-select pickers; keep UI scoped to those surfaces to reduce conflict with concurrent UI work.                           |
+| 2026-11-18 | User screenshot review on PR #22: Linear-level polish for Skills/MCP                                           | List-first pages with dialog create/edit, Field spacing, chip allowlists + header KV rows + Fetch tools, shadcn Select for transport, Markdown Write/Preview, slug-from-title. |
+| 2026-11-16 | User: “dark and light mode, a mode switch, auto, responsive design. Use the logos.”                            | Support Light, Dark and Auto, responsive layouts, the supplied logo and a matching favicon.                                                                                    |
+| 2026-11-16 | User rejected the first dashboard and chose “Vercel inspired”.                                                 | Use the Vercel-inspired direction documented above as the design brief. Generic marketing copy and a large promotional hero are rejected precedents for this admin interface.  |
+| 2026-11-16 | User: “Let's also use all of these. Install them” and “capture our decisions and style guidance in design.md”. | Use the installed design collections as complementary guidance; record decisions and relevant implementation guidance here after UI changes.                                   |
 
 The exact typography, token values, table layout and modal behaviour above describe the current implementation. They are not separate user mandates. Preserve them for consistency during refinement; distinguish a proposed change from a preference the user has explicitly chosen. Record user-stated reasons when available; do not invent reasons or turn a local preference into a universal ban.
 

@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { createMCPClient } from '@ai-sdk/mcp';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
@@ -13,6 +14,15 @@ import {
 
 const uuid = z.uuid();
 
+function parseJsonField<T>(raw: FormDataEntryValue | null, fallback: T): T {
+  if (typeof raw !== 'string' || !raw.trim()) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export async function saveMcpConnection(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
@@ -20,12 +30,12 @@ export async function saveMcpConnection(form: FormData) {
     name: form.get('name'),
     url: form.get('url'),
     transport: form.get('transport'),
-    toolAllowlist: form.get('toolAllowlist') ?? '',
-    headersText: form.get('headersText') ?? '',
+    toolAllowlist: parseJsonField(form.get('toolAllowlist'), []),
+    headers: parseJsonField(form.get('headers'), []),
   });
   if (!parsed.success) {
     return {
-      error: 'Check the name, URL, transport, allowlist and header lines.',
+      error: 'Check the name, URL, transport, tools and header rows.',
     };
   }
   const connectionIdRaw = form.get('connectionId');
@@ -63,4 +73,60 @@ export async function saveAgentMcpConnections(form: FormData) {
   return {
     message: `Attached ${result.count} MCP connection${result.count === 1 ? '' : 's'}.`,
   };
+}
+
+const discoverInput = z.object({
+  url: z.url().max(2000),
+  transport: z.enum(['http', 'sse']),
+  headers: z
+    .array(
+      z.object({
+        key: z.string().trim().min(1).max(120),
+        value: z.string().max(2000),
+      }),
+    )
+    .max(40)
+    .optional(),
+});
+
+/** Probe a remote MCP server for tool names using draft form credentials. */
+export async function discoverMcpTools(input: {
+  url: string;
+  transport: 'http' | 'sse';
+  headers?: { key: string; value: string }[];
+}): Promise<{ tools: string[] } | { error: string }> {
+  await checkOrigin();
+  await requireAdmin();
+  const parsed = discoverInput.safeParse(input);
+  if (!parsed.success) return { error: 'Provide a valid URL, transport and header rows.' };
+
+  const headers: Record<string, string> = {};
+  for (const row of parsed.data.headers ?? []) {
+    const value = row.value.trim();
+    if (value) headers[row.key.trim()] = value;
+  }
+
+  let client: Awaited<ReturnType<typeof createMCPClient>> | undefined;
+  try {
+    client = await createMCPClient({
+      transport: {
+        type: parsed.data.transport,
+        url: parsed.data.url,
+        headers: Object.keys(headers).length ? headers : undefined,
+      },
+      protocolVersionDiscovery: false,
+    });
+    const remote = await client.tools();
+    return { tools: Object.keys(remote).sort((a, b) => a.localeCompare(b)) };
+  } catch {
+    return {
+      error: 'Could not fetch tools from that server. Check the URL, transport and headers.',
+    };
+  } finally {
+    try {
+      await client?.close();
+    } catch {
+      // Best-effort.
+    }
+  }
 }

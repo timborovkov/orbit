@@ -9,65 +9,57 @@ import { encryptSecret } from '@/lib/runtime/secrets';
 import { agentMcpConnections, audit, mcpConnections, type McpTransport } from '@/lib/schema';
 import { skillSlug } from '@/lib/server/skills-mutations';
 
-const headerLine = z
+const toolName = z
   .string()
   .trim()
-  .max(4000)
-  .refine((value) => {
-    if (!value) return true;
-    return value.split('\n').every((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return true;
-      const idx = trimmed.indexOf(':');
-      return idx > 0 && trimmed.slice(0, idx).trim().length > 0;
-    });
-  }, 'Use one Header: value pair per line.');
+  .min(1)
+  .max(120)
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/, 'Use a valid tool name.');
+
+const headerRow = z.object({
+  key: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, 'Use a valid header name.'),
+  value: z.string().max(2000),
+});
 
 export const mcpConnectionInput = z.object({
   name: skillSlug,
   url: z.url().max(2000),
   transport: z.enum(['http', 'sse']),
   toolAllowlist: z
-    .string()
-    .trim()
-    .max(4000)
-    .transform((value) => {
-      if (!value) return null;
-      const tools = [
-        ...new Set(
-          value
-            .split(/[\n,]/)
-            .map((part) => part.trim())
-            .filter(Boolean),
-        ),
-      ];
-      return tools.length ? tools : null;
+    .array(toolName)
+    .max(200)
+    .transform((tools) => {
+      const unique = [...new Set(tools)];
+      return unique.length ? unique : null;
     }),
-  headersText: headerLine,
+  headers: z.array(headerRow).max(40),
 });
 
-function parseHeaders(text: string): Record<string, string> | null {
-  if (!text.trim()) return null;
+export type McpConnectionInput = z.infer<typeof mcpConnectionInput>;
+
+function headersFromRows(rows: McpConnectionInput['headers']): Record<string, string> | null {
   const headers: Record<string, string> = {};
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const idx = trimmed.indexOf(':');
-    const key = trimmed.slice(0, idx).trim();
-    const value = trimmed.slice(idx + 1).trim();
-    if (key && value) headers[key] = value;
+  for (const row of rows) {
+    const value = row.value.trim();
+    if (!value) continue;
+    headers[row.key] = value;
   }
   return Object.keys(headers).length ? headers : null;
 }
 
 export async function persistMcpConnection(
   actor: string,
-  input: z.infer<typeof mcpConnectionInput>,
+  input: McpConnectionInput,
   connectionId?: string,
   clearHeaders = false,
 ) {
   return await db().transaction(async (tx) => {
-    const headers = clearHeaders ? null : parseHeaders(input.headersText);
+    const headers = clearHeaders ? null : headersFromRows(input.headers);
     if (connectionId) {
       const current = (
         await tx.select().from(mcpConnections).where(eq(mcpConnections.id, connectionId))
