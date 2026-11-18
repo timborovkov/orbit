@@ -787,10 +787,18 @@ async function processSimulationRun(
         ),
       );
 
-      // Prefer checkpointed attribution when main already ran; otherwise use this attempt.
-      result.skillVersions = result.skillVersions?.length
-        ? result.skillVersions
-        : resources.skillVersions;
+      // Prefer checkpointed version numbers when present; still OR in `loaded` from the
+      // live resource records so successful load_skill calls are reflected in history.
+      if (result.skillVersions?.length) {
+        for (const entry of result.skillVersions) {
+          const live = resources.skillVersions.find(
+            (row) => row.skillId === entry.skillId && row.version === entry.version,
+          );
+          if (live?.loaded) entry.loaded = true;
+        }
+      } else {
+        result.skillVersions = resources.skillVersions;
+      }
       result.mcpConnections = result.mcpConnections?.length
         ? result.mcpConnections
         : resources.mcpConnections;

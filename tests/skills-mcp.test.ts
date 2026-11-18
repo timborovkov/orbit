@@ -201,6 +201,44 @@ test('MCP tools register through the policy gateway and honour allowlists', asyn
   await close();
 });
 
+test('MCP aliases stay unique when sanitized connection/tool names collide', async () => {
+  const first: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000041',
+    name: 'a_b',
+    url: 'http://127.0.0.1:9/a',
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: null,
+  };
+  const second: McpConnectionConfig = {
+    id: '00000000-0000-4000-8000-000000000042',
+    name: 'a',
+    url: 'http://127.0.0.1:9/b',
+    transport: 'http',
+    encryptedHeaders: null,
+    toolAllowlist: null,
+  };
+  const { tools, statuses, close } = await loadMcpToolsForAgent({
+    connections: [first, second],
+    policy,
+    authorize: async () => ({ decision: 'allow', reasons: ['ok'] }),
+    connect: async (connection) =>
+      ({
+        tools: async () =>
+          connection.name === 'a_b'
+            ? { c: fakeTool(async () => ({ from: 'a_b' })) }
+            : { b_c: fakeTool(async () => ({ from: 'a' })) },
+        close: async () => undefined,
+      }) as unknown as Awaited<ReturnType<typeof connectMcpClient>>,
+  });
+  expect(statuses.map((row) => row.status)).toEqual(['ready', 'ready']);
+  expect(Object.keys(tools).sort()).toEqual(
+    [mcpToolAlias('a_b', 'c'), mcpToolAlias('a', 'b_c')].sort(),
+  );
+  expect(Object.keys(tools)).toHaveLength(2);
+  await close();
+});
+
 test('MCP connection failures degrade without aborting the tool set', async () => {
   const ok: McpConnectionConfig = {
     id: '00000000-0000-4000-8000-000000000021',
@@ -445,12 +483,14 @@ test('read-only authorization still enforces concurrency from the policy snapsho
 
 test('MCP model-facing aliases are OpenAI-compatible while policy keeps canonical ids', () => {
   const alias = mcpToolAlias('crm', 'search');
-  expect(alias).toBe('mcp_crm_search');
+  expect(alias).toMatch(/^mcp_crm_search_[a-f0-9]{6}$/);
   expect(alias).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
   expect(mcpToolId('crm', 'search')).toBe('mcp:crm:search');
   const long = mcpToolAlias('a'.repeat(80), 'b'.repeat(80));
   expect(long.length).toBeLessThanOrEqual(64);
   expect(long).toMatch(/^[a-zA-Z0-9_-]+$/);
+  // Sanitized name collisions across connections stay distinct via the digest.
+  expect(mcpToolAlias('a_b', 'c')).not.toBe(mcpToolAlias('a', 'b_c'));
 });
 
 test('load_skill does not require a spare inference request slot', () => {

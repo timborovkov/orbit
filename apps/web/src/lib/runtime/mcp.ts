@@ -32,7 +32,8 @@ export function mcpToolId(connectionName: string, toolName: string) {
 
 /**
  * Model-facing tool key for OpenAI-compatible providers (letters, digits, `_`, `-`, ≤64).
- * Canonical `mcpToolId` stays on authorizeAction / ToolCallRecord.
+ * Always suffixes a digest of the canonical pair so aliases stay unique across connections
+ * (e.g. `a_b`/`c` vs `a`/`b_c`). Canonical `mcpToolId` stays on authorizeAction / audit.
  */
 export function mcpToolAlias(connectionName: string, toolName: string) {
   const sanitize = (value: string) =>
@@ -40,15 +41,14 @@ export function mcpToolAlias(connectionName: string, toolName: string) {
   const left = sanitize(connectionName) || 'conn';
   const right = sanitize(toolName) || 'tool';
   const prefix = 'mcp_';
-  const alias = `${prefix}${left}_${right}`;
-  if (alias.length <= 64) return alias;
   const digest = createHash('sha256')
     .update(`${connectionName}\0${toolName}`)
     .digest('hex')
-    .slice(0, 8);
-  const budget = 64 - prefix.length - 1 - digest.length;
+    .slice(0, 6);
+  const suffix = `_${digest}`;
+  const budget = 64 - prefix.length - suffix.length;
   const head = `${left}_${right}`.slice(0, Math.max(1, budget));
-  return `${prefix}${head}_${digest}`;
+  return `${prefix}${head}${suffix}`;
 }
 
 function decodeHeaders(connectionId: string, encryptedHeaders: string | null) {
@@ -119,17 +119,11 @@ async function loadOneConnection(
     const allow = connection.toolAllowlist?.length ? new Set(connection.toolAllowlist) : null;
     const registered: string[] = [];
     const tools: Record<string, Tool> = {};
-    const usedAliases = new Set<string>();
 
     for (const [toolName, remoteTool] of Object.entries(remote)) {
       if (allow && !allow.has(toolName)) continue;
       const capability = mcpToolId(connection.name, toolName);
-      let alias = mcpToolAlias(connection.name, toolName);
-      if (usedAliases.has(alias)) {
-        const digest = createHash('sha256').update(capability).digest('hex').slice(0, 6);
-        alias = `${alias.slice(0, Math.max(1, 64 - 7))}_${digest}`;
-      }
-      usedAliases.add(alias);
+      const alias = mcpToolAlias(connection.name, toolName);
       const originalExecute = remoteTool.execute;
       registered.push(toolName);
       // Register under the provider-safe alias; policy/audit still use `capability`.

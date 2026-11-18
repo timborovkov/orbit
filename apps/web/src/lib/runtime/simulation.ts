@@ -187,9 +187,10 @@ export async function simulate(
     : { steps: [], actions: [], error: null };
   result.error = null;
   // Resume must keep checkpointed skill/MCP attribution — a later catalogue edit must
-  // not rewrite versions for an already-paid main decision.
+  // not rewrite versions for an already-paid main decision. Share the live array on a
+  // fresh run so load_skill can flip `loaded` on the recorded result.
   if (options.skillVersions && !result.skillVersions?.length) {
-    result.skillVersions = options.skillVersions.map((entry) => ({ ...entry }));
+    result.skillVersions = options.skillVersions;
   }
   if (options.mcpConnections && !result.mcpConnections?.length) {
     result.mcpConnections = options.mcpConnections.map((entry) => ({

@@ -244,6 +244,28 @@ describe('bounded manual simulation', () => {
     expect(resumed.steps[0].stage).toBe('evaluator');
     expect(resumed.steps[1].stage).toBe('main');
   });
+  test('fresh runs share skill version records so load_skill flips loaded', async () => {
+    const versions = [
+      {
+        skillId: '00000000-0000-4000-8000-000000000088',
+        name: 'research-brief',
+        version: 1,
+        loaded: false,
+      },
+    ];
+    const result = await simulate(
+      config,
+      'question',
+      async (request) => {
+        if (request.stage === 'main') versions[0]!.loaded = true;
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async () => {},
+      { maxSteps: 2, skillVersions: versions },
+    );
+    expect(result.skillVersions).toBe(versions);
+    expect(result.skillVersions?.[0]?.loaded).toBe(true);
+  });
   test('resume keeps checkpointed skill attribution when the catalogue changes', async () => {
     const checkpointed: SimulationResult = {
       steps: [
