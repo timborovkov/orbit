@@ -134,6 +134,46 @@ async function assertOwned(runId: string, executionToken: string) {
   if (!row) throw new BudgetError('cancelled');
 }
 
+/**
+ * Burn a paid stage as soon as the provider returns, before later ownership checks
+ * that may throw Retryable and would otherwise leave only a pending reservation.
+ * Reclaim while a call is still in flight still works — nothing is marked until return.
+ */
+async function markStageDispatchedIfOwned(
+  runId: string,
+  executionToken: string,
+  stage: 'evaluator' | 'main',
+) {
+  return await db().transaction(async (tx) => {
+    const current = (
+      await tx
+        .select({ id: runs.id, result: runs.result })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.id, runId),
+            eq(runs.status, 'running'),
+            eq(runs.executionToken, executionToken),
+          ),
+        )
+        .for('update')
+    ).at(0);
+    if (!current) return [];
+    const dispatchedStages = [...new Set([...(current.result.dispatchedStages ?? []), stage])];
+    return await tx
+      .update(runs)
+      .set({ result: { ...current.result, dispatchedStages } })
+      .where(
+        and(
+          eq(runs.id, runId),
+          eq(runs.status, 'running'),
+          eq(runs.executionToken, executionToken),
+        ),
+      )
+      .returning({ id: runs.id });
+  });
+}
+
 async function expireStaleRuns(
   tx: Parameters<Parameters<ReturnType<typeof db>['transaction']>[0]>[0],
   agentId: string,
@@ -467,6 +507,25 @@ async function processSimulationRun(
       run.input,
       async (request) => {
         const response = await telemetry.callModel(call, { ...request, quote });
+        const stage = request.stage === 'main' ? 'main' : 'evaluator';
+        // Persist the dispatch burn before assertOwned / settlement. A Retryable blip after
+        // a paid return must not requeue with only a pending reservation (double-spend).
+        // We intentionally do not mark before the provider call: that blocked reclaim and
+        // pre-return infrastructure retries in smoke tests.
+        try {
+          const marked = await retryableStore(() =>
+            markStageDispatchedIfOwned(run.id, executionToken, stage),
+          );
+          if (!marked.length) throw new BudgetError('cancelled');
+        } catch (error) {
+          if (isBudgetError(error)) throw error;
+          if (isRetryableInfrastructureError(error)) {
+            throw new Error(
+              'A previous attempt already used this model step but could not save the result. Start a new run.',
+            );
+          }
+          throw error;
+        }
         if (response.costMicros !== undefined) {
           // Failure leaves the conservative reservation in place. Never repeat a paid call
           // solely because the adjustment could not be recorded.
