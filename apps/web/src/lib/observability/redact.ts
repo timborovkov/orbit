@@ -11,7 +11,7 @@ const traceId = /^[0-9a-f]{32}$/i;
 const integer = /^-?\d+$/;
 const modelId = /^[\w.-]+\/[\w.:-]+$/;
 
-export const orbitTagKeys = [
+const orbitTagKeys = [
   'orbit.agent_id',
   'orbit.run_id',
   'orbit.job_id',
@@ -95,7 +95,9 @@ export function redactValue(value: unknown, options: { captureContent?: boolean 
   const captureContent = options.captureContent === true;
   if (value === null || value === undefined) return value;
   if (typeof value === 'string') {
-    if (!captureContent && value.length > 80) return REDACTED;
+    // Omit prose/prompts unless capture is explicitly enabled. Identifiers (UUIDs,
+    // model ids, enums) have no whitespace and stay available as attributes.
+    if (!captureContent && (value.includes(' ') || value.length > 80)) return REDACTED;
     return redactString(value);
   }
   if (typeof value === 'number' || typeof value === 'boolean') return value;
@@ -141,7 +143,7 @@ export function safeOrbitTags(
   return tags;
 }
 
-export type SentryLikeEvent = {
+export interface SentryLikeEvent {
   message?: string;
   extra?: Record<string, unknown>;
   contexts?: Record<string, unknown>;
@@ -153,13 +155,13 @@ export type SentryLikeEvent = {
     query_string?: unknown;
     env?: unknown;
   };
-  breadcrumbs?: { values?: Array<{ message?: string; data?: unknown }> };
-  exception?: { values?: Array<{ value?: string; type?: string }> };
+  breadcrumbs?: { values?: { message?: string; data?: unknown }[] };
+  exception?: { values?: { value?: string; type?: string }[] };
   user?: unknown;
   extra_data?: unknown;
-};
+}
 
-type Primitive = string | number | boolean | null | undefined;
+type Primitive = string | number | boolean | bigint | symbol | null | undefined;
 
 const droppedRequestHeaders = new Set([
   'authorization',
@@ -173,10 +175,12 @@ const droppedRequestHeaders = new Set([
 export function redactSentryEvent<T extends SentryLikeEvent>(event: T): T {
   const tags: Record<string, Primitive> = {};
   for (const [key, value] of Object.entries(event.tags ?? {})) {
-    if (value === undefined || value === null) continue;
-    const safe = safeOrbitTags({ [key]: value });
-    const mapped = safe[key] ?? safe[`orbit.${key}`];
-    if (mapped !== undefined) tags[key.startsWith('orbit.') ? key : `orbit.${key}`] = mapped;
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+      continue;
+    }
+    for (const [safeKey, safeValue] of Object.entries(safeOrbitTags({ [key]: value }))) {
+      tags[safeKey] = safeValue;
+    }
   }
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(event.request?.headers ?? {})) {
@@ -209,9 +213,7 @@ export function redactSentryEvent<T extends SentryLikeEvent>(event: T): T {
           values: (event.breadcrumbs.values ?? []).map((crumb) => ({
             ...crumb,
             message: crumb.message ? redactString(crumb.message) : crumb.message,
-            data: crumb.data
-              ? redactValue(crumb.data, { captureContent: false })
-              : crumb.data,
+            data: crumb.data ? redactValue(crumb.data, { captureContent: false }) : crumb.data,
           })),
         }
       : undefined,

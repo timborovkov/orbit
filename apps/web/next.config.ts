@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import { withSentryConfig } from '@sentry/nextjs/config';
 import type { NextConfig } from 'next';
+import { withSentryConfig } from '@sentry/nextjs/config';
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -27,7 +27,6 @@ export default withSentryConfig(nextConfig, {
   telemetry: false,
   sourcemaps: { disable: uploadSourceMaps ? false : true },
   widenClientFileUpload: false,
-  automaticVercelMonitors: false,
   errorHandler() {
     // Source map upload is optional; a missing token or Sentry outage must not fail the build.
   },

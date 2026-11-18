@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/nextjs';
 
-import { registerErrorCapture, sentryInitOptions } from '@/lib/observability/sentry-runtime';
+import { registerErrorCapture } from '@/lib/observability/errors';
+import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 
 const options = sentryInitOptions();
 if (options) {

@@ -1,6 +1,11 @@
-import { redactSentryEvent, sanitizeError, safeOrbitTags, type SentryLikeEvent } from '@/lib/observability/redact';
+import {
+  redactSentryEvent,
+  safeOrbitTags,
+  sanitizeError,
+  type SentryLikeEvent,
+} from '@/lib/observability/redact';
 
-export const failureOperations = {
+const failureOperations = {
   'web.request': 'Orbit web request failed',
   'worker.queue': 'Orbit worker queue operation failed',
   'worker.inference': 'Orbit model inference failed',
@@ -9,16 +14,16 @@ export const failureOperations = {
   'worker.runtime': 'Orbit runtime fault',
 } as const;
 
-export type FailureOperation = keyof typeof failureOperations;
+type FailureOperation = keyof typeof failureOperations;
 
-export type FailureCorrelation = {
+export interface FailureCorrelation {
   agentId?: string;
   runId?: string;
   jobId?: string;
   lifecycle?: string;
   stage?: 'evaluator' | 'main';
   traceId?: string;
-};
+}
 
 type Capture = (event: {
   operation: FailureOperation;
@@ -58,6 +63,6 @@ export function reportFailure(
   }
 }
 
-export function sentryBeforeSend<T extends SentryLikeEvent>(event: T): T {
-  return redactSentryEvent(event);
+export function sentryBeforeSend<T>(event: T): T {
+  return redactSentryEvent(event as SentryLikeEvent) as T;
 }

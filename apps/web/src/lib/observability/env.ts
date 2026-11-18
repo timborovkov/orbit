@@ -82,24 +82,8 @@ const observability = z
       'NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE',
     ),
     SENTRY_AUTH_TOKEN: optionalSecret,
-    SENTRY_ORG: z.preprocess(
-      emptyToUndefined,
-      z
-        .string()
-        .trim()
-        .min(1)
-        .max(120)
-        .optional(),
-    ),
-    SENTRY_PROJECT: z.preprocess(
-      emptyToUndefined,
-      z
-        .string()
-        .trim()
-        .min(1)
-        .max(120)
-        .optional(),
-    ),
+    SENTRY_ORG: z.preprocess(emptyToUndefined, z.string().trim().min(1).max(120).optional()),
+    SENTRY_PROJECT: z.preprocess(emptyToUndefined, z.string().trim().min(1).max(120).optional()),
     LANGFUSE_PUBLIC_KEY: optionalSecret,
     LANGFUSE_SECRET_KEY: optionalSecret,
     LANGFUSE_BASE_URL: z.preprocess(emptyToUndefined, z.string().optional()),
@@ -150,7 +134,7 @@ const observability = z
     }
   });
 
-export type ObservabilityEnv = {
+export interface ObservabilityEnv {
   sentryDsn?: string;
   nextPublicSentryDsn?: string;
   sentryTracesSampleRate: number;
@@ -164,7 +148,7 @@ export type ObservabilityEnv = {
     baseUrl: string;
     captureContent: boolean;
   };
-};
+}
 
 export function parseObservabilityEnv(
   input: Record<string, string | undefined> = process.env,

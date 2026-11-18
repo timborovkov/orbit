@@ -1,3 +1,5 @@
+import * as Sentry from '@sentry/nextjs';
+
 export async function register() {
   if (
     process.env.NEXT_RUNTIME === 'nodejs' &&
@@ -25,9 +27,4 @@ export async function register() {
   }
 }
 
-export async function onRequestError(
-  ...args: Parameters<(typeof import('@sentry/nextjs'))['captureRequestError']>
-) {
-  const Sentry = await import('@sentry/nextjs');
-  Sentry.captureRequestError(...args);
-}
+export const onRequestError = Sentry.captureRequestError;

@@ -1,5 +1,4 @@
 import { hostname } from 'node:os';
-
 import * as Sentry from '@sentry/bun';
 
 import { closeDb } from '@/lib/db';
@@ -60,7 +59,7 @@ const worker = startJobWorker({
           workerId,
         });
       } catch (error) {
-        void reportFailure('worker.queue', jobCorrelation(job), error);
+        reportFailure('worker.queue', jobCorrelation(job), error);
         throw error;
       }
     },
@@ -75,7 +74,7 @@ const worker = startJobWorker({
   },
   onError: (error) => {
     console.error('Worker queue operation failed.');
-    void reportFailure('worker.queue', {}, error);
+    reportFailure('worker.queue', {}, error);
   },
 });
 

@@ -453,7 +453,7 @@ async function processSimulationRun(
           try {
             await settle(response.costMicros);
           } catch {
-            void reportFailure('worker.settlement', {
+            reportFailure('worker.settlement', {
               runId: run.id,
               agentId: run.agentId,
               jobId: claim?.jobId,
@@ -546,7 +546,7 @@ async function processSimulationRun(
                 agent_id: run.agentId,
                 run_id: run.id,
               },
-              async () => undefined,
+              () => undefined,
             );
             return actions.map((action) => ({
               ...action,
@@ -601,7 +601,7 @@ async function processSimulationRun(
                   agent_id: run.agentId,
                   run_id: run.id,
                 },
-                async () => undefined,
+                () => undefined,
               );
               return {
                 ...action,

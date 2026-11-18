@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { parseEnv } from '@/lib/env';
 import { parseObservabilityEnv } from '@/lib/observability/env';
 import { reportFailure } from '@/lib/observability/errors';
-import { redactSentryEvent, redactString, redactValue, safeOrbitTags } from '@/lib/observability/redact';
+import {
+  redactSentryEvent,
+  redactString,
+  redactValue,
+  safeOrbitTags,
+} from '@/lib/observability/redact';
 import {
   createRunTelemetry,
   flushTelemetry,
@@ -61,7 +66,9 @@ describe('observability env validation', () => {
     expect(parseObservabilityEnv({}).sentryDsn).toBeUndefined();
     expect(parseObservabilityEnv({}).langfuse).toBeUndefined();
     expect(parseEnv(production).observability.langfuse).toBeUndefined();
-    expect(parseWorkerEnv({ DATABASE_URL: production.DATABASE_URL }).observability.sentryDsn).toBeUndefined();
+    expect(
+      parseWorkerEnv({ DATABASE_URL: production.DATABASE_URL }).observability.sentryDsn,
+    ).toBeUndefined();
   });
 
   test('treats empty telemetry strings as unset', () => {
@@ -132,7 +139,10 @@ describe('redaction', () => {
       redactValue(
         {
           OPENROUTER_API_KEY: 'sk-or-secret',
-          nested: { authorization: 'Bearer abc', prompt: 'PRIVATE_SYSTEM_PROMPT that is long enough to drop' },
+          nested: {
+            authorization: 'Bearer abc',
+            prompt: 'PRIVATE_SYSTEM_PROMPT that is long enough to drop',
+          },
         },
         { captureContent: false },
       ),
@@ -174,8 +184,13 @@ describe('redaction', () => {
     expect(event.request?.data).toBeUndefined();
     expect(event.request?.cookies).toBeUndefined();
     expect(event.request?.headers?.authorization).toBeUndefined();
-    expect(event.tags).toEqual({ 'orbit.run_id': runId, 'orbit.stage': 'main' });
-    expect(JSON.stringify(event)).not.toMatch(/PRIVATE_|sk-or-secret|secret-token|admin@example.com/);
+    expect(event.tags as Record<string, unknown>).toEqual({
+      'orbit.run_id': runId,
+      'orbit.stage': 'main',
+    });
+    expect(JSON.stringify(event)).not.toMatch(
+      /PRIVATE_|sk-or-secret|secret-token|admin@example.com/,
+    );
   });
 });
 
@@ -183,10 +198,13 @@ describe('disabled observability', () => {
   test('does not make network calls when exporters are unset', async () => {
     const calls: string[] = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input, init) => {
-      calls.push(String(input));
-      return originalFetch(input, init);
-    };
+    globalThis.fetch = Object.assign(
+      async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        calls.push(String(input));
+        return originalFetch(input, init);
+      },
+      originalFetch,
+    );
     try {
       const telemetry = createRunTelemetry({
         runId,
@@ -250,7 +268,13 @@ describe('run spans', () => {
     );
     await withOrbitSpan(
       'orbit.policy',
-      { tool: 'reply', stage: 'main', policy_decision: 'suppressed', run_id: runId, agent_id: agentId },
+      {
+        tool: 'reply',
+        stage: 'main',
+        policy_decision: 'suppressed',
+        run_id: runId,
+        agent_id: agentId,
+      },
       async () => 'ok',
     );
     await withOrbitSpan(
@@ -262,10 +286,12 @@ describe('run spans', () => {
     await telemetry.finish(false);
     await flushTelemetry();
 
-    const serialized = JSON.stringify(getTestSpans().map((span) => ({
-      name: span.name,
-      attributes: span.attributes,
-    })));
+    const serialized = JSON.stringify(
+      getTestSpans().map((span) => ({
+        name: span.name,
+        attributes: span.attributes,
+      })),
+    );
     expect(serialized).toContain('orbit.run');
     expect(serialized).toContain('orbit.evaluator');
     expect(serialized).toContain('orbit.policy');

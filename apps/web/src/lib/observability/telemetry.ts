@@ -16,17 +16,21 @@ import { reportFailure, type FailureCorrelation } from '@/lib/observability/erro
 import { redactValue, safeOrbitTags } from '@/lib/observability/redact';
 import type { ModelCall } from '@/lib/runtime/simulation';
 
-type LangfuseHandle = {
+interface LangfuseHandle {
   processor: { forceFlush(): Promise<void>; shutdown(): Promise<void> };
-  client: { flush(): Promise<void>; shutdown(): Promise<void>; score: { activeTrace(data: ScoreInput): void } };
-};
+  client: {
+    flush(): Promise<void>;
+    shutdown(): Promise<void>;
+    score: { activeTrace(data: ScoreInput): void };
+  };
+}
 
-type ScoreInput = {
+interface ScoreInput {
   name: string;
   value: number;
   dataType?: 'NUMERIC' | 'BOOLEAN' | 'CATEGORICAL';
   comment?: string;
-};
+}
 
 let testExporter: InMemorySpanExporter | undefined;
 let testProvider: BasicTracerProvider | undefined;
@@ -136,13 +140,13 @@ export async function resetTestTelemetry() {
 export async function withOrbitSpan<T>(
   name: string,
   attributes: Record<string, string | number | boolean | undefined>,
-  fn: () => Promise<T>,
+  fn: () => Promise<T> | T,
 ): Promise<T> {
   const tracer = await getTracer();
-  if (!tracer) return fn();
+  if (!tracer) return await fn();
   const span = tracer.startSpan(name, { attributes: safeOrbitTags(attributes) }, context.active());
   try {
-    return await context.with(trace.setSpan(context.active(), span), fn);
+    return await context.with(trace.setSpan(context.active(), span), async () => await fn());
   } catch (error) {
     span.setStatus({ code: SpanStatusCode.ERROR, message: 'failed' });
     throw error;
@@ -175,7 +179,7 @@ async function aiSdkTelemetry(functionId: string): Promise<TelemetryOptions | un
   }
 }
 
-export type RunTelemetryContext = {
+export interface RunTelemetryContext {
   runId: string;
   agentId: string;
   configurationId: string;
@@ -183,7 +187,7 @@ export type RunTelemetryContext = {
   jobId?: string;
   lifecycle?: string;
   trigger?: string;
-};
+}
 
 export function createRunTelemetry(run: RunTelemetryContext) {
   const tags = safeOrbitTags({
@@ -305,11 +309,7 @@ export function createRunTelemetry(run: RunTelemetryContext) {
       } catch (error) {
         span?.setStatus({ code: SpanStatusCode.ERROR, message: 'Inference failed' });
         if (!request.signal.aborted) {
-          reportFailure(
-            'worker.inference',
-            { ...correlation, stage, traceId },
-            error,
-          );
+          reportFailure('worker.inference', { ...correlation, stage, traceId }, error);
         }
         throw error;
       } finally {
@@ -329,7 +329,8 @@ export function createRunTelemetry(run: RunTelemetryContext) {
     finish: async (failed: boolean) => {
       try {
         await ready;
-        if (failed) root?.setStatus({ code: SpanStatusCode.ERROR, message: 'Run did not complete' });
+        if (failed)
+          root?.setStatus({ code: SpanStatusCode.ERROR, message: 'Run did not complete' });
         root?.end();
       } catch (error) {
         swallow('Langfuse run span finish failed', error);
@@ -349,7 +350,9 @@ export function recordLangfuseScore(score: ScoreInput) {
       name,
       value: score.value,
       dataType: score.dataType ?? 'NUMERIC',
-      comment: score.comment ? String(redactValue(score.comment, { captureContent: false })) : undefined,
+      comment: score.comment
+        ? String(redactValue(score.comment, { captureContent: false }))
+        : undefined,
     });
   } catch (error) {
     swallow('Langfuse score failed', error);

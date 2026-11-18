@@ -8,7 +8,6 @@ if (dsn) {
   Sentry.init({
     dsn,
     tracesSampleRate: Number.isFinite(sample) && sample >= 0 && sample <= 1 ? sample : 0.1,
-    sendDefaultPii: false,
     beforeSend: sentryBeforeSend,
   });
 }
