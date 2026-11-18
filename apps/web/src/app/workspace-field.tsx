@@ -2,9 +2,22 @@
 
 import { useState, useSyncExternalStore } from 'react';
 
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+
 const subscribe = () => () => undefined;
 const clientReady = () => true;
 const serverReady = () => false;
+
+const controlClassName = 'm-0';
 
 export function WorkspaceField({
   id,
@@ -15,6 +28,8 @@ export function WorkspaceField({
   required = false,
   maxLength = 12000,
   rows = 3,
+  description,
+  error,
 }: {
   id: string;
   name: string;
@@ -24,9 +39,14 @@ export function WorkspaceField({
   required?: boolean;
   maxLength?: number;
   rows?: number;
+  description?: string;
+  error?: string;
 }) {
   const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
   const [value, setValue] = useState(initialValue);
+  const descriptionId = description ? `${id}-description` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [errorId, descriptionId].filter(Boolean).join(' ') || undefined;
   const props = {
     id,
     name,
@@ -34,13 +54,16 @@ export function WorkspaceField({
     required,
     maxLength,
     readOnly: !hydrated,
+    'aria-invalid': Boolean(error) || undefined,
+    'aria-describedby': describedBy,
+    className: controlClassName,
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setValue(event.target.value);
     },
   };
   return (
-    <div>
-      <label htmlFor={id}>
+    <Field data-invalid={error ? true : undefined}>
+      <FieldLabel htmlFor={id}>
         {label}
         {required && (
           <span className="field-required-mark" aria-label="required">
@@ -48,9 +71,11 @@ export function WorkspaceField({
             *
           </span>
         )}
-      </label>
-      {multiline ? <textarea {...props} rows={rows} /> : <input {...props} />}
-    </div>
+      </FieldLabel>
+      {multiline ? <Textarea {...props} rows={rows} /> : <Input {...props} />}
+      {description ? <FieldDescription id={descriptionId}>{description}</FieldDescription> : null}
+      {error ? <FieldError id={errorId}>{error}</FieldError> : null}
+    </Field>
   );
 }
 
@@ -60,38 +85,46 @@ export function WorkspaceSelect({
   label,
   initialValue,
   options,
+  description,
+  error,
 }: {
   id: string;
   name: string;
   label: string;
   initialValue: string;
   options: { value: string; label: string }[];
+  description?: string;
+  error?: string;
 }) {
   const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
   const [value, setValue] = useState(initialValue);
+  const descriptionId = description ? `${id}-description` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [errorId, descriptionId].filter(Boolean).join(' ') || undefined;
   return (
-    <div>
-      <label htmlFor={id}>{label}</label>
-      <select
-        disabled={!hydrated}
-        id={id}
-        name={name}
-        value={value}
-        onChange={(event) => {
-          const selected = event.currentTarget.value;
-          setValue(selected);
-          // Preserve the chosen replay version through the form's native reset.
-          for (const option of event.currentTarget.options) {
-            option.defaultSelected = option.value === selected;
-          }
-        }}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
+    <Field data-invalid={error ? true : undefined}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <input type="hidden" name={name} value={value} />
+      <Select value={value} onValueChange={setValue} disabled={!hydrated}>
+        <SelectTrigger
+          id={id}
+          className="w-full min-w-0"
+          aria-label={label}
+          aria-invalid={Boolean(error) || undefined}
+          aria-describedby={describedBy}
+        >
+          <SelectValue placeholder="Choose an option" />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {description ? <FieldDescription id={descriptionId}>{description}</FieldDescription> : null}
+      {error ? <FieldError id={errorId}>{error}</FieldError> : null}
+    </Field>
   );
 }

@@ -5,22 +5,27 @@ import postgres from 'postgres';
 
 const sql = postgres('postgres://orbit:orbit_dev@127.0.0.1:5432/orbit_test');
 
-/** Runner-writable output; also mirror into Cursor artifacts when that path exists. */
-const ARTIFACT_DIRS = (() => {
-  const dirs = [path.resolve('test-results/approvals-artifacts')];
-  const cursor = process.env.CURSOR_ARTIFACTS_DIR ?? '/opt/cursor/artifacts';
+/**
+ * Turbopack is rooted at the monorepo (`next.config.ts`), so writing under the
+ * repo (e.g. test-results/) during a live `next dev` remounts the app. Capture
+ * outside the repo first, then mirror after the suite finishes.
+ */
+const LIVE_ARTIFACT_DIR = (() => {
+  const preferred = process.env.CURSOR_ARTIFACTS_DIR ?? '/opt/cursor/artifacts';
   try {
-    mkdirSync(cursor, { recursive: true });
-    dirs.push(cursor);
+    mkdirSync(preferred, { recursive: true });
+    return preferred;
   } catch {
-    // GitHub runners cannot write under /opt; keep the repo-relative dir only.
+    const fallback = '/tmp/approvals-artifacts';
+    mkdirSync(fallback, { recursive: true });
+    return fallback;
   }
-  for (const dir of dirs) mkdirSync(dir, { recursive: true });
-  return dirs;
 })();
+const POST_RUN_ARTIFACT_DIR = path.resolve('test-results/approvals-artifacts');
+const capturedNames: string[] = [];
 
 function artifactPath(name: string) {
-  return path.join(ARTIFACT_DIRS[0], name);
+  return path.join(LIVE_ARTIFACT_DIR, name);
 }
 
 async function screenshotToArtifacts(
@@ -30,25 +35,35 @@ async function screenshotToArtifacts(
 ) {
   const primary = artifactPath(name);
   await page.screenshot({ ...options, path: primary });
-  for (const dir of ARTIFACT_DIRS.slice(1)) {
-    copyFileSync(primary, path.join(dir, name));
-  }
+  capturedNames.push(name);
 }
+
+test.afterAll(async () => {
+  try {
+    mkdirSync(POST_RUN_ARTIFACT_DIR, { recursive: true });
+    for (const name of capturedNames) {
+      copyFileSync(path.join(LIVE_ARTIFACT_DIR, name), path.join(POST_RUN_ARTIFACT_DIR, name));
+    }
+  } catch {
+    // CI without /opt still keeps /tmp captures; ignore mirror failures.
+  }
+  await sql.end();
+});
 
 test.beforeEach(async () => {
   await sql`TRUNCATE recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 
-test.afterAll(async () => {
-  await sql.end();
-});
-
 async function hideDevChrome(page: Page) {
-  await page.addStyleTag({
-    content:
-      'nextjs-portal, [data-next-badge-root], [data-nextjs-toast], [data-nextjs-dev-overlay], #__next-build-watcher { display: none !important; }',
-  });
+  try {
+    await page.addStyleTag({
+      content:
+        'nextjs-portal, [data-next-badge-root], [data-nextjs-toast], [data-nextjs-dev-overlay], #__next-build-watcher { display: none !important; }',
+    });
+  } catch {
+    // Ignore when Turbopack remounts mid-injection.
+  }
 }
 
 async function setTheme(page: Page, theme: 'light' | 'dark') {
@@ -60,16 +75,44 @@ async function setTheme(page: Page, theme: 'light' | 'dark') {
 }
 
 async function preparePage(page: Page, theme: 'light' | 'dark') {
-  await expect(page.locator('body')).toBeVisible();
-  await setTheme(page, theme);
-  // Dev HMR can remount between evaluate and style injection; retry once.
-  try {
-    await hideDevChrome(page);
-  } catch {
-    await page.waitForLoadState('load');
-    await setTheme(page, theme);
-    await hideDevChrome(page);
+  await page.waitForLoadState('domcontentloaded');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await setTheme(page, theme);
+      await hideDevChrome(page);
+      return;
+    } catch {
+      await page.waitForLoadState('load');
+    }
   }
+  await setTheme(page, theme);
+  await hideDevChrome(page);
+}
+
+/** Open Access → Approvals in the #24 AccessWorkbench (left nav or compact Select). */
+async function openAccessApprovals(page: Page) {
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30000 });
+  const accessTab = page.getByRole('tab', { name: 'Access' });
+  const compactWorkspace = page.getByLabel('Agent workspace section');
+  // Wait for hydration: either desktop tabs or the ≤600px Select.
+  await expect(accessTab.or(compactWorkspace)).toBeVisible({ timeout: 30000 });
+  if (await accessTab.isVisible()) {
+    await accessTab.click();
+  } else {
+    await compactWorkspace.click();
+    await page.getByRole('option', { name: /^Access/ }).click();
+  }
+  const navButton = page.locator('.access-sections button', { hasText: 'Approvals' });
+  const compactAccess = page.getByLabel('Access section', { exact: true });
+  await expect(navButton.or(compactAccess).first()).toBeVisible({ timeout: 15000 });
+  if (await navButton.isVisible()) {
+    await navButton.click();
+  } else {
+    // ≤900px: AccessWorkbench collapses section nav to a Select.
+    await compactAccess.click();
+    await page.getByRole('option', { name: 'Approvals' }).click();
+  }
+  await expect(page.getByTestId('approval-settings')).toBeVisible({ timeout: 15000 });
 }
 
 async function seedApprovals() {
@@ -111,7 +154,7 @@ async function seedApprovals() {
 }
 
 test('Approvals page and agent approval settings screenshots', async ({ page }) => {
-  test.setTimeout(180000);
+  test.setTimeout(240000);
   const agent = await seedApprovals();
 
   for (const theme of ['light', 'dark'] as const) {
@@ -149,9 +192,8 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`/agents/${agent.id}`, { waitUntil: 'load' });
     await preparePage(page, theme);
-    await page.getByRole('tab', { name: 'Access' }).click();
+    await openAccessApprovals(page);
     const approvalSettings = page.getByTestId('approval-settings');
-    await expect(approvalSettings).toBeVisible();
     await approvalSettings.scrollIntoViewIfNeeded();
     const spend = page.locator('.approval-spend-field');
     await spend.scrollIntoViewIfNeeded();
@@ -176,45 +218,32 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
         });
       }
     }
-    const box = await approvalSettings.boundingBox();
+    // Capture the Access workbench with Approvals section active (nav + panel).
     await screenshotToArtifacts(page, `agent-approval-settings-${theme}-desktop-1440x900.png`, {
-      clip: box
-        ? {
-            x: Math.max(0, box.x - 32),
-            y: Math.max(0, box.y - 24),
-            width: Math.min(1400, box.width + 64),
-            height: Math.min(900, box.height + 48),
-          }
-        : undefined,
+      fullPage: false,
     });
     await page.setViewportSize({ width: 390, height: 844 });
-    await approvalSettings.scrollIntoViewIfNeeded();
-    const mobileBox = await approvalSettings.boundingBox();
+    await openAccessApprovals(page);
     await screenshotToArtifacts(page, `agent-approval-settings-${theme}-mobile-390x844.png`, {
-      clip: mobileBox
-        ? {
-            x: Math.max(0, mobileBox.x - 8),
-            y: Math.max(0, mobileBox.y - 8),
-            width: Math.min(390, mobileBox.width + 16),
-            height: Math.min(1400, mobileBox.height + 16),
-          }
-        : undefined,
+      fullPage: false,
     });
   }
 
   await sql`DELETE FROM action_intents WHERE review_status = 'pending'`;
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/approvals', { waitUntil: 'load' });
-  await preparePage(page, 'light');
-  await expect(page.getByTestId('approvals-empty')).toBeVisible();
-  await screenshotToArtifacts(page, 'approvals-empty-light-desktop-1440x900.png', {
-    fullPage: true,
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await hideDevChrome(page);
-  await screenshotToArtifacts(page, 'approvals-empty-light-mobile-390x844.png', {
-    fullPage: true,
-  });
+  for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/approvals', { waitUntil: 'load' });
+    await preparePage(page, theme);
+    await expect(page.getByTestId('approvals-empty')).toBeVisible();
+    await screenshotToArtifacts(page, `approvals-empty-${theme}-desktop-1440x900.png`, {
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await hideDevChrome(page);
+    await screenshotToArtifacts(page, `approvals-empty-${theme}-mobile-390x844.png`, {
+      fullPage: true,
+    });
+  }
 
   // Keep canonical artifact names for the PR summary.
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -233,31 +262,13 @@ test('Approvals page and agent approval settings screenshots', async ({ page }) 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/agents/${agent.id}`, { waitUntil: 'load' });
   await preparePage(page, 'light');
-  await page.getByRole('tab', { name: 'Access' }).click();
-  const settings = page.getByTestId('approval-settings');
-  await settings.scrollIntoViewIfNeeded();
-  const settingsBox = await settings.boundingBox();
+  await openAccessApprovals(page);
   await screenshotToArtifacts(page, 'agent-approval-settings-desktop-1440x900.png', {
-    clip: settingsBox
-      ? {
-          x: Math.max(0, settingsBox.x - 32),
-          y: Math.max(0, settingsBox.y - 24),
-          width: Math.min(1400, settingsBox.width + 64),
-          height: Math.min(900, settingsBox.height + 48),
-        }
-      : undefined,
+    fullPage: false,
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await settings.scrollIntoViewIfNeeded();
-  const settingsMobile = await settings.boundingBox();
+  await openAccessApprovals(page);
   await screenshotToArtifacts(page, 'agent-approval-settings-mobile-390x844.png', {
-    clip: settingsMobile
-      ? {
-          x: Math.max(0, settingsMobile.x - 8),
-          y: Math.max(0, settingsMobile.y - 8),
-          width: Math.min(390, settingsMobile.width + 16),
-          height: Math.min(1400, settingsMobile.height + 16),
-        }
-      : undefined,
+    fullPage: false,
   });
 });

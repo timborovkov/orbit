@@ -74,6 +74,22 @@ export function ConsentSettings({
           Record a recipient’s choice and the source of their consent for this agent.
         </p>
       </div>
+      <div className="consent-records-block">
+        <h3 className="consent-records-title">Existing consents</h3>
+        {consents.length > 0 ? (
+          <ul className="policy-records" aria-label="Recent consent records">
+            {consents.map((record) => (
+              <li key={JSON.stringify([record.recipient, record.scope])}>
+                <strong>{record.recipient}</strong> · {actionLabels[record.scope]} ·{' '}
+                {record.granted ? 'Granted' : 'Revoked'}
+                <p className="field-hint">{record.evidence}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted consent-records-empty">No consent records yet.</p>
+        )}
+      </div>
       <WorkspaceForm action={saveConsent} label="Save consent">
         <input type="hidden" name="agentId" value={agentId} />
         <FieldGroup className="gap-5">
@@ -83,6 +99,7 @@ export function ConsentSettings({
             label="Recipient ID"
             maxLength={120}
             required
+            description="Use the same recipient ID the playground consent checks will receive."
           />
           <WorkspaceSelect
             id="consent-scope"
@@ -110,20 +127,10 @@ export function ConsentSettings({
             label="Evidence reference"
             maxLength={1000}
             required
+            description="Link or note that shows where this choice was recorded."
           />
         </FieldGroup>
       </WorkspaceForm>
-      {consents.length > 0 && (
-        <ul className="policy-records" aria-label="Recent consent records">
-          {consents.map((record) => (
-            <li key={JSON.stringify([record.recipient, record.scope])}>
-              <strong>{record.recipient}</strong> · {actionLabels[record.scope]} ·{' '}
-              {record.granted ? 'Granted' : 'Revoked'}
-              <p className="field-hint">{record.evidence}</p>
-            </li>
-          ))}
-        </ul>
-      )}
     </section>
   );
 }

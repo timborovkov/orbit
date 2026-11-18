@@ -2,6 +2,9 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import postgres from 'postgres';
 
+import { capturePage } from './screenshot';
+import { openAccessSection, openWorkspaceTab } from './workspace-nav';
+
 const sql = postgres('postgres://orbit:orbit_dev@localhost:5432/orbit_test');
 test.afterAll(async () => {
   await sql.end();
@@ -20,7 +23,8 @@ test('template copies, independent versions, encrypted keys and durable manual r
     ['Sarah', 'Customer Support'],
   ]) {
     await page.getByRole('button', { name: 'Create agent', exact: true }).click();
-    await page.getByLabel('Template', { exact: true }).selectOption({ label: template });
+    await page.getByLabel('Template', { exact: true }).click();
+    await page.getByRole('option', { name: template, exact: true }).click();
     await page.getByLabel(/^Name/).fill(name);
     await expect(page.getByLabel(/^Mission/)).not.toHaveValue('');
     await page.getByRole('button', { name: 'Create shadow agent' }).click();
@@ -35,8 +39,8 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await page
     .getByLabel('Personality', { exact: true })
     .fill('Direct, energetic, and always concise.');
-  await page.getByRole('tab', { name: 'Playground', exact: true }).click();
-  await page.getByRole('tab', { name: 'Configuration', exact: true }).click();
+  await openWorkspaceTab(page, 'Playground');
+  await openWorkspaceTab(page, 'Configuration');
   await expect(page.getByLabel('Personality', { exact: true })).toHaveValue(
     'Direct, energetic, and always concise.',
   );
@@ -61,21 +65,16 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await expect(page.getByText('A safe place to try things')).toBeVisible();
   for (const mode of ['Light', 'Dark']) {
     await page.getByRole('radio', { name: mode, exact: true }).check();
-    await page.screenshot({
-      path: `test-results/agent-Playground-empty-${mode}.png`,
-      fullPage: true,
-    });
+    await capturePage(page, `test-results/agent-Playground-empty-${mode}.png`);
   }
   await page.getByRole('radio', { name: 'Light', exact: true }).check();
-  await page.getByRole('tab', { name: 'Access', exact: true }).click();
+  await openWorkspaceTab(page, 'Access');
+  await openAccessSection(page, 'OpenRouter');
   await expect(page.getByRole('heading', { name: 'No key available', exact: true })).toBeVisible();
   await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.screenshot({
-      path: `test-results/access-none-Light-${width}.png`,
-      fullPage: true,
-    });
+    await capturePage(page, `test-results/access-none-Light-${width}.png`);
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByLabel('Agent API key', { exact: true }).fill('test-only-secret-never-use');
@@ -88,10 +87,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await expect(page.getByText('Agent key', { exact: true })).toBeVisible();
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.screenshot({
-      path: `test-results/access-agent-Light-${width}.png`,
-      fullPage: true,
-    });
+    await capturePage(page, `test-results/access-agent-Light-${width}.png`);
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   const [john] =
@@ -100,20 +96,23 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await page.getByRole('button', { name: 'Remove agent key', exact: true }).click();
   await expect(page.getByText('Credential removed.', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'No key available', exact: true })).toBeVisible();
-  await page.getByRole('tab', { name: 'Playground', exact: true }).click();
+  await openWorkspaceTab(page, 'Playground');
   const input = 'Can you help me with product setup and choosing a plan?';
-  await expect(page.getByLabel('Configuration version')).toHaveValue(
-    (await sql`SELECT id FROM agent_configurations WHERE agent_id=${john.id} AND version=2`)[0].id,
-  );
-  await page.getByLabel('Configuration version').selectOption({ label: 'Version 1 · John' });
-  await page.getByRole('tab', { name: 'Playground', exact: true }).click();
+  const version2 = (
+    await sql`SELECT id FROM agent_configurations WHERE agent_id=${john.id} AND version=2`
+  )[0].id;
+  await expect(page.getByLabel('Configuration version')).toContainText('Version 2 · John');
+  expect(version2).toBeTruthy();
+  await page.getByLabel('Configuration version').click();
+  await page.getByRole('option', { name: 'Version 1 · John', exact: true }).click();
+  await openWorkspaceTab(page, 'Playground');
   await page.getByLabel(/^Post or question/).fill(input);
-  await page.getByRole('button', { name: 'Queue simulation', exact: true }).click();
-  await expect(page.getByText('Simulation queued.', { exact: false })).toBeVisible();
-  await expect(page.getByLabel('Configuration version').locator('option:checked')).toHaveText(
-    'Version 1 · John',
-  );
-  await page.getByRole('tab', { name: /^History/ }).click();
+  await page.getByRole('button', { name: 'Submit', exact: true }).click();
+  await expect(page.getByText('Simulation queued', { exact: false })).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.getByLabel('Configuration version')).toContainText('Version 1 · John');
+  await openWorkspaceTab(page, /^History/);
   await expect
     .poll(async () => page.locator('#history .state-label').first().textContent(), {
       timeout: 30000,
@@ -124,12 +123,12 @@ test('template copies, independent versions, encrypted keys and durable manual r
     page.locator('#history').getByText('No OpenRouter credential available.', { exact: false }),
   ).toBeVisible();
   await page.reload();
-  await page.getByRole('tab', { name: /^History/ }).click();
+  await openWorkspaceTab(page, /^History/);
   await page.locator('.run-detail > summary').click();
   await expect(
     page.locator('.run-content').filter({ visible: true }).getByText(input, { exact: true }),
   ).toBeVisible();
-  await page.getByRole('tab', { name: 'Configuration', exact: true }).click();
+  await openWorkspaceTab(page, 'Configuration');
   await page.getByRole('button', { name: 'Models', exact: true }).click();
   await expect(page.getByLabel(/^Main model/)).toHaveValue('deepseek/deepseek-v4.1-flash-1017');
   await expect(page.getByLabel(/^Evaluator model/)).toHaveValue(
@@ -151,17 +150,17 @@ test('template copies, independent versions, encrypted keys and durable manual r
         ).violations,
       ).toEqual([]);
       if ([1440, 390].includes(width)) {
-        await page.screenshot({ path: `test-results/agent-${mode}-${width}.png`, fullPage: true });
+        await capturePage(page, `test-results/agent-${mode}-${width}.png`);
         for (const section of ['Behaviour', 'Models']) {
           await page.getByRole('button', { name: section, exact: true }).click();
-          await page.screenshot({
-            path: `test-results/agent-${section}-${mode}-${width}.png`,
-            fullPage: true,
-          });
+          await capturePage(page, `test-results/agent-${section}-${mode}-${width}.png`);
         }
         await page.getByRole('button', { name: 'Identity', exact: true }).click();
         for (const tab of ['Playground', 'History', 'Access']) {
-          await page.getByRole('tab', { name: new RegExp('^' + tab) }).click();
+          await openWorkspaceTab(page, new RegExp('^' + tab));
+          if (tab === 'Access') {
+            await openAccessSection(page, 'OpenRouter');
+          }
           expect(
             await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
           ).toBe(true);
@@ -172,12 +171,9 @@ test('template copies, independent versions, encrypted keys and durable manual r
                 .analyze()
             ).violations,
           ).toEqual([]);
-          await page.screenshot({
-            path: `test-results/agent-${tab}-${mode}-${width}.png`,
-            fullPage: true,
-          });
+          await capturePage(page, `test-results/agent-${tab}-${mode}-${width}.png`);
         }
-        await page.getByRole('tab', { name: 'Configuration', exact: true }).click();
+        await openWorkspaceTab(page, 'Configuration');
       }
     }
   }
@@ -187,10 +183,12 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await expect(page.getByLabel('Personality', { exact: true })).toHaveValue(
     'Patient, empathetic and precise.',
   );
-  await page.getByRole('tab', { name: 'Playground', exact: true }).click();
+  await openWorkspaceTab(page, 'Playground');
   await page.getByLabel(/^Post or question/).fill(input);
-  await page.getByRole('button', { name: 'Queue simulation', exact: true }).click();
-  await expect(page.getByText('Simulation queued.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Submit', exact: true }).click();
+  await expect(page.getByText('Simulation queued', { exact: false })).toBeVisible({
+    timeout: 15000,
+  });
   const versions =
     await sql`SELECT a.name,c.version,c.config FROM agents a JOIN agent_configurations c ON c.agent_id=a.id ORDER BY a.name,c.version`;
   expect(versions.map((v) => `${v.name}:${v.version}`)).toEqual(['John:1', 'John:2', 'Sarah:1']);
@@ -223,10 +221,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
             .analyze()
         ).violations,
       ).toEqual([]);
-      await page.screenshot({
-        path: `test-results/templates-${mode}-${width}.png`,
-        fullPage: true,
-      });
+      await capturePage(page, `test-results/templates-${mode}-${width}.png`);
     }
   }
 

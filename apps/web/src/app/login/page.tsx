@@ -6,6 +6,8 @@ import { LockKeyhole } from 'lucide-react';
 import { login } from '@/actions/auth';
 import { PasswordField } from '@/app/login/password-field';
 import { ThemeSwitch } from '@/app/theme';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 import { env } from '@/lib/env';
 
@@ -17,6 +19,7 @@ export default async function Login({
 }) {
   if (env().AUTH_DISABLED) redirect('/');
   const { error } = await searchParams;
+  const invalid = Boolean(error);
   return (
     <div className="login-shell">
       <a className="skip-link" href="#login-main">
@@ -44,30 +47,36 @@ export default async function Login({
             <p className="muted">Access your private workspace.</p>
           </div>
           <form action={login}>
-            <label htmlFor="email">
-              Email <span className="field-required">Required</span>
-            </label>
-            <input
-              id="email"
-              name="email"
-              aria-describedby={error ? 'login-error' : undefined}
-              type="email"
-              autoComplete="username"
-              autoCapitalize="none"
-              spellCheck={false}
-              required
-            />
-            <PasswordField error={Boolean(error)} />
-            {error && (
-              <p id="login-error" role="alert" className="form-error">
-                {error === 'limited'
-                  ? 'Too many attempts. Try again in 15 minutes.'
-                  : 'Unable to sign in. Check your credentials.'}
-              </p>
-            )}
-            <SubmitButton className="login-submit" pendingLabel="Signing in…">
-              Sign in
-            </SubmitButton>
+            <FieldGroup className="gap-5">
+              <Field data-invalid={invalid || undefined}>
+                <FieldLabel htmlFor="email">
+                  Email <span className="field-required">Required</span>
+                </FieldLabel>
+                <Input
+                  id="email"
+                  name="email"
+                  aria-describedby={error ? 'login-error' : undefined}
+                  aria-invalid={invalid || undefined}
+                  type="email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  required
+                  className="m-0 min-h-11"
+                />
+              </Field>
+              <PasswordField error={invalid} />
+              {error && (
+                <FieldError id="login-error" className="form-error m-0">
+                  {error === 'limited'
+                    ? 'Too many attempts. Try again in 15 minutes.'
+                    : 'Unable to sign in. Check your credentials.'}
+                </FieldError>
+              )}
+              <SubmitButton className="login-submit" pendingLabel="Signing in…">
+                Sign in
+              </SubmitButton>
+            </FieldGroup>
           </form>
           <div className="login-note">
             <LockKeyhole size={12} />

@@ -83,7 +83,8 @@ export function ApprovalToolsForm({
       <FieldSet>
         <FieldLegend variant="label">Actions requiring approval</FieldLegend>
         <FieldDescription>
-          Toggle actions that must wait for an administrator before they can proceed.
+          Toggle actions that must wait for an administrator before they can proceed. Introductions
+          and escalations always require approval.
         </FieldDescription>
         <FieldGroup className="approval-tool-list gap-0" data-slot="checkbox-group">
           {tools.map((tool) => {
