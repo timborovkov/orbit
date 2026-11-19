@@ -25,7 +25,10 @@ import {
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
 import { emailKnowledgeQuery } from '@/lib/runtime/email/input';
-import { proposeEmailReplyFromDraft } from '@/lib/runtime/email/propose';
+import {
+  proposeEmailReplyFromDraft,
+  recoverEmailReplyProposalIfNeeded,
+} from '@/lib/runtime/email/propose';
 import { EMAIL_DRAFT_JOB } from '@/lib/runtime/email/settings';
 import {
   isRetryableInfrastructureError,
@@ -556,7 +559,20 @@ async function processSimulationRun(
   });
 
   if (!claimed) return;
-  if (claimed.skip) return;
+  if (claimed.skip) {
+    // Completed email drafts must still have an approval intent. If proposal
+    // persistence failed after completion on an earlier attempt, recover here
+    // before exiting — retries otherwise skip completed runs forever.
+    if (origin === 'email' && claimed.run.status === 'completed' && !claimed.run.result.error) {
+      await recoverEmailReplyProposalIfNeeded({
+        agentId: claimed.run.agentId,
+        runId: claimed.run.id,
+        actor: claimed.run.actor,
+        result: claimed.run.result,
+      });
+    }
+    return;
+  }
 
   const { run, config, budgets, executionToken, expiresAt, agent } = claimed;
   // Refuse model work for paused/stopped agents even if a job was already claimed.
@@ -1015,6 +1031,17 @@ async function processSimulationRun(
       else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
       try {
         const traceResult = { ...result, traceId: telemetry.traceId };
+        // Propose before flipping the run to completed so a transient failure
+        // leaves the run running and the job can retry. Idempotent recovery also
+        // runs when skipping already-completed email drafts (see claimed.skip).
+        if (origin === 'email' && !result.error) {
+          await proposeEmailReplyFromDraft({
+            agentId: run.agentId,
+            runId: run.id,
+            actor: run.actor,
+            result: traceResult,
+          });
+        }
         const owned = await retryableStore(() =>
           result.error
             ? updateIfOwned(run.id, executionToken, {
@@ -1039,19 +1066,6 @@ async function processSimulationRun(
                 ),
         );
         if (!owned.length) return;
-        if (origin === 'email' && !result.error) {
-          try {
-            await proposeEmailReplyFromDraft({
-              agentId: run.agentId,
-              runId: run.id,
-              actor: run.actor,
-              result: traceResult,
-            });
-          } catch {
-            // Proposal persistence failures must not undo a completed draft; the
-            // administrator can still open a review from the Email tab later.
-          }
-        }
       } catch (error) {
         // Paid-step burn: never complete the job while the run is still running. Persist the burn
         // markers when possible, then Retryable so the queue retries finalization only (simulate

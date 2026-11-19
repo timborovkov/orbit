@@ -9,7 +9,11 @@ import { startJobWorker } from '@/lib/queue/worker';
 import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
 import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
 import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
-import { processEmailSendJob } from '@/lib/runtime/email/send';
+import {
+  finalizeExhaustedOutboundJob,
+  processEmailSendJob,
+  reconcileDeadOutboundJobs,
+} from '@/lib/runtime/email/send';
 import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB, EMAIL_SEND_JOB } from '@/lib/runtime/email/settings';
 import {
   finalizeExhaustedSimulationJob,
@@ -117,6 +121,10 @@ const worker = startJobWorker({
       await finalizeExhaustedSimulationJob(job.payload, error);
       return;
     }
+    if (job.type === EMAIL_SEND_JOB) {
+      await finalizeExhaustedOutboundJob(job.payload, error);
+      return;
+    }
     if (job.type === KNOWLEDGE_JOB_TYPE) {
       await finalizeFailedKnowledgeJob(job.payload, error);
     }
@@ -125,6 +133,7 @@ const worker = startJobWorker({
     await Promise.all([
       reconcileOrphanedSimulationRuns(),
       reconcileDeadKnowledgeJobs(),
+      reconcileDeadOutboundJobs(),
       expireStaleApprovals(),
       reconcileSuspendedApprovals(),
     ]);

@@ -19,9 +19,12 @@ CREATE TABLE outbound_actions (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   dispatched_at timestamptz,
-  completed_at timestamptz,
-  FOREIGN KEY (agent_id, thread_id) REFERENCES email_threads(agent_id, id) ON DELETE SET NULL
+  completed_at timestamptz
 );
+
+-- thread_id is informational only. A composite FK to email_threads(agent_id, id)
+-- with ON DELETE SET NULL would also null agent_id (NOT NULL) and break thread merges.
+
 
 CREATE INDEX outbound_actions_agent_thread ON outbound_actions (agent_id, thread_id, created_at DESC);
 CREATE INDEX outbound_actions_email_message ON outbound_actions (email_message_id);

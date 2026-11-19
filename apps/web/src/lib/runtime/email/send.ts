@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
 import { recipientConsentFailure } from '@/lib/policy/consent';
@@ -19,7 +19,7 @@ import {
   markOutboundStatus,
   recordOutboundUsage,
 } from '@/lib/runtime/outbound/dispatch';
-import { EMAIL_SEND_ACTION } from '@/lib/runtime/outbound/types';
+import { EMAIL_SEND_ACTION, EMAIL_SEND_JOB } from '@/lib/runtime/outbound/types';
 import { emailMailboxes, emailMessages, outboundActions, policyDecisions } from '@/lib/schema';
 
 function draftBody(payload: Record<string, unknown>, fallback: string): string {
@@ -296,4 +296,90 @@ export async function processEmailSendJob(
       completedAt: new Date(),
     });
   });
+}
+
+function exhaustedOutboundMessage(reason: string) {
+  const detail = reason.trim().slice(0, 200);
+  return detail
+    ? `Outbound send retries exhausted (${detail}).`
+    : 'Outbound send retries exhausted after repeated provider failures.';
+}
+
+/**
+ * When the queue dead-letters an `email.send` job, mark non-terminal outbound
+ * rows failed (or reconcile as sent when a provider id was already recorded).
+ */
+export async function finalizeExhaustedOutboundJob(
+  payload: Record<string, unknown>,
+  reason: string,
+) {
+  const outboundId = typeof payload.outboundId === 'string' ? payload.outboundId : null;
+  if (!outboundId) return;
+  const inspectable = exhaustedOutboundMessage(reason);
+  await db().transaction(async (tx) => {
+    const row = (
+      await tx
+        .select()
+        .from(outboundActions)
+        .where(eq(outboundActions.id, outboundId))
+        .for('update')
+    ).at(0);
+    if (!row) return;
+    if (row.status === 'sent' || row.status === 'blocked' || row.status === 'failed') return;
+    if (row.providerMessageId) {
+      await markOutboundStatus(tx, outboundId, {
+        status: 'sent',
+        provider: row.provider ?? 'resend',
+        providerMessageId: row.providerMessageId,
+        providerResult: row.providerResult ?? { reconciled: true },
+        completedAt: new Date(),
+      });
+      return;
+    }
+    await markOutboundStatus(tx, outboundId, {
+      status: 'failed',
+      reason: inspectable,
+      completedAt: new Date(),
+    });
+  });
+}
+
+/**
+ * Durable reconcile for dead `email.send` jobs whose onDeadLetter callback
+ * previously failed. Idempotent: only touches queued/sending rows linked to dead jobs.
+ */
+export async function reconcileDeadOutboundJobs() {
+  const inspectable = exhaustedOutboundMessage('reconciled after dead-letter callback failure');
+  await db().execute(sql`
+    UPDATE outbound_actions AS o
+    SET
+      status = CASE
+        WHEN o.provider_message_id IS NOT NULL THEN 'sent'
+        ELSE 'failed'
+      END,
+      reason = CASE
+        WHEN o.provider_message_id IS NOT NULL THEN NULL
+        ELSE ${inspectable}
+      END,
+      provider = CASE
+        WHEN o.provider_message_id IS NOT NULL THEN coalesce(o.provider, 'resend')
+        ELSE o.provider
+      END,
+      provider_result = CASE
+        WHEN o.provider_message_id IS NOT NULL THEN coalesce(o.provider_result, '{"reconciled":true}'::jsonb)
+        ELSE o.provider_result
+      END,
+      completed_at = coalesce(o.completed_at, now()),
+      updated_at = now()
+    WHERE o.status IN ('queued', 'sending')
+      AND EXISTS (
+        SELECT 1 FROM jobs AS j
+        WHERE j.status = 'dead'
+          AND j.type = ${EMAIL_SEND_JOB}
+          AND (
+            j.id = o.job_id
+            OR j.payload->>'outboundId' = o.id::text
+          )
+      )
+  `);
 }

@@ -156,11 +156,13 @@ function SelectedThread({
               {message.draft && <KnowledgeCitations sources={message.draft.sources} />}
             </section>
           )}
-          {message.review?.status !== 'pending' && message.draft && (
+          {message.review?.status !== 'pending' && (message.review?.draft ?? message.draft) && (
             <section className="email-draft">
               <h4>Reply draft</h4>
-              <p className="preserve-text">{message.draft.answer}</p>
-              <KnowledgeCitations sources={message.draft.sources} />
+              <p className="preserve-text">
+                {message.review?.draft ?? message.draft?.answer ?? ''}
+              </p>
+              {message.draft && <KnowledgeCitations sources={message.draft.sources} />}
             </section>
           )}
           {message.sendOutcome && <SendOutcome outcome={message.sendOutcome} />}

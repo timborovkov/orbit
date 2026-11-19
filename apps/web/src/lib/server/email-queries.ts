@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { recoverEmailReplyProposalIfNeeded } from '@/lib/runtime/email/propose';
 import { EMAIL_SEND_ACTION } from '@/lib/runtime/outbound/types';
 import { draftAnswerFromResult } from '@/lib/runtime/simulation';
 import {
@@ -65,7 +66,7 @@ export async function getEmailInbox(
     .orderBy(asc(emailMessages.threadId), desc(emailMessages.receivedAt), desc(emailMessages.id))
     .as('latest_email');
 
-  const [mailboxes, threadPage, selected, pending] = await Promise.all([
+  const [mailboxes, threadPage, selected, pendingReceive, pendingOutbound] = await Promise.all([
     store
       .select({ enabled: emailMailboxes.enabled, address: emailMailboxes.address })
       .from(emailMailboxes)
@@ -97,7 +98,18 @@ export async function getEmailInbox(
         ),
       )
       .limit(1),
+    store
+      .select({ id: outboundActions.id })
+      .from(outboundActions)
+      .where(
+        and(
+          eq(outboundActions.agentId, agentId),
+          inArray(outboundActions.status, ['queued', 'sending']),
+        ),
+      )
+      .limit(1),
   ]);
+  const pending = [...pendingReceive, ...pendingOutbound];
   const threads = threadPage.slice(0, THREADS_PER_PAGE);
   const selectedId = selected.at(0)?.id ?? threads.at(0)?.id;
   const messages = selectedId
@@ -125,7 +137,32 @@ export async function getEmailInbox(
         .limit(MESSAGES_PER_PAGE + 1)
     : [];
 
-  const messageIds = messages.slice(0, MESSAGES_PER_PAGE).map((message) => message.id);
+  const visible = messages.slice(0, MESSAGES_PER_PAGE);
+  // Email-tab recovery: completed drafts stranded without an approval intent
+  // (e.g. proposal failed after an older completion path) get an idempotent backfill.
+  await Promise.all(
+    visible.flatMap((message) => {
+      if (
+        message.runStatus !== 'completed' ||
+        !message.runId ||
+        !message.result ||
+        message.result.error
+      ) {
+        return [];
+      }
+      if (!draftAnswerFromResult(message.result)?.answer.trim()) return [];
+      return [
+        recoverEmailReplyProposalIfNeeded({
+          agentId,
+          runId: message.runId,
+          actor: 'system:email-recovery',
+          result: message.result,
+        }),
+      ];
+    }),
+  );
+
+  const messageIds = visible.map((message) => message.id);
   const [intents, outbounds] = messageIds.length
     ? await Promise.all([
         store

@@ -138,10 +138,15 @@ test('review, approve, reject, and send outcome at desktop and mobile', async ({
   const approved = await seedLiveAgentWithDraft();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/agents/${approved.agentId}?tab=email&emailThread=${approved.threadId}`);
-  await page.getByLabel('Reply draft').fill('Edited approved reply for screenshots.');
+  const editedBody = 'Edited approved reply for screenshots.';
+  await page.getByLabel('Reply draft').fill(editedBody);
   await page.getByRole('button', { name: 'Approve & queue' }).click();
   await expect(page.getByRole('region', { name: 'Send outcome' })).toContainText('Queued');
+  const emailPanel = page.getByRole('tabpanel', { name: 'Email' });
+  await expect(emailPanel.locator('.email-draft .preserve-text')).toHaveText(editedBody);
   await screenshotToArtifacts(page, 'email-reply-queued-desktop-1440.png', { fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await screenshotToArtifacts(page, 'email-reply-queued-mobile-390.png', { fullPage: true });
 
   const transport = createStubEmailTransport();
   const claimed = await claimJobs({ workerId, limit: 5, types: [EMAIL_SEND_JOB] });
@@ -149,9 +154,13 @@ test('review, approve, reject, and send outcome at desktop and mobile', async ({
     await processEmailSendJob(job, new AbortController().signal, transport);
     await completeJob(job.id, workerId);
   }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
   await openWorkspaceTab(page, 'Email');
   await expect(page.getByRole('region', { name: 'Send outcome' })).toContainText('Sent');
+  await expect(
+    page.getByRole('tabpanel', { name: 'Email' }).locator('.email-draft .preserve-text'),
+  ).toHaveText(editedBody);
   await screenshotToArtifacts(page, 'email-reply-sent-desktop-1440.png', { fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await screenshotToArtifacts(page, 'email-reply-sent-mobile-390.png', { fullPage: true });
