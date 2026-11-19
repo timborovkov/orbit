@@ -30,6 +30,14 @@ export const sessions = pgTable('sessions', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
+export type ApprovalOnReject = 'continue' | 'end';
+export interface ApprovalSettings {
+  approvalTools: string[];
+  approvalExpiresAfterHours: number | null;
+  approvalOnReject: ApprovalOnReject;
+  approvalSpendCents: number | null;
+}
+
 export const agents = pgTable('agents', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
@@ -38,6 +46,14 @@ export const agents = pgTable('agents', {
   lifecycle: text('lifecycle').$type<LifecycleState>().notNull().default('shadow'),
   budgets: jsonb('budgets').$type<AgentBudgets>().notNull(),
   approvalTools: jsonb('approval_tools').$type<string[]>().notNull().default([]),
+  /** Optional hours until a pending approval auto-rejects; null disables expiry. */
+  approvalExpiresAfterHours: integer('approval_expires_after_hours'),
+  approvalOnReject: text('approval_on_reject')
+    .$type<ApprovalOnReject>()
+    .notNull()
+    .default('continue'),
+  /** When set, write actions need approval once day spend reaches this many USD cents. */
+  approvalSpendCents: integer('approval_spend_cents'),
   enabledTools: jsonb('enabled_tools').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -45,6 +61,8 @@ export const agents = pgTable('agents', {
 export const controls = pgTable('controls', {
   id: integer('id').primaryKey(),
   paused: boolean('paused').notNull().default(true),
+  /** Optional workspace-wide approval tool names; merged with per-agent lists. */
+  approvalTools: jsonb('approval_tools').$type<string[]>().notNull().default([]),
 });
 
 export const audit = pgTable('audit', {
@@ -70,6 +88,7 @@ export const configurations = pgTable(
       .references(() => agents.id),
     version: integer('version').notNull(),
     config: jsonb('config').$type<AgentConfig>().notNull(),
+    approvalSettings: jsonb('approval_settings').$type<ApprovalSettings>(),
     actor: text('actor').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -101,7 +120,8 @@ export const jobs = pgTable('jobs', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export type RunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'interrupted';
+export type RunStatus =
+  'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'interrupted';
 
 export const runs = pgTable('simulation_runs', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -136,6 +156,8 @@ export const actionIntents = pgTable('action_intents', {
   reviewStatus: text('review_status').$type<'pending' | 'approved' | 'rejected'>(),
   reviewedBy: text('reviewed_by'),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  reviewExpiresAt: timestamp('review_expires_at', { withTimezone: true }),
+  reviewNote: text('review_note'),
   payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
   idempotencyKey: text('idempotency_key').notNull().unique(),
   decision: text('decision').notNull(),

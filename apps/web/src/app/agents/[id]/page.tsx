@@ -28,11 +28,19 @@ import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
 
 export const dynamic = 'force-dynamic';
-export default async function AgentWorkspace({ params }: { params: Promise<{ id: string }> }) {
+export default async function AgentWorkspace({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ run?: string }>;
+}) {
   const email = await requireAdmin();
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
-  const workspace = await getAgentWorkspace(id);
+  const focus = z.uuid().safeParse((await searchParams).run);
+  const focusRunId = focus.success ? focus.data : undefined;
+  const workspace = await getAgentWorkspace(id, focusRunId);
   if (!workspace) notFound();
   const {
     agent,
@@ -42,6 +50,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     history,
     current,
     reviews,
+    pendingApprovalCount,
     consents,
     usage,
     skillIds,
@@ -53,10 +62,14 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     listMcpConnections(),
   ]);
   const lifecycle = agent.lifecycle;
+  const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const viewedHistory = history;
   const hasPendingRuns = history.some(
-    (run) => run.displayStatus === 'queued' || run.displayStatus === 'running',
+    (run) =>
+      run.displayStatus === 'queued' ||
+      run.displayStatus === 'running' ||
+      run.displayStatus === 'awaiting_approval',
   );
   const hasPendingKnowledge = knowledgeDocuments.some(
     (doc) => doc.status === 'pending' || doc.status === 'processing',
@@ -95,7 +108,11 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       lifecycle={lifecycle}
       budgets={agent.budgets}
       usage={usage}
-      approvalTools={agent.approvalTools}
+      configurationVersion={current.version}
+      approvalTools={approvalSettings.approvalTools}
+      approvalExpiresAfterHours={approvalSettings.approvalExpiresAfterHours}
+      approvalOnReject={approvalSettings.approvalOnReject}
+      approvalSpendCents={approvalSettings.approvalSpendCents}
       consents={consents}
       hasAgentCredential={hasAgentCredential}
       keySource={keySource}
@@ -123,6 +140,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
         lifecycle={lifecycle}
         versions={versions}
         currentConfigurationId={current.id}
+        runStatuses={Object.fromEntries(history.map(({ id, status }) => [id, status]))}
       />
     </section>
   );
@@ -143,7 +161,12 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
           </div>
         )}
         {viewedHistory.map((run) => (
-          <details key={run.id} className="run-detail">
+          <details
+            key={run.id}
+            id={`run-${run.id}`}
+            className="run-detail"
+            open={run.id === focusRunId ? true : undefined}
+          >
             <summary>
               <div>
                 <span className="run-title">{run.input}</span>
@@ -156,7 +179,9 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
                 </time>
               </div>
               <span className="state-label" title={run.deferReason ?? undefined}>
-                {run.displayStatus}
+                {run.displayStatus === 'awaiting_approval'
+                  ? 'Awaiting approval'
+                  : run.displayStatus}
               </span>
               <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
             </summary>
@@ -191,7 +216,7 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <WorkspaceHeader name={agent.name} />
+      <WorkspaceHeader name={agent.name} pendingApprovalCount={pendingApprovalCount} />
       <main className="agent-main" id="main">
         {env().AUTH_DISABLED && (
           <p className="local-auth-notice">Authentication disabled · Local development · {email}</p>
@@ -222,6 +247,8 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
         </div>
         <PendingRunRefresh active={hasPendingRuns || hasPendingKnowledge} />
         <WorkspaceTabs
+          key={focusRunId ?? id}
+          initialTab={focusRunId ? 'history' : undefined}
           items={[
             { id: 'configure', label: 'Configuration', content: configuration },
             { id: 'playground', label: 'Playground', content: playground },

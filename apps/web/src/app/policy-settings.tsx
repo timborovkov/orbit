@@ -28,18 +28,36 @@ const actionLabels = {
 
 export function ReviewSettings({
   agentId,
+  configurationVersion,
   approvalTools,
+  approvalExpiresAfterHours,
+  approvalOnReject,
+  approvalSpendCents,
 }: {
   agentId: string;
+  configurationVersion: number;
   approvalTools: string[];
+  approvalExpiresAfterHours: number | null;
+  approvalOnReject: 'continue' | 'end';
+  approvalSpendCents: number | null;
 }) {
   return (
-    <section className="access-workbench">
+    <section className="access-workbench" data-testid="approval-settings">
       <div className="editor-section-heading">
         <h2>Approval requirements</h2>
-        <p className="muted">Introductions and escalations always require consent and approval.</p>
+        <p className="muted">
+          Off by default. Enable actions that must pause for an administrator before continuing.
+          Introductions and escalations always require consent and approval.
+        </p>
       </div>
-      <ApprovalToolsForm agentId={agentId} approvalTools={approvalTools} />
+      <ApprovalToolsForm
+        agentId={agentId}
+        configurationVersion={configurationVersion}
+        approvalTools={approvalTools}
+        approvalExpiresAfterHours={approvalExpiresAfterHours}
+        approvalOnReject={approvalOnReject}
+        approvalSpendCents={approvalSpendCents}
+      />
     </section>
   );
 }
@@ -132,7 +150,8 @@ export function ProposalReview({
       <div className="editor-section-heading">
         <h2 id="proposal-review-title">Proposal review</h2>
         <p className="muted">
-          Review simulated actions. Approval records your decision without sending the action.
+          Pending items suspend the run until approved or rejected. Edit a draft before approving
+          when needed.
         </p>
       </div>
       {reviews.length === 0 ? (
@@ -143,7 +162,7 @@ export function ProposalReview({
             </EmptyMedia>
             <EmptyTitle>No proposals awaiting review</EmptyTitle>
             <EmptyDescription>
-              Simulated introduce and escalate actions that need approval will appear here.
+              When an agent action needs approval, it will appear here.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -151,29 +170,43 @@ export function ProposalReview({
         <ul className="policy-records" aria-label="Proposals, pending first">
           {reviews.map((proposal) => (
             <li id={`proposal-${proposal.id}`} key={proposal.id}>
-              <strong>{actionLabels[proposal.actionType] ?? proposal.actionType}</strong>{' '}
-              <span className="state-label">
-                {proposal.status === 'pending' ? 'Pending review' : proposal.status}
-              </span>
+              <div className="approvals-row-meta">
+                <strong>{actionLabels[proposal.actionType] ?? proposal.actionType}</strong>
+                <span className="state-label">
+                  {proposal.status === 'pending' ? 'Pending review' : proposal.status}
+                </span>
+              </div>
               {proposal.recipients.length > 0 && (
                 <p className="muted">{proposal.recipients.join(' · ')}</p>
               )}
               {proposal.reason && <p>{proposal.reason}</p>}
-              {proposal.draft && <blockquote>{proposal.draft}</blockquote>}
-              {proposal.status === 'pending' && (
-                <div className="policy-review-actions">
-                  {(['approved', 'rejected'] as const).map((decision) => (
-                    <WorkspaceForm
-                      key={decision}
-                      action={reviewProposal}
-                      label={decision === 'approved' ? 'Approve' : 'Reject'}
-                    >
-                      <input type="hidden" name="agentId" value={agentId} />
-                      <input type="hidden" name="intentId" value={proposal.id} />
-                      <input type="hidden" name="decision" value={decision} />
-                    </WorkspaceForm>
-                  ))}
+              {proposal.status === 'pending' ? (
+                <div className="policy-review-edit">
+                  <WorkspaceForm action={reviewProposal} label="Approve">
+                    <input type="hidden" name="agentId" value={agentId} />
+                    <input type="hidden" name="intentId" value={proposal.id} />
+                    <input type="hidden" name="decision" value="approved" />
+                    <div className="approvals-draft">
+                      <label htmlFor={`draft-${proposal.id}`}>Draft (edit before approve)</label>
+                      <textarea
+                        id={`draft-${proposal.id}`}
+                        name="draft"
+                        rows={3}
+                        defaultValue={proposal.draft ?? ''}
+                        maxLength={8000}
+                      />
+                    </div>
+                  </WorkspaceForm>
+                  <WorkspaceForm action={reviewProposal} label="Reject">
+                    <input type="hidden" name="agentId" value={agentId} />
+                    <input type="hidden" name="intentId" value={proposal.id} />
+                    <input type="hidden" name="decision" value="rejected" />
+                  </WorkspaceForm>
                 </div>
+              ) : (
+                proposal.draft && (
+                  <blockquote className="approvals-preview">{proposal.draft}</blockquote>
+                )
               )}
               {proposal.reviewedBy && (
                 <p className="field-hint">Reviewed by {proposal.reviewedBy}</p>

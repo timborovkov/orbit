@@ -117,7 +117,9 @@ test('administrators control independent spend caps, consent and proposal review
   await expect(page.getByRole('list', { name: 'Recent consent records' })).toContainText('Revoked');
 
   await openAccessSection(page, 'Approvals');
-  await page.getByRole('checkbox', { name: 'Reply', exact: true }).check();
+  const replyApproval = page.getByRole('switch', { name: 'Reply', exact: true });
+  await replyApproval.click();
+  await expect(replyApproval).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('button', { name: 'Save approval requirements', exact: true }).click();
   await expect(page.getByText('Approval requirements saved.')).toBeVisible();
   await sql`UPDATE controls SET paused=false`;

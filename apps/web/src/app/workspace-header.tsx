@@ -15,12 +15,19 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const navLinks = [
+  { href: '/approvals', label: 'Approvals' },
   { href: '/templates', label: 'Templates' },
   { href: '/skills', label: 'Skills' },
   { href: '/mcp', label: 'MCP' },
 ] as const;
 
-export function WorkspaceHeader({ name }: { name: string }) {
+export function WorkspaceHeader({
+  name,
+  pendingApprovalCount = 0,
+}: {
+  name: string;
+  pendingApprovalCount?: number;
+}) {
   const pathname = usePathname();
   const underAgents = pathname.startsWith('/agents/');
 
@@ -62,6 +69,9 @@ export function WorkspaceHeader({ name }: { name: string }) {
                 }
               >
                 {link.label}
+                {link.href === '/approvals' && pendingApprovalCount > 0 && (
+                  <span className="tab-count">{pendingApprovalCount}</span>
+                )}
               </Link>
             ))}
           </div>
@@ -83,7 +93,12 @@ export function WorkspaceHeader({ name }: { name: string }) {
               </DropdownMenuItem>
               {navLinks.map((link) => (
                 <DropdownMenuItem key={link.href} asChild>
-                  <Link href={link.href}>{link.label}</Link>
+                  <Link href={link.href}>
+                    {link.label}
+                    {link.href === '/approvals' && pendingApprovalCount > 0
+                      ? ` (${pendingApprovalCount})`
+                      : ''}
+                  </Link>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

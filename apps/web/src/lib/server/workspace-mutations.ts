@@ -26,9 +26,13 @@ export async function persistConfiguration(
         .limit(1)
     ).at(0);
     if (current?.version !== version) return false;
-    await tx
-      .insert(configurations)
-      .values({ agentId, version: version + 1, config: config, actor });
+    await tx.insert(configurations).values({
+      agentId,
+      version: version + 1,
+      config,
+      approvalSettings: current.approvalSettings,
+      actor,
+    });
     await tx
       .update(agents)
       .set({ name: config.name, mission: config.mission })

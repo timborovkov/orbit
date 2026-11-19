@@ -6,6 +6,7 @@ import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { registerErrorCapture } from '@/lib/observability/errors';
 import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import { startJobWorker } from '@/lib/queue/worker';
+import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
 import {
   finalizeExhaustedSimulationJob,
   processSimulationJob,
@@ -102,7 +103,12 @@ const worker = startJobWorker({
     }
   },
   reconcileDeadLetters: async () => {
-    await Promise.all([reconcileOrphanedSimulationRuns(), reconcileDeadKnowledgeJobs()]);
+    await Promise.all([
+      reconcileOrphanedSimulationRuns(),
+      reconcileDeadKnowledgeJobs(),
+      expireStaleApprovals(),
+      reconcileSuspendedApprovals(),
+    ]);
   },
   onError: (error) => {
     console.error('Worker queue operation failed.');

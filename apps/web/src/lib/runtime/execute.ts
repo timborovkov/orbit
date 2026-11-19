@@ -13,11 +13,16 @@ import {
   parseBudgets,
   type BudgetSnapshot,
 } from '@/lib/budgets';
-import { db } from '@/lib/db';
+import { db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
-import { deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
+import { completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
+import {
+  lockApprovalAgent,
+  recordApprovalReviews,
+  settleApprovalRun,
+} from '@/lib/runtime/approval-work';
 import {
   isRetryableInfrastructureError,
   isUnrecoverablePaidStepFinalizationError,
@@ -43,7 +48,16 @@ import {
 } from '@/lib/runtime/simulation';
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
 import { nativeTools } from '@/lib/runtime/tools/native';
-import { agents, configurations, credentials, jobs, runs, usageCounters } from '@/lib/schema';
+import {
+  actionIntents,
+  agents,
+  configurations,
+  credentials,
+  jobs,
+  runs,
+  usageCounters,
+  type ApprovalOnReject,
+} from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
 
@@ -73,10 +87,11 @@ async function updateIfOwned(
   runId: string,
   executionToken: string,
   values: Partial<typeof runs.$inferInsert> & { result?: SimulationResult },
+  transaction?: Tx,
 ) {
   const incoming = values.result;
   if (!incoming) {
-    return await db()
+    return await (transaction ?? db())
       .update(runs)
       .set(values)
       .where(
@@ -90,7 +105,7 @@ async function updateIfOwned(
   }
   // Preserve per-stage quota rows written by reserveRequestQuota so simulate checkpoints
   // cannot wipe idempotency keys that retries must reuse.
-  return await db().transaction(async (tx) => {
+  const write = async (tx: Tx) => {
     const current = (
       await tx
         .select({ id: runs.id, result: runs.result })
@@ -127,7 +142,8 @@ async function updateIfOwned(
         ),
       )
       .returning({ id: runs.id });
-  });
+  };
+  return transaction ? write(transaction) : db().transaction(write);
 }
 
 /** Abort this claim when another worker has rotated the execution token. */
@@ -211,21 +227,34 @@ async function markStageDispatchedIfOwned(
   });
 }
 
-async function expireStaleRuns(
-  tx: Parameters<Parameters<ReturnType<typeof db>['transaction']>[0]>[0],
-  agentId: string,
-) {
+async function expireStaleRuns(tx: Tx, agent: Pick<typeof agents.$inferSelect, 'id' | 'name'>) {
+  // Do not apply the execution deadline to awaiting_approval — that wait is governed by
+  // action_intents.review_expires_at / expireStaleApprovals, not run.expiresAt.
   const stale = await tx
     .update(runs)
     .set({ status: 'interrupted', finishedAt: new Date() })
     .where(
       and(
-        eq(runs.agentId, agentId),
+        eq(runs.agentId, agent.id),
         inArray(runs.status, ['queued', 'running']),
         lt(runs.expiresAt, new Date()),
       ),
     )
-    .returning({ jobId: runs.jobId });
+    .returning({ id: runs.id, jobId: runs.jobId });
+  const runIds = stale.map((row) => row.id);
+  if (runIds.length) {
+    const pending = await tx
+      .select()
+      .from(actionIntents)
+      .where(and(inArray(actionIntents.runId, runIds), eq(actionIntents.reviewStatus, 'pending')));
+    await recordApprovalReviews(tx, pending, {
+      actor: 'system:run-expiry',
+      agentName: agent.name,
+      status: 'rejected',
+      reason: 'Run reached its execution deadline before suspending for review.',
+      now: new Date(),
+    });
+  }
   const jobIds = stale.map((row) => row.jobId).filter((id): id is string => !!id);
   if (jobIds.length) {
     await tx
@@ -272,14 +301,19 @@ export async function enqueueSimulation({
       };
     }
 
-    await expireStaleRuns(tx, agentId);
+    await expireStaleRuns(tx, agent);
 
     const budgets = parseBudgets(agent.budgets);
     const active = (
       await tx
         .select({ id: runs.id })
         .from(runs)
-        .where(and(eq(runs.agentId, agentId), inArray(runs.status, ['queued', 'running'])))
+        .where(
+          and(
+            eq(runs.agentId, agentId),
+            inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
+          ),
+        )
     ).length;
     if (active >= budgets.maxConcurrentRuns) {
       return {
@@ -402,6 +436,7 @@ async function processSimulationRun(
     if (peek.status === 'completed' || peek.status === 'failed' || peek.status === 'interrupted') {
       return { skip: true as const, run: peek };
     }
+    // awaiting_approval is only reclaimable when a resume job re-enqueues work.
 
     const agent = (
       await tx.select().from(agents).where(eq(agents.id, peek.agentId)).for('update')
@@ -432,10 +467,18 @@ async function processSimulationRun(
 
     const run = (await tx.select().from(runs).where(eq(runs.id, runId)).for('update')).at(0);
     if (!run) return null;
-    if (run.status === 'completed' || run.status === 'failed' || run.status === 'interrupted') {
+    if (
+      run.status === 'completed' ||
+      run.status === 'failed' ||
+      run.status === 'interrupted' ||
+      run.status === 'awaiting_approval'
+    ) {
+      // awaiting_approval is only resumed after review flips the run back to queued.
       return { skip: true as const, run };
     }
-    if (run.expiresAt < new Date()) {
+    // Queued claims (first start and post-approval resumes) refresh the deadline below.
+    // Only interrupt mid-flight running work whose wall clock already expired.
+    if (run.status !== 'queued' && run.expiresAt < new Date()) {
       await tx
         .update(runs)
         .set({ status: 'interrupted', finishedAt: new Date() })
@@ -454,7 +497,7 @@ async function processSimulationRun(
     ).at(0);
     if (!config) return null;
     const executionToken = randomUUID();
-    // First claim starts the wall-clock deadline; retries keep the original expiresAt.
+    // First claim and approval resumes (queued) start a fresh deadline; running retries keep it.
     const expiresAt =
       run.status === 'queued'
         ? new Date(Date.now() + budgets.runDeadlineSeconds * 1000)
@@ -465,6 +508,7 @@ async function processSimulationRun(
         status: 'running',
         executionToken,
         expiresAt,
+        deferReason: null,
       })
       .where(eq(runs.id, run.id));
     return {
@@ -540,15 +584,30 @@ async function processSimulationRun(
   let didComplete = false;
   let statusMessage: string | undefined;
   try {
-    const credential = (
-      await db().select().from(credentials).where(eq(credentials.agentId, run.agentId))
-    ).at(0);
-    // Agent key → OPENROUTER_API_KEY → inspectable failure. Same path for web and worker.
-    const { apiKey } = resolveOpenRouterApiKey(run.agentId, credential?.encryptedKey);
-    const call = inference(apiKey);
-
     // Include reservation-only progress so a failed post-call checkpoint cannot free the step slot.
     const checkpointed = hasSimulationProgress(run.result) ? run.result : undefined;
+    // Defer credential resolution and inference construction until a model call is required.
+    // Reviewed resumes with both stages already checkpointed must not need OpenRouter.
+    let resolvedCall: ReturnType<typeof inference> | undefined;
+    const ensureCall = async () => {
+      if (resolvedCall) return resolvedCall;
+      const credential = (
+        await db().select().from(credentials).where(eq(credentials.agentId, run.agentId))
+      ).at(0);
+      // Agent key → OPENROUTER_API_KEY → inspectable failure. Same path for web and worker.
+      const { apiKey } = resolveOpenRouterApiKey(run.agentId, credential?.encryptedKey);
+      resolvedCall = inference(apiKey);
+      return resolvedCall;
+    };
+    const call: ModelCall = Object.assign(
+      async (request: Parameters<ModelCall>[0]) => (await ensureCall())(request),
+      {
+        quote: async (model: string, signal: AbortSignal, options?: { requireTools?: boolean }) => {
+          const resolved = await ensureCall();
+          return resolved.quote?.(model, signal, options);
+        },
+      },
+    );
     // A prior attempt already burned a paid step but failed to mark the run terminal — finalize
     // without calling the provider again.
     if (checkpointed?.error === PAID_STEP_BURN_MESSAGE) {
@@ -872,8 +931,17 @@ async function processSimulationRun(
                     },
                     () => undefined,
                   );
+                  // Preserve edited drafts from approval review payloads when present.
+                  const draft =
+                    decision.payload && 'draft' in decision.payload
+                      ? typeof decision.payload.draft === 'string' ||
+                        decision.payload.draft === null
+                        ? decision.payload.draft
+                        : action.draft
+                      : action.draft;
                   return {
                     ...action,
+                    draft,
                     intentId: decision.intentId,
                     policy: decision.decision,
                     effect: decision.reasons.join(' '),
@@ -904,18 +972,27 @@ async function processSimulationRun(
           : resources.mcpConnections;
       result.toolCalls = resources.toolCalls;
 
-      const terminalStatus = result.error ? ('failed' as const) : ('completed' as const);
       if (result.error && isTrustedBudgetMessage(result.error)) statusMessage = result.error;
       else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
       try {
-        await retryableStore(() =>
-          updateIfOwned(run.id, executionToken, {
-            status: terminalStatus,
-            finishedAt: new Date(),
-            result: { ...result, traceId: telemetry.traceId },
-            deferReason: result.error && isTrustedBudgetMessage(result.error) ? result.error : null,
-          }),
+        const traceResult = { ...result, traceId: telemetry.traceId };
+        const owned = await retryableStore(() =>
+          result.error
+            ? updateIfOwned(run.id, executionToken, {
+                status: 'failed',
+                finishedAt: new Date(),
+                result: traceResult,
+                deferReason: isTrustedBudgetMessage(result.error) ? result.error : null,
+              })
+            : finishSimulationWithApprovals(
+                run,
+                executionToken,
+                traceResult,
+                config.approvalSettings?.approvalOnReject,
+                claim,
+              ),
         );
+        if (!owned.length) return;
       } catch (error) {
         // Paid-step burn: never complete the job while the run is still running. Persist the burn
         // markers when possible, then Retryable so the queue retries finalization only (simulate
@@ -1081,6 +1158,87 @@ async function processSimulationRun(
   } finally {
     await telemetry.finish(!didComplete, statusMessage);
   }
+}
+
+async function finishSimulationWithApprovals(
+  run: typeof runs.$inferSelect,
+  executionToken: string,
+  result: SimulationResult,
+  onReject: ApprovalOnReject | undefined,
+  claim?: SimulationJobClaim,
+) {
+  return db().transaction(async (tx) => {
+    const agent = await lockApprovalAgent(tx, run.agentId);
+    if (!agent) return [];
+    const reviewStatuses =
+      (onReject ?? agent.approvalOnReject) === 'end'
+        ? (['pending', 'rejected'] as const)
+        : (['pending'] as const);
+    const review = (
+      await tx
+        .select({ id: actionIntents.id })
+        .from(actionIntents)
+        .where(
+          and(
+            eq(actionIntents.runId, run.id),
+            inArray(actionIntents.reviewStatus, [...reviewStatuses]),
+          ),
+        )
+        .limit(1)
+    ).at(0);
+
+    if (!review && !result.actions.some((action) => action.policy === 'needs-approval')) {
+      return updateIfOwned(
+        run.id,
+        executionToken,
+        {
+          status: 'completed',
+          finishedAt: new Date(),
+          result,
+          deferReason: null,
+        },
+        tx,
+      );
+    }
+
+    if (run.jobId) {
+      const job = (
+        await tx
+          .select({ status: jobs.status, claimedBy: jobs.claimedBy })
+          .from(jobs)
+          .where(eq(jobs.id, run.jobId))
+          .for('update')
+      ).at(0);
+      const ownsJob = claim
+        ? claim.jobId === run.jobId && job?.status === 'claimed' && job.claimedBy === claim.workerId
+        : job?.status === 'pending';
+      if (!ownsJob) return [];
+    }
+    const owned = await updateIfOwned(
+      run.id,
+      executionToken,
+      {
+        status: 'awaiting_approval',
+        finishedAt: null,
+        result,
+        deferReason: 'Awaiting administrator approval.',
+      },
+      tx,
+    );
+    if (!owned.length) return owned;
+
+    if (run.jobId && claim) {
+      await completeJob(run.jobId, claim.workerId, tx);
+    } else if (run.jobId) {
+      const now = new Date();
+      await tx
+        .update(jobs)
+        .set({ status: 'completed', finishedAt: now, updatedAt: now })
+        .where(eq(jobs.id, run.jobId));
+    }
+    await settleApprovalRun(tx, agent, run.id, run.actor);
+    return owned;
+  });
 }
 
 export async function processSimulationJob(

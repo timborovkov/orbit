@@ -1,5 +1,9 @@
+import type { UIMessage } from 'ai';
+
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { groundedAnswerFromResult, type SimulationResult } from '@/lib/runtime/simulation';
+
+export type PlaygroundUIMessage = UIMessage<unknown, { approval: { runId: string } }>;
 
 /** Chunks the UI message stream protocol can emit for a playground reply. */
 export type PlaygroundStreamChunk =

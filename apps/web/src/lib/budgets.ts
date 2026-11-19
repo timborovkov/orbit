@@ -66,7 +66,7 @@ export const budgetFields = [
   {
     key: 'maxConcurrentRuns',
     label: 'Concurrency limit',
-    hint: 'Queued plus running jobs for this agent at once.',
+    hint: 'Queued, running and awaiting-approval runs for this agent.',
   },
   {
     key: 'maxToolStepsPerRun',
