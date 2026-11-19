@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   accessSectionPanelHidden,
   knowledgeSectionPanelHidden,
+  latestPersistedRun,
   PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
   playgroundAttachmentRejection,
   playgroundEffectiveConfigurationId,
@@ -32,6 +33,17 @@ describe('access section panel visibility', () => {
     expect(accessSectionPanelHidden('budgets', 'consent')).toBe(true);
     expect(knowledgeSectionPanelHidden('documents', 'documents')).toBe(false);
     expect(knowledgeSectionPanelHidden('documents', 'inspector')).toBe(true);
+  });
+});
+
+describe('latest persisted run selection', () => {
+  test('picks the newest createdAt even when an older focused run is listed first', () => {
+    const older = { id: 'old', createdAt: new Date('2026-11-18T10:00:00.000Z') };
+    const newer = { id: 'new', createdAt: new Date('2026-11-18T12:00:00.000Z') };
+    expect(latestPersistedRun([])).toBeUndefined();
+    expect(latestPersistedRun([older])).toEqual(older);
+    expect(latestPersistedRun([older, newer])).toEqual(newer);
+    expect(latestPersistedRun([newer, older])).toEqual(newer);
   });
 });
 

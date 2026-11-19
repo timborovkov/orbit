@@ -22,6 +22,7 @@ import { formatUtcTimestamp } from '@/lib/format';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
+import { latestPersistedRun } from '@/lib/runtime/playground-ui';
 import { listKnowledgeDocuments } from '@/lib/server/knowledge-queries';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
@@ -65,7 +66,7 @@ export default async function AgentWorkspace({
   const lifecycle = agent.lifecycle;
   const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
-  const latestRun = history.at(0);
+  const latestRun = latestPersistedRun(history);
   const hasPendingRuns = history.some(
     (run) =>
       run.displayStatus === 'queued' ||

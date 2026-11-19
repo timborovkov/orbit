@@ -3,6 +3,20 @@
 export const PLAYGROUND_ATTACHMENTS_UNSUPPORTED =
   'Attachments are not supported yet. Paste a post or question as text only.';
 
+/**
+ * Newest simulation by created time, independent of History focus-first ordering
+ * when `?run=<id>` pins an older run to the front of the workspace history list.
+ */
+export function latestPersistedRun<T extends { createdAt: Date }>(
+  history: readonly T[],
+): T | undefined {
+  let latest: T | undefined;
+  for (const run of history) {
+    if (!latest || run.createdAt.getTime() > latest.createdAt.getTime()) latest = run;
+  }
+  return latest;
+}
+
 /** Reject any attached files until the simulation runtime can consume them. */
 export function playgroundAttachmentRejection(
   files: { filename?: string | null }[] | null | undefined,
