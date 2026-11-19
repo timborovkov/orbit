@@ -3,10 +3,7 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/web/package.json apps/web/package.json
 COPY apps/worker/package.json apps/worker/package.json
-# Optional trusted registry CA for environments with an HTTPS proxy.
-RUN --mount=type=secret,id=npm_ca \
-    if [ -f /run/secrets/npm_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/npm_ca; fi; \
-    bun install --frozen-lockfile
+RUN bun install --frozen-lockfile
 COPY apps/web apps/web
 # Inlined into the client bundle at build time. Empty keeps browser Sentry off.
 # Railway injects matching service variables when these ARG names are declared.

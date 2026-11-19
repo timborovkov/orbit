@@ -30,7 +30,7 @@ docker build -f docker/worker.Dockerfile -t orbit-worker .
 
 The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker claims simulation and knowledge-processing jobs, heartbeats leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
 
-If your package registry uses a private CA, pass its PEM file with `--secret id=npm_ca,src=/path/to/ca.pem` when building. The CA is mounted only for dependency installation and is not copied into the image. TLS verification remains enabled.
+The Dockerfiles use the base image's trust store for dependency installation. Railway's Docker builder does not support BuildKit secret mounts.
 
 ## RustFS object storage
 
