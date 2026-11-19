@@ -244,8 +244,8 @@ export function EvaluationsWorkbench({
                   {cases.map((row) => (
                     <tr key={row.id}>
                       <td>
-                        <span className="library-primary">{row.title}</span>
-                        <span className="library-secondary preserve-text">{row.input}</span>
+                        <div className="library-primary">{row.title}</div>
+                        <div className="library-secondary preserve-text">{row.input}</div>
                       </td>
                       <td>{row.agentName}</td>
                       <td>{row.sourceKind === 'email' ? 'Email' : 'Playground'}</td>
@@ -291,10 +291,10 @@ export function EvaluationsWorkbench({
                   {comparisons.map((row) => (
                     <tr key={row.id}>
                       <td>
-                        <Link className="library-primary" href={`/evaluations/${row.id}`}>
-                          {row.caseTitle}
-                        </Link>
-                        {row.error && <span className="library-secondary">{row.error}</span>}
+                        <div className="library-primary">
+                          <Link href={`/evaluations/${row.id}`}>{row.caseTitle}</Link>
+                        </div>
+                        {row.error && <div className="library-secondary">{row.error}</div>}
                       </td>
                       <td>{row.agentName}</td>
                       <td>

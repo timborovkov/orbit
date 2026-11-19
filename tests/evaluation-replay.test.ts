@@ -220,3 +220,141 @@ test('replay runs cannot dispatch an external write through the policy gateway',
   `;
   expect(intent.decision).toBe('suppressed');
 });
+
+test('retry reuses each side run instead of admitting duplicates', async () => {
+  const { id, v1, v2 } = await seedAgent();
+  const saved = await saveEvaluationCase({
+    actor: admin,
+    agentId: id,
+    title: 'Retry case',
+    sourceKind: 'playground',
+    caseInput: 'Same lead twice.',
+  });
+  expect('caseId' in saved).toBe(true);
+  if (!('caseId' in saved)) return;
+
+  const started = await startEvaluationComparison({
+    actor: admin,
+    agentId: id,
+    caseId: saved.caseId,
+    leftConfigurationId: v1.id,
+    rightConfigurationId: v2.id,
+  });
+  expect('comparisonId' in started).toBe(true);
+  if (!('comparisonId' in started)) return;
+
+  await processEvaluationReplayJob(
+    { comparisonId: started.comparisonId, agentId: id, actor: admin },
+    fixtureInference(),
+  );
+
+  const [first] = await sql`
+    SELECT left_run_id, right_run_id FROM evaluation_comparisons WHERE id=${started.comparisonId}
+  `;
+  expect(first.left_run_id).toBeTruthy();
+  expect(first.right_run_id).toBeTruthy();
+
+  // Simulate a retryable failure after the left side finished: mark the comparison and
+  // right run failed, then re-enter the worker handler.
+  await sql`
+    UPDATE evaluation_comparisons
+    SET status='failed', error='infrastructure blip', finished_at=now()
+    WHERE id=${started.comparisonId}
+  `;
+  await sql`
+    UPDATE simulation_runs
+    SET status='failed', finished_at=now(), defer_reason='infrastructure blip'
+    WHERE id=${first.right_run_id}
+  `;
+
+  await processEvaluationReplayJob(
+    { comparisonId: started.comparisonId, agentId: id, actor: admin },
+    fixtureInference(),
+  );
+
+  const [again] = await sql`
+    SELECT status, left_run_id, right_run_id FROM evaluation_comparisons WHERE id=${started.comparisonId}
+  `;
+  expect(again.status).toBe('completed');
+  expect(again.left_run_id).toBe(first.left_run_id);
+  expect(again.right_run_id).toBe(first.right_run_id);
+
+  const [{ n }] = await sql`
+    SELECT count(*)::int AS n FROM simulation_runs WHERE agent_id=${id} AND origin='replay'
+  `;
+  expect(n).toBe(2);
+});
+
+test('email case replay uses email drafting semantics', async () => {
+  const { id, v1, v2 } = await seedAgent();
+  const saved = await saveEvaluationCase({
+    actor: admin,
+    agentId: id,
+    title: 'Inbound lead mail',
+    sourceKind: 'email',
+    caseInput: 'From: lead@example.com\nSubject: Pricing\n\nCan you send pricing?',
+  });
+  expect('caseId' in saved).toBe(true);
+  if (!('caseId' in saved)) return;
+
+  const started = await startEvaluationComparison({
+    actor: admin,
+    agentId: id,
+    caseId: saved.caseId,
+    leftConfigurationId: v1.id,
+    rightConfigurationId: v2.id,
+  });
+  expect('comparisonId' in started).toBe(true);
+  if (!('comparisonId' in started)) return;
+
+  // Empty evaluator actions: playground would skip main without knowledge; email must still draft.
+  const emailInference: (key: string) => ModelCall = () => async (request) => {
+    if (request.stage === 'evaluator') {
+      return {
+        decision: {
+          relevant: true,
+          priority: 0.9,
+          reason: 'Needs a reply',
+          actions: [],
+        },
+        inputTokens: 2,
+        outputTokens: 2,
+        costMicros: 0,
+      };
+    }
+    return {
+      decision: {
+        relevant: true,
+        priority: 0.9,
+        reason: 'Draft reply',
+        actions: [],
+        answer: 'Happy to share pricing — what company size are you?',
+        citations: [],
+      },
+      inputTokens: 4,
+      outputTokens: 6,
+      costMicros: 0,
+    };
+  };
+
+  await processEvaluationReplayJob(
+    { comparisonId: started.comparisonId, agentId: id, actor: admin },
+    emailInference,
+  );
+
+  const [comparison] = await sql`
+    SELECT left_run_id, status FROM evaluation_comparisons WHERE id=${started.comparisonId}
+  `;
+  expect(comparison.status).toBe('completed');
+  const [left] = await sql`
+    SELECT origin, result FROM simulation_runs WHERE id=${comparison.left_run_id}
+  `;
+  expect(left.origin).toBe('replay');
+  const stages = (left.result.steps as { stage: string }[]).map((step) => step.stage);
+  expect(stages).toContain('evaluator');
+  expect(stages).toContain('main');
+  const main = (
+    left.result.steps as { stage: string; decision: { answer?: string | null } }[]
+  ).find((step) => step.stage === 'main');
+  expect(main?.decision.answer).toContain('pricing');
+});

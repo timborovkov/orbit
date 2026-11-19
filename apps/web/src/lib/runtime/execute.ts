@@ -450,13 +450,21 @@ export interface SimulationJobClaim {
   workerId: string;
 }
 
+/** Playground vs email drafting semantics. Replay keeps origin=replay for safety. */
+export type SimulationBehavior = 'playground' | 'email';
+
 async function processSimulationRun(
   runId: string,
   inference: (key: string) => ModelCall = openRouterInference,
   externalSignal?: AbortSignal,
   claim?: SimulationJobClaim,
   origin: typeof runs.$inferSelect.origin = 'playground',
+  /** Drafting mode when origin is `replay` (defaults to playground). */
+  behavior?: SimulationBehavior,
 ) {
+  // Persisted origin gates reclaim; behavior selects email vs playground simulate paths.
+  const simulationBehavior: SimulationBehavior =
+    behavior ?? (origin === 'email' ? 'email' : 'playground');
   const claimed = await db().transaction(async (tx) => {
     // Peek without locking so we can take the agent lock before the run lock
     // (same order as enqueueSimulation and persistLifecycle) and avoid deadlocks.
@@ -604,7 +612,7 @@ async function processSimulationRun(
     jobId: claim?.jobId,
     lifecycle: agent.lifecycle,
     trigger: origin,
-    allowContentCapture: origin !== 'email',
+    allowContentCapture: simulationBehavior !== 'email',
   });
   const failureCorrelation = (extra: { stage?: 'evaluator' | 'main' } = {}) => ({
     runId: run.id,
@@ -768,7 +776,7 @@ async function processSimulationRun(
             if (!updated.length) throw new BudgetError('cancelled');
           },
           {
-            origin,
+            origin: simulationBehavior,
             maxToolSteps: budgets.maxToolStepsPerRun,
             signal,
             initial: checkpointed,
@@ -780,7 +788,7 @@ async function processSimulationRun(
             retrieveKnowledge: agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
               ? async (requestSignal) => {
                   const query = (
-                    origin === 'email' ? emailKnowledgeQuery(run.input) : run.input
+                    simulationBehavior === 'email' ? emailKnowledgeQuery(run.input) : run.input
                   ).slice(0, 2000);
                   if (!query) return { status: 'deny', reason: 'No text to search.', hits: [] };
                   const args = { query, limit: 4 };
@@ -896,7 +904,7 @@ async function processSimulationRun(
               }
             },
             onActions: async (actions, partial, stage) => {
-              if (origin === 'email') return [];
+              if (simulationBehavior === 'email') return [];
               await assertOwned(run.id, executionToken);
               // Tool invocations are gated separately from paid inference stages
               // (evaluator/main). Do not add steps.length — that double-counts.
@@ -1022,7 +1030,7 @@ async function processSimulationRun(
                 result: traceResult,
                 deferReason: isTrustedBudgetMessage(result.error) ? result.error : null,
               })
-            : origin === 'email'
+            : simulationBehavior === 'email'
               ? updateIfOwned(run.id, executionToken, {
                   status: 'completed',
                   finishedAt: new Date(),
@@ -1315,8 +1323,10 @@ export async function processSimulationRunForOrigin(
   inference: (key: string) => ModelCall = openRouterInference,
   signal?: AbortSignal,
   claim?: SimulationJobClaim,
+  /** For origin=replay: select email vs playground drafting without changing safety origin. */
+  behavior?: SimulationBehavior,
 ) {
-  await processSimulationRun(runId, inference, signal, claim, origin);
+  await processSimulationRun(runId, inference, signal, claim, origin, behavior);
 }
 
 function exhaustedJobMessage(reason: string) {

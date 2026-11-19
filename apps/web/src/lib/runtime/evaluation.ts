@@ -9,7 +9,11 @@ import {
 import { db, type Tx } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { enqueueJob } from '@/lib/queue/jobs';
-import { processSimulationRunForOrigin, type SimulationJobClaim } from '@/lib/runtime/execute';
+import {
+  processSimulationRunForOrigin,
+  type SimulationBehavior,
+  type SimulationJobClaim,
+} from '@/lib/runtime/execute';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import type { ModelCall } from '@/lib/runtime/simulation';
 import {
@@ -22,6 +26,10 @@ import {
   usageCounters,
   type EvaluationCaseSource,
 } from '@/lib/schema';
+
+function behaviorForCaseSource(sourceKind: EvaluationCaseSource): SimulationBehavior {
+  return sourceKind === 'email' ? 'email' : 'playground';
+}
 
 export const EVALUATION_REPLAY_JOB = 'evaluation.replay';
 
@@ -302,6 +310,35 @@ async function runReplaySide(
       return { error: `Agent lifecycle ${agent.lifecycle} cannot run replay.` as const };
     }
 
+    const behavior = behaviorForCaseSource(evaluationCase.sourceKind);
+    const existingRunId = side === 'left' ? comparison.leftRunId : comparison.rightRunId;
+    if (existingRunId) {
+      const existing = (
+        await tx.select().from(runs).where(eq(runs.id, existingRunId)).for('update')
+      ).at(0);
+      if (existing?.origin === 'replay' && existing.configurationId === configurationId) {
+        if (existing.status === 'completed') {
+          return { runId: existing.id, behavior, skipProcess: true as const };
+        }
+        // Resume the same run so checkpoints and paid-step burns stay effective across retries.
+        if (existing.status === 'failed' || existing.status === 'interrupted') {
+          await tx
+            .update(runs)
+            .set({
+              status: 'queued',
+              finishedAt: null,
+              deferReason: null,
+              result: {
+                ...existing.result,
+                error: null,
+              },
+            })
+            .where(eq(runs.id, existing.id));
+        }
+        return { runId: existing.id, behavior, skipProcess: false as const };
+      }
+    }
+
     const result = await admitReplayRun(tx, agent, {
       actor: comparison.actor,
       configurationId,
@@ -315,13 +352,21 @@ async function runReplaySide(
       .set(side === 'left' ? { leftRunId: result.runId } : { rightRunId: result.runId })
       .where(eq(evaluationComparisons.id, comparisonId));
 
-    return result;
+    return { ...result, behavior, skipProcess: false as const };
   });
 
   if ('error' in admitted) return admitted;
-
-  await processSimulationRunForOrigin(admitted.runId, 'replay', inference, signal);
-  return admitted;
+  if (!admitted.skipProcess) {
+    await processSimulationRunForOrigin(
+      admitted.runId,
+      'replay',
+      inference,
+      signal,
+      undefined,
+      admitted.behavior,
+    );
+  }
+  return { runId: admitted.runId };
 }
 
 /**

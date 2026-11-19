@@ -3549,10 +3549,12 @@ details[open] > summary > .disclosure-chevron {
   border-bottom: none;
 }
 .library-table .library-primary {
+  display: block;
   font-weight: 500;
   letter-spacing: -0.01em;
 }
 .library-table .library-secondary {
+  display: block;
   color: var(--muted);
   font-size: 0.8125rem;
   margin-top: 4px;
@@ -4088,6 +4090,22 @@ textarea.library-field-control {
   gap: 1rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 1rem;
+}
+
+/* Override the global horizontal label flex so titles stay above controls. */
+.evaluation-compare-form label.workspace-field,
+.save-evaluation-case label.workspace-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.4rem;
+  align-items: stretch;
+  justify-content: stretch;
+  min-width: 0;
+}
+
+.evaluation-compare-form label.workspace-field > span,
+.save-evaluation-case label.workspace-field > span {
+  white-space: nowrap;
 }
 
 .evaluation-compare-form .workspace-form-footer,
