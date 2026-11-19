@@ -584,15 +584,30 @@ async function processSimulationRun(
   let didComplete = false;
   let statusMessage: string | undefined;
   try {
-    const credential = (
-      await db().select().from(credentials).where(eq(credentials.agentId, run.agentId))
-    ).at(0);
-    // Agent key → OPENROUTER_API_KEY → inspectable failure. Same path for web and worker.
-    const { apiKey } = resolveOpenRouterApiKey(run.agentId, credential?.encryptedKey);
-    const call = inference(apiKey);
-
     // Include reservation-only progress so a failed post-call checkpoint cannot free the step slot.
     const checkpointed = hasSimulationProgress(run.result) ? run.result : undefined;
+    // Defer credential resolution and inference construction until a model call is required.
+    // Reviewed resumes with both stages already checkpointed must not need OpenRouter.
+    let resolvedCall: ReturnType<typeof inference> | undefined;
+    const ensureCall = async () => {
+      if (resolvedCall) return resolvedCall;
+      const credential = (
+        await db().select().from(credentials).where(eq(credentials.agentId, run.agentId))
+      ).at(0);
+      // Agent key → OPENROUTER_API_KEY → inspectable failure. Same path for web and worker.
+      const { apiKey } = resolveOpenRouterApiKey(run.agentId, credential?.encryptedKey);
+      resolvedCall = inference(apiKey);
+      return resolvedCall;
+    };
+    const call: ModelCall = Object.assign(
+      async (request: Parameters<ModelCall>[0]) => (await ensureCall())(request),
+      {
+        quote: async (model: string, signal: AbortSignal, options?: { requireTools?: boolean }) => {
+          const resolved = await ensureCall();
+          return resolved.quote?.(model, signal, options);
+        },
+      },
+    );
     // A prior attempt already burned a paid step but failed to mark the run terminal — finalize
     // without calling the provider again.
     if (checkpointed?.error === PAID_STEP_BURN_MESSAGE) {

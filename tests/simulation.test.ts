@@ -307,6 +307,56 @@ describe('bounded manual simulation', () => {
     expect(result.skillVersions).toBe(versions);
     expect(result.skillVersions?.[0]?.loaded).toBe(true);
   });
+  test('resume with both stages checkpointed never calls inference', async () => {
+    const checkpointed: SimulationResult = {
+      steps: [
+        {
+          stage: 'evaluator',
+          model: 'test/evaluator',
+          decision,
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+        {
+          stage: 'main',
+          model: 'test/main',
+          decision: { ...decision, reason: 'Reviewed draft' },
+          inputTokens: 2,
+          outputTokens: 2,
+        },
+      ],
+      actions: decision.actions.map((action) => ({
+        ...action,
+        policy: 'suppressed' as const,
+        effect: 'Simulation only. No external action performed.',
+      })),
+      error: null,
+    };
+    let calls = 0;
+    const resumed = await simulate(
+      config,
+      'question',
+      async () => {
+        calls += 1;
+        throw new Error('must not construct or call inference when both stages are checkpointed');
+      },
+      async () => {},
+      {
+        maxToolSteps: 2,
+        initial: checkpointed,
+        onActions: async (candidates) =>
+          candidates.map((candidate) => ({
+            ...candidate,
+            policy: 'suppressed' as const,
+            effect: 'Reviewed without redistributing paid stages.',
+          })),
+      },
+    );
+    expect(calls).toBe(0);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.actions.every((action) => action.policy === 'suppressed')).toBe(true);
+    expect(resumed.error).toBeNull();
+  });
   test('resume keeps checkpointed skill attribution when the catalogue changes', async () => {
     const checkpointed: SimulationResult = {
       steps: [
