@@ -109,12 +109,6 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
               progressive until <code>load_skill</code> runs.
             </>
           }
-          action={
-            <Button type="button" onClick={openCreate}>
-              <Plus size={16} aria-hidden="true" />
-              New skill
-            </Button>
-          }
         />
       ) : (
         <>

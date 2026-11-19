@@ -10,6 +10,8 @@ function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>)
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
 }
 
+const DialogTrigger = DialogPrimitive.Trigger;
+
 function DialogPortal({ ...props }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
   return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />;
 }
@@ -97,4 +99,4 @@ function DialogDescription({
   );
 }
 
-export { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle };
+export { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger };

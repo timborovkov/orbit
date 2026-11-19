@@ -51,7 +51,7 @@ export interface ApprovalItem {
 function statusBadge(status: ApprovalItem['status']) {
   if (status === 'approved') {
     return (
-      <Badge className="border-transparent bg-emerald-600/15 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300">
+      <Badge className="border-transparent bg-emerald-600/15 text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-300">
         approved
       </Badge>
     );

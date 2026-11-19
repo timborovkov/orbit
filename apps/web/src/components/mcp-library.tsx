@@ -109,12 +109,6 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
         <LibraryEmpty
           title="No MCP connections yet"
           description="Register a shared HTTP or SSE server, choose which tools agents may see, then attach the connection from Access."
-          action={
-            <Button type="button" onClick={openCreate}>
-              <Plus size={16} aria-hidden="true" />
-              New connection
-            </Button>
-          }
         />
       ) : (
         <>

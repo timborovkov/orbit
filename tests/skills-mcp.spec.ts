@@ -47,7 +47,7 @@ test('saved Skills and authenticated MCP grants reach the worker and run history
   try {
     await signIn(page);
     await page.goto('/skills');
-    await page.getByRole('button', { name: 'New skill', exact: true }).first().click();
+    await page.getByRole('button', { name: 'New skill', exact: true }).click();
     await page.getByLabel(/^Title/).fill('Release check');
     await page.getByLabel(/^When to use/).fill('Check the release fixture.');
     await page.getByLabel(/^Markdown body/).fill('# Release check\nVerify both connections.');
@@ -58,7 +58,7 @@ test('saved Skills and authenticated MCP grants reach the worker and run history
     for (const transport of ['http', 'sse'] as const) {
       const slug = `${transport}-fixture`;
       const tool = `${transport}_lookup`;
-      await page.getByRole('button', { name: 'New connection', exact: true }).first().click();
+      await page.getByRole('button', { name: 'New connection', exact: true }).click();
       await page.getByLabel(/^Slug/).fill(slug);
       await page.getByLabel(/^URL/).fill(`${fixture.url}/${transport}`);
       await page.getByRole('combobox', { name: /^Transport/ }).click();
@@ -177,17 +177,19 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
     await page.goto('/skills');
     await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'No skills yet' })).toBeVisible();
-    await expect(page.getByLabel('Breadcrumb').getByText('Skills', { exact: true })).toBeVisible();
     await shot(page, `skills-empty-desktop-${mode}`, { width: 1440, height: 900 });
     await shot(page, `skills-empty-mobile-${mode}`, { width: 390, height: 844 });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole('button', { name: 'Workspace navigation' }).click();
-    await expect(page.getByRole('menuitem', { name: 'Skills' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Skills' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
     await expect(page.getByRole('menuitem', { name: 'MCP' })).toBeVisible();
     await page.keyboard.press('Escape');
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.getByRole('button', { name: 'New skill', exact: true }).first().click();
+    await page.getByRole('button', { name: 'New skill', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'New skill' })).toBeVisible();
     await shot(page, `skills-create-desktop-${mode}`, { width: 1440, height: 900 });
     await page.keyboard.press('Escape');
@@ -196,13 +198,13 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
     await expect(page.getByRole('heading', { name: 'MCP connections', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'No MCP connections yet' })).toBeVisible();
     await expect(
-      page.getByLabel('Breadcrumb').getByText('MCP connections', { exact: true }),
-    ).toBeVisible();
+      page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'MCP' }),
+    ).toHaveAttribute('aria-current', 'page');
     await shot(page, `mcp-empty-desktop-${mode}`, { width: 1440, height: 900 });
     await shot(page, `mcp-empty-mobile-${mode}`, { width: 390, height: 844 });
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.getByRole('button', { name: 'New connection', exact: true }).first().click();
+    await page.getByRole('button', { name: 'New connection', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'New connection' })).toBeVisible();
     await shot(page, `mcp-create-desktop-${mode}`, { width: 1440, height: 900 });
     await page.keyboard.press('Escape');
@@ -210,7 +212,7 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
 
   await setTheme(page, 'light');
   await page.goto('/skills');
-  await page.getByRole('button', { name: 'New skill', exact: true }).first().click();
+  await page.getByRole('button', { name: 'New skill', exact: true }).click();
   await page.getByLabel(/^Title/).fill('Research brief');
   await expect(page.getByLabel(/^Slug/)).toHaveValue('research-brief');
   await page.getByLabel(/^When to use/).fill('Use when drafting a research summary.');
@@ -225,7 +227,7 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
   await expect(page.getByText('Research brief').first()).toBeVisible();
 
   await page.goto('/mcp');
-  await page.getByRole('button', { name: 'New connection', exact: true }).first().click();
+  await page.getByRole('button', { name: 'New connection', exact: true }).click();
   await page.getByLabel(/^Slug/).fill('docs-mcp');
   await page.getByLabel(/^URL/).fill('https://example.com/mcp');
   await page.getByRole('combobox', { name: /^Transport/ }).click();

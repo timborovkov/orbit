@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ChevronDown, History } from 'lucide-react';
 import { z } from 'zod';
@@ -237,14 +238,14 @@ export default async function AgentWorkspace({
   );
   return (
     <div className="agent-shell">
-      <a className="skip-link" href="#main">
-        Skip to content
-      </a>
-      <WorkspaceHeader name={agent.name} pendingApprovalCount={pendingApprovalCount} />
-      <main className="agent-main" id="main">
+      <WorkspaceHeader pendingApprovalCount={pendingApprovalCount} />
+      <main className="workspace-main" id="main" tabIndex={-1}>
         {env().AUTH_DISABLED && (
           <p className="local-auth-notice">Authentication disabled · Local development · {email}</p>
         )}
+        <nav className="agent-breadcrumb" aria-label="Breadcrumb">
+          <Link href="/#agents">Agents</Link>
+        </nav>
         <div className="agent-title-row">
           <div className="agent-title-identity">
             <AgentAvatar
