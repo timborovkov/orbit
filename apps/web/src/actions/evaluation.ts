@@ -1,0 +1,124 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
+
+import { checkOrigin, requireAdmin } from '@/lib/auth';
+import {
+  createEvaluationCaseFromSource,
+  enqueueEvaluationComparison,
+} from '@/lib/server/evaluation-mutations';
+
+const titleSchema = z.string().trim().min(1).max(200);
+const inputSchema = z.string().trim().min(1).max(16000);
+
+export async function saveCaseFromPlaygroundRun(form: FormData) {
+  await checkOrigin();
+  const actor = await requireAdmin();
+  const parsed = z
+    .object({
+      agentId: z.uuid(),
+      runId: z.uuid(),
+      title: titleSchema,
+      input: inputSchema,
+      recipients: z.string().optional(),
+    })
+    .safeParse({
+      agentId: form.get('agentId'),
+      runId: form.get('runId'),
+      title: form.get('title'),
+      input: form.get('input'),
+      recipients: form.get('recipients') ?? undefined,
+    });
+  if (!parsed.success) return { error: 'Invalid case details.' };
+
+  let recipients: string[] = [];
+  if (parsed.data.recipients) {
+    try {
+      const value: unknown = JSON.parse(parsed.data.recipients);
+      if (
+        !Array.isArray(value) ||
+        !value.every((entry): entry is string => typeof entry === 'string')
+      ) {
+        return { error: 'Invalid recipients.' };
+      }
+      recipients = value;
+    } catch {
+      return { error: 'Invalid recipients.' };
+    }
+  }
+
+  const result = await createEvaluationCaseFromSource(actor, {
+    agentId: parsed.data.agentId,
+    title: parsed.data.title,
+    sourceKind: 'playground',
+    sourceRunId: parsed.data.runId,
+    caseInput: parsed.data.input,
+    recipients,
+  });
+  if (!('error' in result)) {
+    revalidatePath('/evaluations');
+    revalidatePath(`/agents/${parsed.data.agentId}`);
+  }
+  return result;
+}
+
+export async function saveCaseFromEmailMessage(form: FormData) {
+  await checkOrigin();
+  const actor = await requireAdmin();
+  const parsed = z
+    .object({
+      agentId: z.uuid(),
+      messageId: z.uuid(),
+      title: titleSchema,
+      input: inputSchema,
+    })
+    .safeParse({
+      agentId: form.get('agentId'),
+      messageId: form.get('messageId'),
+      title: form.get('title'),
+      input: form.get('input'),
+    });
+  if (!parsed.success) return { error: 'Invalid case details.' };
+
+  const result = await createEvaluationCaseFromSource(actor, {
+    agentId: parsed.data.agentId,
+    title: parsed.data.title,
+    sourceKind: 'email',
+    sourceEmailMessageId: parsed.data.messageId,
+    caseInput: parsed.data.input,
+    recipients: [],
+  });
+  if (!('error' in result)) {
+    revalidatePath('/evaluations');
+    revalidatePath(`/agents/${parsed.data.agentId}`);
+  }
+  return result;
+}
+
+export async function startComparison(form: FormData) {
+  await checkOrigin();
+  const actor = await requireAdmin();
+  const parsed = z
+    .object({
+      agentId: z.uuid(),
+      caseId: z.uuid(),
+      leftConfigurationId: z.uuid(),
+      rightConfigurationId: z.uuid(),
+    })
+    .safeParse({
+      agentId: form.get('agentId'),
+      caseId: form.get('caseId'),
+      leftConfigurationId: form.get('leftConfigurationId'),
+      rightConfigurationId: form.get('rightConfigurationId'),
+    });
+  if (!parsed.success) return { error: 'Select a case and two configurations.' };
+
+  const result = await enqueueEvaluationComparison(actor, parsed.data);
+  if (!('error' in result)) {
+    revalidatePath('/evaluations');
+    revalidatePath(`/evaluations/${result.comparisonId}`);
+    revalidatePath(`/agents/${parsed.data.agentId}`);
+  }
+  return result;
+}

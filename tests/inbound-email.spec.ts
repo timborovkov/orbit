@@ -98,6 +98,8 @@ test('the admin can enable Sarah’s inbox and inspect a draft on mobile', async
     }
     await expect(page.getByRole('button', { name: /send/i })).toHaveCount(0);
   } finally {
+    await sql`DELETE FROM evaluation_comparisons WHERE agent_id=${agentId}`;
+    await sql`DELETE FROM evaluation_cases WHERE agent_id=${agentId}`;
     await sql`DELETE FROM simulation_runs WHERE agent_id=${agentId}`;
     await sql`DELETE FROM agent_configurations WHERE agent_id=${agentId}`;
     await sql`DELETE FROM agents WHERE id=${agentId}`;

@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { updateEmailMailbox } from '@/actions/email';
 import { KnowledgeCitations } from '@/app/knowledge-citations';
+import { SaveEmailCaseForm } from '@/app/save-evaluation-case-form';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { Button } from '@/components/ui/button';
 import { formatUtcTimestamp } from '@/lib/format';
@@ -78,11 +79,13 @@ function ThreadList({ inbox, page, inboxUrl }: { inbox: Inbox; page: number; inb
 }
 
 function SelectedThread({
+  agentId,
   inbox,
   page,
   messagePage,
   inboxUrl,
 }: {
+  agentId: string;
   inbox: Inbox;
   page: number;
   messagePage: number;
@@ -129,6 +132,14 @@ function SelectedThread({
               <KnowledgeCitations sources={message.draft.sources} />
             </section>
           )}
+          {!!message.body && (
+            <SaveEmailCaseForm
+              agentId={agentId}
+              messageId={message.id}
+              input={message.body}
+              defaultTitle={message.subject || message.body.slice(0, 80)}
+            />
+          )}
         </article>
       ))}
     </section>
@@ -158,7 +169,13 @@ export function EmailInbox({
     <div className="email-inbox">
       <MailboxSettings agentId={agentId} mailbox={inbox.mailbox} configured={inbox.configured} />
       <ThreadList inbox={inbox} page={page} inboxUrl={inboxUrl} />
-      <SelectedThread inbox={inbox} page={page} messagePage={messagePage} inboxUrl={inboxUrl} />
+      <SelectedThread
+        agentId={agentId}
+        inbox={inbox}
+        page={page}
+        messagePage={messagePage}
+        inboxUrl={inboxUrl}
+      />
     </div>
   );
 }

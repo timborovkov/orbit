@@ -1308,6 +1308,17 @@ export async function processEmailDraftJob(
   await processSimulationRun(runId, inference, signal, claim, 'email');
 }
 
+/** Process a run whose origin is already set (playground, email, or replay). */
+export async function processSimulationRunForOrigin(
+  runId: string,
+  origin: typeof runs.$inferSelect.origin,
+  inference: (key: string) => ModelCall = openRouterInference,
+  signal?: AbortSignal,
+  claim?: SimulationJobClaim,
+) {
+  await processSimulationRun(runId, inference, signal, claim, origin);
+}
+
 function exhaustedJobMessage(reason: string) {
   const detail = reason.trim().slice(0, 200);
   return detail

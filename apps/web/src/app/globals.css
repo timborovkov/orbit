@@ -4070,3 +4070,94 @@ textarea.library-field-control {
 .email-draft h4 {
   margin-bottom: 0.5rem;
 }
+
+.evaluations-workbench {
+  display: grid;
+  gap: 2rem;
+}
+
+.evaluation-compare-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  background: var(--surface);
+}
+
+.evaluation-compare-form {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.evaluation-compare-form .workspace-form-footer,
+.evaluation-compare-form .form-error {
+  grid-column: 1 / -1;
+}
+
+.evaluation-case-preview {
+  margin-top: 1rem;
+  max-width: 68ch;
+}
+
+.evaluation-lists {
+  display: grid;
+  gap: 2rem;
+}
+
+.save-evaluation-case {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.evaluation-comparison {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.evaluation-shared-input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  max-width: 68ch;
+}
+
+.evaluation-side-by-side {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.evaluation-side {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.evaluation-side-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.evaluation-side-heading h2 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .evaluation-compare-form,
+  .evaluation-side-by-side {
+    grid-template-columns: 1fr;
+  }
+}

@@ -11,6 +11,11 @@ import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
 import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
 import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import {
+  EVALUATION_REPLAY_JOB,
+  finalizeExhaustedEvaluationReplayJob,
+  processEvaluationReplayJob,
+} from '@/lib/runtime/evaluation';
+import {
   finalizeExhaustedSimulationJob,
   processEmailDraftJob,
   processSimulationJob,
@@ -86,6 +91,17 @@ const worker = startJobWorker({
         throw error;
       }
     },
+    [EVALUATION_REPLAY_JOB]: async (job, signal) => {
+      try {
+        await processEvaluationReplayJob(job.payload, undefined, signal, {
+          jobId: job.id,
+          workerId,
+        });
+      } catch (error) {
+        reportFailure('worker.queue', jobCorrelation(job), error);
+        throw error;
+      }
+    },
     [KNOWLEDGE_JOB_TYPE]: async (job, signal) => {
       try {
         const agentId = typeof job.payload.agentId === 'string' ? job.payload.agentId : undefined;
@@ -109,6 +125,10 @@ const worker = startJobWorker({
     reportFailure('worker.dead_letter', jobCorrelation(job), error);
     if (job.type === SIMULATION_JOB_TYPE || job.type === EMAIL_DRAFT_JOB) {
       await finalizeExhaustedSimulationJob(job.payload, error);
+      return;
+    }
+    if (job.type === EVALUATION_REPLAY_JOB) {
+      await finalizeExhaustedEvaluationReplayJob(job.payload, error);
       return;
     }
     if (job.type === KNOWLEDGE_JOB_TYPE) {

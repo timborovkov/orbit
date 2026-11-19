@@ -240,7 +240,9 @@ the first invalid field. On success, close after the server action completes.
 
 Show agent identity, lifecycle, current configuration version and OpenRouter
 status above the task tabs. The tasks are Configuration, Playground,
-Knowledge, Email, History, Approvals and Access. Use a horizontal tablist with
+Knowledge, Email, History, Approvals and Access. Save evaluation cases from
+History or Email; open Comparisons from the global Evaluations page. Use a
+horizontal tablist with
 Left, Right, Home and End support above 600px and a full-width Select at
 600px and narrower. Keep task panels mounted so drafts survive navigation.
 
@@ -346,6 +348,18 @@ resolved entries under History. Show agent, action, recipients, originating
 run link when available, draft and age. Use one initial timestamp for relative
 ages on the server and browser and show the full UTC timestamp on demand.
 Support filtering by agent or run, and cap bulk selection at 50.
+
+### Evaluations
+
+Global Evaluations navigation lists saved cases and comparisons. Cases come
+from Playground history or inbound email via an inline “Save as case” form on
+those surfaces. Starting a comparison requires one case and two distinct
+configuration versions for the same agent. The comparison detail page shows
+the shared input once, then a two-column side-by-side of drafts, citations,
+policy decisions and run status. Stack the columns below 900px. Pending
+comparisons soft-refresh like other in-flight workspace work. Replay runs use
+origin `replay`; the policy gateway and outbound dispatch gate always suppress
+external writes for that execution context.
 
 ## Design review and verification
 
