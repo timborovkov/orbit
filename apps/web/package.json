@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "bun scripts/dev.ts",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "bun scripts/start-standalone.ts",
     "typecheck": "tsc --noEmit"
   },
