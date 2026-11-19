@@ -5,8 +5,17 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, isToolUIPart } from 'ai';
-import { ArrowUp, ChevronDown, Eraser, FlaskConical, ShieldCheck } from 'lucide-react';
+import {
+  ArrowUp,
+  ChevronDown,
+  Clock3,
+  Eraser,
+  FlaskConical,
+  ShieldCheck,
+  TriangleAlert,
+} from 'lucide-react';
 
+import { KnowledgeToolResult } from '@/app/knowledge-citations';
 import {
   Conversation,
   ConversationContent,
@@ -41,9 +50,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { PlaygroundMessage as ChatMessage } from '@/lib/runtime/chat-ui';
+import type { PlaygroundUIMessage } from '@/lib/runtime/chat-ui';
 import {
   PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
+  playgroundAttachmentRejection,
   playgroundEffectiveConfigurationId,
   type PlaygroundVersionSelection,
 } from '@/lib/runtime/playground-ui';
@@ -74,6 +84,14 @@ function queuedRunId({ type, data }: { type: string; data: unknown }) {
   return null;
 }
 
+function isStatusText(text: string) {
+  return (
+    text.startsWith('Simulation queued') ||
+    text.startsWith('Timed out waiting') ||
+    text.includes('No OpenRouter credential')
+  );
+}
+
 export function PlaygroundChat({
   agentId,
   agentName,
@@ -82,6 +100,7 @@ export function PlaygroundChat({
   versions,
   currentConfigurationId,
   latestRun,
+  runStatuses,
 }: {
   agentId: string;
   agentName: string;
@@ -90,6 +109,7 @@ export function PlaygroundChat({
   versions: AgentVersion[];
   currentConfigurationId: string;
   latestRun?: ReactNode;
+  runStatuses: Record<string, string>;
 }) {
   const router = useRouter();
   const [versionSelection, setVersionSelection] = useState<PlaygroundVersionSelection>({
@@ -109,7 +129,7 @@ export function PlaygroundChat({
 
   const transport = useMemo(
     () =>
-      new DefaultChatTransport<ChatMessage>({
+      new DefaultChatTransport<PlaygroundUIMessage>({
         api: `/api/agents/${agentId}/chat`,
         credentials: 'same-origin',
         prepareSendMessagesRequest: ({ body }) => ({ body: body ?? {} }),
@@ -118,7 +138,7 @@ export function PlaygroundChat({
   );
 
   const { messages, sendMessage, status, stop, error, setMessages, clearError } =
-    useChat<ChatMessage>({
+    useChat<PlaygroundUIMessage>({
       transport,
       onData: (part) => {
         const id = queuedRunId(part);
@@ -264,10 +284,12 @@ export function PlaygroundChat({
 
       <div className="playground-chat-shell">
         <PlaygroundConversation
+          agentId={agentId}
           messages={messages}
           busy={busy}
           queued={Boolean(runId)}
           hasLatestRun={Boolean(latestRun)}
+          runStatuses={runStatuses}
         />
 
         <PlaygroundComposer
@@ -279,7 +301,10 @@ export function PlaygroundChat({
           formError={formError}
           onSubmit={onSubmit}
           onAttachment={() => {
-            setFormError(PLAYGROUND_ATTACHMENTS_UNSUPPORTED);
+            setFormError(
+              playgroundAttachmentRejection([{ filename: 'attachment' }]) ??
+                PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
+            );
           }}
           onStopWatching={() => {
             setStoppedWatching(true);
@@ -370,15 +395,19 @@ function PlaygroundComposer({
 }
 
 function PlaygroundConversation({
+  agentId,
   messages,
   busy,
   queued,
   hasLatestRun,
+  runStatuses,
 }: {
-  messages: ChatMessage[];
+  agentId: string;
+  messages: PlaygroundUIMessage[];
   busy: boolean;
   queued: boolean;
   hasLatestRun: boolean;
+  runStatuses: Record<string, string>;
 }) {
   return (
     <Conversation className="playground-conversation">
@@ -391,7 +420,12 @@ function PlaygroundConversation({
           />
         )}
         {messages.map((message) => (
-          <PlaygroundMessage key={message.id} message={message} />
+          <PlaygroundMessage
+            key={message.id}
+            message={message}
+            agentId={agentId}
+            runStatuses={runStatuses}
+          />
         ))}
         {busy && (
           <Message from="assistant">
@@ -411,6 +445,21 @@ function PlaygroundConversation({
   );
 }
 
+function PlaygroundStatusPart({ text }: { text: string }) {
+  const failed = /failed|error|credential|timed out/i.test(text);
+  return (
+    <div className={cn('playground-status', failed && 'is-error')} role="status">
+      {failed ? <TriangleAlert size={16} aria-hidden="true" /> : <Loader />}
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function PlaygroundTextPart({ text }: { text: string }) {
+  if (isStatusText(text)) return <PlaygroundStatusPart text={text} />;
+  return <MessageResponse>{text}</MessageResponse>;
+}
+
 function PlaygroundReasoningPart({ text, state }: { text: string; state?: 'streaming' | 'done' }) {
   const streaming = state === 'streaming';
   return (
@@ -425,7 +474,7 @@ function PlaygroundToolPart({
   part,
 }: {
   part: Extract<
-    ChatMessage['parts'][number],
+    PlaygroundUIMessage['parts'][number],
     { type: `tool-${string}` } | { type: 'dynamic-tool' }
   >;
 }) {
@@ -448,21 +497,73 @@ function PlaygroundToolPart({
   );
 }
 
-function PlaygroundMessagePart({ part }: { part: ChatMessage['parts'][number] }) {
-  if (part.type === 'text') return <MessageResponse>{part.text}</MessageResponse>;
+function PlaygroundMessagePart({
+  agentId,
+  part,
+  runStatuses,
+}: {
+  agentId: string;
+  part: PlaygroundUIMessage['parts'][number];
+  runStatuses: Record<string, string>;
+}) {
+  if (part.type === 'data-approval') {
+    const { runId } = part.data;
+    const status = runStatuses[runId];
+    const awaiting = !status || status === 'awaiting_approval';
+    const continuing = status === 'queued' || status === 'running';
+    return (
+      <div className="playground-status" role="status">
+        <Clock3 size={16} aria-hidden="true" />
+        <span>
+          {awaiting
+            ? 'Awaiting approval'
+            : continuing
+              ? 'Resuming after review'
+              : 'Review recorded'}
+          {' · '}
+          {awaiting ? (
+            <Link href={`/approvals?agent=${agentId}&run=${runId}`}>Review proposals</Link>
+          ) : (
+            <Link href={`/agents/${agentId}?run=${runId}#run-${runId}`}>View run</Link>
+          )}
+        </span>
+      </div>
+    );
+  }
+  if (part.type === 'text') return <PlaygroundTextPart text={part.text} />;
   if (part.type === 'reasoning') {
     return <PlaygroundReasoningPart text={part.text} state={part.state} />;
   }
   if (!isToolUIPart(part)) return null;
+  if (part.type === 'tool-knowledge.search' && 'output' in part)
+    return <KnowledgeToolResult output={part.output} />;
   return <PlaygroundToolPart part={part} />;
 }
 
-function PlaygroundMessage({ message }: { message: ChatMessage }) {
+function PlaygroundMessage({
+  agentId,
+  message,
+  runStatuses,
+}: {
+  agentId: string;
+  message: PlaygroundUIMessage;
+  runStatuses: Record<string, string>;
+}) {
+  const parts = message.parts.some((part) => part.type === 'data-approval')
+    ? message.parts.filter(
+        (part) => part.type !== 'text' || !part.text.startsWith('Simulation queued'),
+      )
+    : message.parts;
   return (
     <Message from={message.role === 'user' ? 'user' : 'assistant'}>
       <MessageContent>
-        {message.parts.map((part, index) => (
-          <PlaygroundMessagePart key={`${message.id}-part-${index}`} part={part} />
+        {parts.map((part, index) => (
+          <PlaygroundMessagePart
+            key={`${message.id}-part-${index}`}
+            agentId={agentId}
+            part={part}
+            runStatuses={runStatuses}
+          />
         ))}
       </MessageContent>
     </Message>

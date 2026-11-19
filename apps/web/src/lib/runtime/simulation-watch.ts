@@ -8,7 +8,10 @@ export function isTerminalSimulationStatus(status: string) {
 }
 
 export function isExpiredSimulationRun(run: { status: string; expiresAt: Date }) {
-  return !isTerminalSimulationStatus(run.status) && run.expiresAt.getTime() < Date.now();
+  return (
+    (run.status === 'running' || run.status === 'queued') &&
+    run.expiresAt.getTime() < Date.now()
+  );
 }
 
 interface WatchOptions {

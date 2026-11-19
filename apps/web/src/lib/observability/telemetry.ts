@@ -485,6 +485,47 @@ export function recordLangfuseScore(score: ScoreInput) {
   }
 }
 
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Record an approval decision as a short-lived Langfuse/OTel span when configured.
+ * Never includes drafts, payloads, or actor emails. Best-effort and non-blocking.
+ */
+export function recordApprovalDecision(input: {
+  intentId: string;
+  agentId: string;
+  runId?: string | null;
+  decision: 'approved' | 'rejected';
+}) {
+  if (!uuid.test(input.intentId) || !uuid.test(input.agentId)) return;
+  void (async () => {
+    try {
+      const tracer = await getTracer();
+      if (!tracer) return;
+      const tags = safeOrbitTags({
+        'orbit.approval.decision': input.decision,
+        'orbit.intent_id': input.intentId,
+        'orbit.agent_id': input.agentId,
+        ...(input.runId && uuid.test(input.runId) ? { 'orbit.run_id': input.runId } : {}),
+      });
+      const span = tracer.startSpan(
+        'orbit.approval.decision',
+        {
+          attributes: {
+            ...tags,
+            ...langfuseMetadataAttributes(tags),
+            'langfuse.observation.type': 'event',
+          },
+        },
+        ROOT_CONTEXT,
+      );
+      span.end();
+    } catch (error) {
+      swallow('Langfuse approval decision span failed', error);
+    }
+  })();
+}
+
 export async function flushTelemetry() {
   try {
     await testProvider?.forceFlush();

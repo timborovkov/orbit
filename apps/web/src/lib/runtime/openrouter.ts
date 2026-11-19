@@ -2,7 +2,12 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText, isStepCount, Output } from 'ai';
 import { z } from 'zod';
 
-import { decisionSchema, type InferenceQuote, type ModelCall } from '@/lib/runtime/simulation';
+import {
+  decisionSchema,
+  groundedDecisionSchema,
+  type InferenceQuote,
+  type ModelCall,
+} from '@/lib/runtime/simulation';
 
 const maxOutputTokens = 3000;
 const microsPerDollar = 1_000_000;
@@ -117,7 +122,9 @@ export function openRouterInference(apiKey: string): ModelCall {
         await beforeProviderCall?.(stepNumber);
         if (hasTools && stepNumber >= toolSteps) return { activeTools: [] };
       },
-      output: Output.object({ schema: decisionSchema }),
+      output: Output.object({
+        schema: request.grounded ? groundedDecisionSchema : decisionSchema,
+      }),
       maxOutputTokens,
       maxRetries: 0,
       abortSignal: signal,

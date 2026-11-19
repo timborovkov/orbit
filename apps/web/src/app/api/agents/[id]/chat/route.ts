@@ -7,7 +7,7 @@ import { recipientId } from '@/lib/policy/scopes';
 import {
   createPlaygroundStreamProgress,
   playgroundChunksFromResult,
-  type PlaygroundMessage,
+  type PlaygroundUIMessage,
 } from '@/lib/runtime/chat-ui';
 import { enqueueSimulation } from '@/lib/runtime/execute';
 import { isTerminalSimulationStatus } from '@/lib/runtime/simulation-watch';
@@ -44,7 +44,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return new Response('Invalid chat request', { status: 400 });
   }
 
-  const stream = createUIMessageStream<PlaygroundMessage>({
+  const stream = createUIMessageStream<PlaygroundUIMessage>({
     execute: async ({ writer }) => {
       writer.write({ type: 'start' });
 
@@ -88,6 +88,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         });
         for (const chunk of chunks) {
           writer.write(chunk);
+        }
+
+        if (run.status === 'awaiting_approval') {
+          writer.write({ type: 'data-approval', data: { runId: run.id } });
+          writer.write({ type: 'finish', finishReason: 'stop' });
+          return;
         }
 
         if (isTerminalSimulationStatus(run.status)) {

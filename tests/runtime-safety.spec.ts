@@ -25,7 +25,7 @@ async function createAgent(page: Page, name: string) {
 }
 
 test.beforeEach(async () => {
-  await sql`TRUNCATE recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE knowledge_chunks, knowledge_documents, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 
@@ -128,11 +128,16 @@ test('administrators control independent spend caps, consent and proposal review
   await expect(page.getByRole('list', { name: 'Recent consent records' })).toContainText('Revoked');
 
   await openAccessSection(page, 'Approvals');
-  const introductionReview = page.getByRole('checkbox', { name: 'Introduce', exact: true });
-  await expect(introductionReview).not.toBeChecked();
-  await expect(page.getByRole('checkbox', { name: 'Escalate', exact: true })).not.toBeChecked();
-  await introductionReview.check();
-  await page.getByRole('checkbox', { name: 'Reply', exact: true }).check();
+  const replyApproval = page.getByRole('switch', { name: 'Reply', exact: true });
+  await replyApproval.click();
+  await expect(replyApproval).toHaveAttribute('aria-checked', 'true');
+  const introduceApproval = page.getByRole('switch', { name: 'Introduce', exact: true });
+  await expect(introduceApproval).toHaveAttribute('aria-checked', 'false');
+  await introduceApproval.click();
+  await expect(page.getByRole('switch', { name: 'Escalate', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  );
   await page.getByRole('button', { name: 'Save approval requirements', exact: true }).click();
   await expect(page.getByText('Approval requirements saved.')).toBeVisible();
   const [approvalPolicy] = await sql`SELECT approval_tools FROM agents WHERE id=${agent.id}`;

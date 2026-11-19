@@ -18,6 +18,7 @@ export const orbitTestWebServer = {
     ORBIT_ADMIN_EMAIL: 'admin@example.com',
     ORBIT_ADMIN_PASSWORD: 'test-only-password-123456',
     ORBIT_WORKER_ID: 'playwright-worker',
+    KNOWLEDGE_EMBEDDING_STUB: 'true',
   },
 };
 
@@ -29,6 +30,7 @@ export default defineConfig({
     'workspace.spec.ts',
     'pictures.spec.ts',
     'runtime-safety.spec.ts',
+    'knowledge.spec.ts',
   ],
   workers: 1,
   use: {

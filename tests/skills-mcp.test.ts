@@ -30,6 +30,8 @@ const policy = {
   enabledTools: [] as string[],
   approvalTools: [] as string[],
   consentRequiredTools: [],
+  approvalSpendCents: null as number | null,
+  approvalExpiresAfterHours: null as number | null,
   budgets: budgetDefaults,
   globalPaused: false,
   usage: {
@@ -655,8 +657,10 @@ test('load_skill and read-only MCP do not require spare inference quota', () => 
   const saturated = {
     lifecycle: 'shadow' as const,
     enabledTools: [] as string[],
-    approvalTools: undefined,
+    approvalTools: [] as string[],
     consentRequiredTools: [],
+    approvalSpendCents: null as number | null,
+    approvalExpiresAfterHours: null as number | null,
     budgets: {
       ...budgetDefaults,
       dailyRequests: 12,

@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
-/** Soft-refresh the agent workspace while runs are queued or running. */
+/** Soft-refresh the agent workspace while runs or knowledge jobs are in flight. */
 export function PendingRunRefresh({ active }: { active: boolean }) {
   const router = useRouter();
   useEffect(() => {

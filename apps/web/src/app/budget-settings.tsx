@@ -74,7 +74,8 @@ const groups = [
   {
     id: 'run',
     title: 'Run limits',
-    description: 'Concurrency, tool steps and wall-clock deadline for a single run.',
+    description:
+      'Queued, running and awaiting-approval runs share the concurrency limit. Tool steps and the wall-clock deadline apply to each run.',
     keys: ['maxConcurrentRuns', 'maxToolStepsPerRun', 'runDeadlineSeconds'] as const,
   },
 ] as const;

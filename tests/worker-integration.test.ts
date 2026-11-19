@@ -1322,6 +1322,11 @@ test('introductions honor independent consent and administrator review settings'
   await persistApprovalTools(actor, id, ['introduce']);
   const proposed = await run();
   expect(proposed.proposal.policy).toBe('needs-approval');
+  const [suspended] =
+    await sql`SELECT status, job_id FROM simulation_runs WHERE id=${proposed.runId}`;
+  expect(suspended.status).toBe('awaiting_approval');
+  const [suspendedJob] = await sql`SELECT status FROM jobs WHERE id=${suspended.job_id}`;
+  expect(suspendedJob.status).toBe('completed');
   await consent('fixture-b', false);
   expect(
     await reviewProposedAction(actor, id, proposed.proposal.intentId, 'approved'),
@@ -1334,6 +1339,20 @@ test('introductions honor independent consent and administrator review settings'
   const [intent] = await sql`SELECT * FROM action_intents WHERE id=${proposed.proposal.intentId}`;
   expect(intent.review_status).toBe('approved');
   expect(intent.decision).toBe('suppressed');
+  const [resumed] =
+    await sql`SELECT status, job_id FROM simulation_runs WHERE id=${proposed.runId}`;
+  expect(resumed.status).toBe('queued');
+  let providerCalls = 0;
+  await processSimulationJob({ runId: proposed.runId }, () => async () => {
+    providerCalls++;
+    throw new Error('Resume must not redispatch paid model stages');
+  });
+  expect(providerCalls).toBe(0);
+  const [finished] =
+    await sql`SELECT status, result FROM simulation_runs WHERE id=${proposed.runId}`;
+  expect(finished.status).toBe('completed');
+  expect(finished.result.actions[0].policy).toBe('suppressed');
+
   await consent('fixture-b', false);
   const ctx = (await loadPolicyContext(id, actor, proposed.runId))!;
   expect(

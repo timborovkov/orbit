@@ -1,9 +1,13 @@
 import type { UIMessage } from 'ai';
 
-import type { SimulationResult } from '@/lib/runtime/simulation';
+import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
+import { groundedAnswerFromResult, type SimulationResult } from '@/lib/runtime/simulation';
 import { isTerminalSimulationStatus } from '@/lib/runtime/simulation-watch';
 
-export type PlaygroundMessage = UIMessage<unknown, { run: { id: string } }>;
+export type PlaygroundUIMessage = UIMessage<
+  unknown,
+  { run: { id: string }; approval: { runId: string } }
+>;
 
 /** Chunks the UI message stream protocol can emit for a playground reply. */
 export type PlaygroundStreamChunk =
@@ -28,6 +32,7 @@ export type PlaygroundStreamChunk =
 export interface PlaygroundStreamProgress {
   emittedStages: Set<'evaluator' | 'main'>;
   emittedActions: Set<string>;
+  emittedKnowledge: boolean;
   textStarted: boolean;
   textFinished: boolean;
 }
@@ -36,6 +41,7 @@ export function createPlaygroundStreamProgress(): PlaygroundStreamProgress {
   return {
     emittedStages: new Set(),
     emittedActions: new Set(),
+    emittedKnowledge: false,
     textStarted: false,
     textFinished: false,
   };
@@ -94,6 +100,24 @@ export function playgroundChunksFromResult(
   // Only emit action tool cards from the finalized result so evaluator candidates
   // that the main stage later drops or rewrites do not stick around as completed tools.
   const terminal = isTerminalSimulationStatus(options.status);
+  const grounded = terminal ? groundedAnswerFromResult(result) : null;
+  if (terminal && result.knowledge && !progress.emittedKnowledge) {
+    progress.emittedKnowledge = true;
+    const toolCallId = KNOWLEDGE_SEARCH_TOOL;
+    const { status, reason } = result.knowledge;
+    chunks.push({
+      type: 'tool-input-available',
+      toolCallId,
+      toolName: KNOWLEDGE_SEARCH_TOOL,
+      title: 'Knowledge search',
+      input: {},
+    });
+    chunks.push({
+      type: 'tool-output-available',
+      toolCallId,
+      output: { status, reason, sources: grounded?.sources ?? [] },
+    });
+  }
   if (terminal) {
     for (const action of result.actions) {
       const key = `${action.type}:${action.intentId ?? action.policy}:${action.draft ?? ''}`;
@@ -128,15 +152,29 @@ export function playgroundChunksFromResult(
       chunks.push({ type: 'text-start', id: 'reply' });
       progress.textStarted = true;
     }
-    const outcome =
-      options.status === 'interrupted'
-        ? 'The simulation was interrupted.'
-        : 'The simulation failed.';
-    const delta =
-      options.status === 'completed'
-        ? summarizeActions(result.actions)
-        : [outcome, options.deferReason ?? result.error].filter(Boolean).join(' ');
-    chunks.push({ type: 'text-delta', id: 'reply', delta });
+    if (options.status === 'completed') {
+      const answer =
+        grounded?.answer ??
+        (result.knowledge?.status === 'allow'
+          ? 'The knowledge library did not provide enough evidence for an answer.'
+          : '');
+      const actions = grounded && !result.actions.length ? '' : summarizeActions(result.actions);
+      chunks.push({
+        type: 'text-delta',
+        id: 'reply',
+        delta: [answer, actions].filter(Boolean).join('\n\n'),
+      });
+    } else {
+      const outcome =
+        options.status === 'interrupted'
+          ? 'The simulation was interrupted.'
+          : 'The simulation failed.';
+      chunks.push({
+        type: 'text-delta',
+        id: 'reply',
+        delta: [outcome, options.deferReason ?? result.error].filter(Boolean).join(' '),
+      });
+    }
     if (options.runId) {
       chunks.push({
         type: 'text-delta',

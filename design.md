@@ -193,44 +193,80 @@ status. Its save bar is separated by a top border and subtle fill. Identity,
 Behaviour and Models section buttons show one field group at a time; hidden fields
 remain mounted. Invalid required fields reveal their section before receiving focus.
 
-The workspace offers Configuration, Playground, History, Approvals and Access. The
-desktop tab list has one tab stop and supports Left, Right, Home and End. Hidden panels
-remain mounted so drafts survive tab changes. At 600px and below, a Select switches
-workspace sections. Configuration uses one editor and one save bar.
-
-Playground uses one column with the latest persisted run, a configuration version Select,
-an optional recipient disclosure and a text-only AI Elements composer. The run card shows
-the input, version and current status. Expanding it shows the saved evaluation, policy
-outcomes, drafts and usage. It remains available after a reload or stream disconnect.
-The composer identifies inference as paid and explains that the simulation sends no posts
-or messages. During a live watch, the chat streams evaluation checkpoints and final action
-proposals. The waiting indicator ends when the stream ends. An interrupted run shows its
-recorded reason. **Stop watching** explains that inference can continue and links directly
-to the matching History entry.
-
-History uses native details and summary for each run and configuration version. It reports
-the provider cost where available and labels missing costs. The workspace refreshes after
-the stream acknowledges the queued run and every two seconds while a run is pending, so
-both Playground and History can show the outcome after the stream closes.
-
-Access presents Lifecycle, Budgets, Approvals, Consent, Skills, MCP and OpenRouter in
-a left-side navigator. At 900px and below it switches to a Select. Hidden sections preserve unsaved
-form values. Lifecycle uses a list of state cards with keyboard-accessible action
-buttons and a Current label. Budgets group related limits in cards. Daily and monthly
-spend caps have independently named No cap switches, with the visible switch row stacking
-beneath its label on small screens. Access → Approvals lists every action, including introductions
-and escalations, with administrator review off by default. Access → Consent lets the administrator
-choose which of those two actions require recorded permission. Both consent requirements start on.
-Consent records pair a recipient ID with a scope, choice and evidence reference. The Approvals
-queue shows pending decisions first with their drafts and approve or reject controls. OpenRouter
-shows the active key source by label.
-The encrypted agent override is entered in a password field and cleared after submission.
-Removing it falls back to the environment default when one is available.
-Skills and MCP attachments use checkboxes. Each attached MCP connection shows a checklist
-of administrator-classified read-only tools. New attachments start with no tools selected.
-
-Skip links stay visually clipped until keyboard focus, in both left-to-right and
-right-to-left layouts.
+Task tabs are Configuration, Playground, Knowledge, History, Approvals and Access. On
+viewports wider than 600px they use a horizontal tablist with Left/Right/Home/End
+keyboard navigation; at 600px and below they collapse to a full-width Select (same
+pattern as the UI redesign branch). Hidden panels remain mounted, preserving
+unsaved configuration and pasted input when changing tasks. Configuration presents
+one editor and one save bar. Playground is an AI SDK chat surface (`useChat` + AI Elements
+Conversation/Message/PromptInput/Reasoning/Tool/Loader) with a streaming route that still
+enqueues the durable simulation job, watches run checkpoints, and streams evaluation,
+proposed actions and drafts. Empty conversation state explains what will appear; failures
+and interrupted runs show actual state. Paid inference and simulation-only actions remain
+explicit. **Stop watching** explains that inference can continue and links directly to the
+matching History entry.
+Knowledge uses an Access-style left section nav (Documents, Inspector, Playground) with
+one section visible at a time; at ≤900px the section nav collapses to a Select and panels
+stay mounted. Documents is list-first: header Upload control and, when empty, a dashed
+dropzone (“Drop files or browse”, size limit once — types stay in the section heading).
+Rows show title + status Badge, then a muted sans meta line (type, size, chunk count,
+relative “Updated …” with full UTC in a tooltip). Row actions live in an ellipsis
+DropdownMenu; Delete confirms via AlertDialog. Failed rows surface the error with
+Retry. Inspector uses a single-line InputGroup with an adjacent Inspect control; results
+open with a “Found N passages” header (plus a “Dev stub embeddings” Badge when the stub
+embedder is active). Each hit shows title, rank, combined score and vector/text score
+Badges, with raw offsets/reasons behind a Details collapsible. Playground retrieval is a
+shadcn Switch row under its own section. A grounded answer uses numbered citations. Its
+source card shows the filename, page or section, and quoted passage. History keeps the
+same citations with the saved run.
+History uses native details/summary for run content and exact configuration snapshots.
+History shows the provider’s recorded cost and labels missing cost explicitly.
+Access uses a Configuration-style left nav (Lifecycle, Budgets, Approvals, Consent,
+Skills, MCP, OpenRouter) with one section visible at a time. Budgets use card groups and a two-column
+desktop grid, with No cap Switches on the same heading row as spend labels (`space-between`
+gap, switch never overlapping the label) and inline unit suffixes. Per-field copy is only
+the short usage line; longer explanations stay in the card description. Access → Approvals
+lists every action, including introductions and escalations, with administrator review off
+by default. Access → Consent lets the administrator choose which of those two actions
+require recorded permission; both consent requirements start on. Approval requirements in
+Access use Switch rows (label, description, control) plus optional spend (InputGroup `$`),
+expiry and rejection behaviour. Saving per-agent approval settings creates a configuration
+version. Skills/MCP pickers use shadcn Checkbox rows (label, description, control).
+Attached MCP connections show a nested checklist of administrator-classified read-only tools.
+New attachments start with an empty tool checklist. Pause, consent and tool availability are
+checked live. Queued, running and awaiting-approval runs share the per-agent concurrency limit.
+Consent and Playground version pickers use shadcn Select. Lifecycle uses radio-card rows with
+consistent actions.
+Playground is a single chat column: toolbar settings (version Select, recipients Collapsible),
+AI Elements Conversation with status/Loader messages, and PromptInput (text-only for now —
+file attachments stay off until the simulation runtime can consume them — one bordered
+composer, PromptInputSubmit with ArrowUp). The version Select keeps normal foreground/background
+contrast while selectable (not greyed as disabled). Task tabs switch to a Select at ≤600px;
+Access section nav switches to a Select at ≤900px (wider screens keep scrollable tablist/sub-nav
+with fade edges). Access panels stay mounted so drafts survive section switches. On narrow
+Budgets, each No cap Switch sits on its own row under the field label. Skip links are visually hidden
+until `:focus-visible`; screenshot helpers blur focus so captures never show them.
+Consent records pair a recipient ID with a scope, choice and evidence reference. Playground
+accepts the same IDs for consent checks in an optional disclosure. The global Approvals page
+lists pending items newest first with the agent, action, recipients, link to the originating
+run, draft and age. The inbox filters by agent or run, groups resolved entries under History,
+and caps bulk selection at 50. Relative ages share the same initial timestamp on the server
+and in the browser. The tooltip shows UTC. The nav badge shows the global pending count. Approvals actions use
+the shared `Button` component. Draft fields must not sit inside the global flex `label` rule.
+Lifecycle clearly labels Live as simulation-only until adapters are configured. Access also shows
+which OpenRouter key source is active—agent key, environment default or none—by label only, never
+by value or prefix. It accepts a password input for an agent override, clears it after submission
+and never reads the secret back. Removing an agent key falls back to the environment default when
+configured; otherwise it retains a visible missing-key state. History shows
+queued, running, awaiting approval, completed, failed and interrupted runs with linked job status.
+When a run suspends, the chat stream ends with an Awaiting approval status and a link to its review.
+Playground refreshes the workspace when the stream acknowledges a queued simulation so History and
+PendingRunRefresh see the new run immediately; while any run is queued, running or awaiting
+approval, the workspace soft-refreshes every two seconds so Playground and History pick up worker
+results without a manual reload. The chat route polls runs through an authorized `lib/server` watch
+helper; PromptInput rejects attachments until the runtime can consume them; tool cards emit only on
+terminal results so evaluator candidates cannot outlive the final plan. No loading skeletons on
+Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents
@@ -266,6 +302,7 @@ This file is the single design reference for Orbit. Keep the lowercase filename 
 
 | Date       | Source                                                                                                         | Decision                                                                                                                                                                       |
 | ---------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-11-18 | User: merge #22 into knowledge PR; Knowledge matches Access nav                                                | Knowledge Documents/Inspector/Playground use Access-style left nav + ≤900px Select; Playground retrieval is a Switch; one helper block per section.                            |
 | 2026-11-18 | User: shared skill library + generic MCP connections with agent opt-in                                         | Add `/skills` and `/mcp` library pages and Access multi-select pickers; keep UI scoped to those surfaces to reduce conflict with concurrent UI work.                           |
 | 2026-11-18 | User screenshot review on PR #22: Linear-level polish for Skills/MCP                                           | List-first pages with dialog create/edit, Field spacing, chip allowlists + header KV rows + Fetch tools, shadcn Select for transport, Markdown Write/Preview, slug-from-title. |
 | 2026-11-16 | User: “dark and light mode, a mode switch, auto, responsive design. Use the logos.”                            | Support Light, Dark and Auto, responsive layouts, the supplied logo and a matching favicon.                                                                                    |
@@ -457,3 +494,15 @@ as the non-root runtime user. Captures are saved in
 `.impeccable/review/profile-picture-Light-1440.png` and
 `.impeccable/review/profile-picture-Dark-390.png`. No remote infrastructure was
 provisioned and no real OpenRouter call was made during this milestone.
+
+### Agent knowledge library — 18 November 2026
+
+The Knowledge tab uses Access-style Documents / Inspector / Playground sections (left nav
+desktop, Select ≤900px). Documents stay list-first with pending/processing/ready/failed
+Badges. Empty library uses a dashed dropzone; header Upload remains available once
+documents exist. Row meta is muted sans; actions use an ellipsis menu with delete
+confirmation. Inspector query is a single-line InputGroup; retrieval failures render a destructive
+shadcn Alert in the Inspector panel (not only under Documents). Hit counts and
+stub-embedding notices live in the inspector results header. Playground retrieval is a
+Switch. Soft refresh also covers in-flight knowledge jobs. Task tabs still use the
+compact Select at ≤600px.

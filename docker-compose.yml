@@ -60,6 +60,8 @@ services:
       S3_BUCKET: ${S3_BUCKET:-orbit}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-orbit_local}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-orbit_local_storage_only}
+      KNOWLEDGE_EMBEDDING_MODEL: ${KNOWLEDGE_EMBEDDING_MODEL:-}
+      KNOWLEDGE_EMBEDDING_DIMENSIONS: ${KNOWLEDGE_EMBEDDING_DIMENSIONS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,6 +81,13 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-}
       ORBIT_WORKER_ID: ${ORBIT_WORKER_ID:-compose-worker}
+      S3_ENDPOINT: http://rustfs:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-orbit}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-orbit_local}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-orbit_local_storage_only}
+      KNOWLEDGE_EMBEDDING_MODEL: ${KNOWLEDGE_EMBEDDING_MODEL:-}
+      KNOWLEDGE_EMBEDDING_DIMENSIONS: ${KNOWLEDGE_EMBEDDING_DIMENSIONS:-}
     depends_on:
       postgres:
         condition: service_healthy

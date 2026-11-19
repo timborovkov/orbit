@@ -244,6 +244,47 @@ describe('bounded manual simulation', () => {
     expect(resumed.steps[0].stage).toBe('evaluator');
     expect(resumed.steps[1].stage).toBe('main');
   });
+  test('knowledge retrieval runs with a one-slot tool budget', async () => {
+    let retrieved = 0;
+    const result = await simulate(
+      config,
+      'What is the refund policy?',
+      async () => ({ decision, inputTokens: 1, outputTokens: 1 }),
+      async () => {},
+      {
+        maxToolSteps: 1,
+        retrieveKnowledge: async () => {
+          retrieved += 1;
+          return {
+            status: 'allow',
+            hits: [
+              {
+                chunkId: '00000000-0000-4000-8000-000000000099',
+                documentId: '00000000-0000-4000-8000-000000000098',
+                agentId: '00000000-0000-4000-8000-000000000097',
+                content: 'Refunds within 30 days.',
+                sourceTitle: 'FAQ',
+                sourceFilename: 'faq.md',
+                page: null,
+                section: null,
+                startOffset: 0,
+                endOffset: 22,
+                rankScore: 1,
+                vectorScore: 0.9,
+                textScore: 0.8,
+                reasons: ['vector'],
+              },
+            ],
+          };
+        },
+      },
+    );
+    expect(retrieved).toBe(1);
+    expect(result.knowledge?.status).toBe('allow');
+    expect(result.knowledge?.hits).toHaveLength(1);
+    // Contrast: the previous >= 3 gate skipped retrieval for maxToolSteps 1.
+    expect(result.steps.length).toBeGreaterThan(0);
+  });
   test('fresh runs share skill version records so load_skill flips loaded', async () => {
     const versions = [
       {
@@ -265,6 +306,56 @@ describe('bounded manual simulation', () => {
     );
     expect(result.skillVersions).toBe(versions);
     expect(result.skillVersions?.[0]?.loaded).toBe(true);
+  });
+  test('resume with both stages checkpointed never calls inference', async () => {
+    const checkpointed: SimulationResult = {
+      steps: [
+        {
+          stage: 'evaluator',
+          model: 'test/evaluator',
+          decision,
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+        {
+          stage: 'main',
+          model: 'test/main',
+          decision: { ...decision, reason: 'Reviewed draft' },
+          inputTokens: 2,
+          outputTokens: 2,
+        },
+      ],
+      actions: decision.actions.map((action) => ({
+        ...action,
+        policy: 'suppressed' as const,
+        effect: 'Simulation only. No external action performed.',
+      })),
+      error: null,
+    };
+    let calls = 0;
+    const resumed = await simulate(
+      config,
+      'question',
+      async () => {
+        calls += 1;
+        throw new Error('must not construct or call inference when both stages are checkpointed');
+      },
+      async () => {},
+      {
+        maxToolSteps: 2,
+        initial: checkpointed,
+        onActions: async (candidates) =>
+          candidates.map((candidate) => ({
+            ...candidate,
+            policy: 'suppressed' as const,
+            effect: 'Reviewed without redistributing paid stages.',
+          })),
+      },
+    );
+    expect(calls).toBe(0);
+    expect(resumed.steps).toHaveLength(2);
+    expect(resumed.actions.every((action) => action.policy === 'suppressed')).toBe(true);
+    expect(resumed.error).toBeNull();
   });
   test('resume keeps checkpointed skill attribution when the catalogue changes', async () => {
     const checkpointed: SimulationResult = {
