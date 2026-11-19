@@ -89,9 +89,11 @@ Use pgvector for semantic matching of knowledge passages, long-term textual memo
 
 ## 8. Native knowledge base and RAG
 
-Each agent has a private document library for PDFs, Markdown, plain text, FAQs, product descriptions, brand materials and documentation. Files are stored in object storage; PostgreSQL stores ownership, versions, extraction state, chunks, metadata and optional embeddings.
+Each agent has a private document library for PDFs, Markdown, plain text, FAQs, product descriptions, brand materials and documentation. Files are stored in object storage; PostgreSQL stores ownership, extraction state, chunks, metadata and embeddings.
 
-Upload flow: authenticate admin → upload original → create durable document record → worker extracts and cleans text → split into source-aware chunks → embed → store chunks in PostgreSQL/pgvector → mark searchable. Retrieval: agent-scoped hybrid search → source-labelled passages → answer grounded in retrieved evidence. Provide a knowledge inspection screen showing retrieved chunks and source documents.
+Upload flow: authenticate admin → upload original to RustFS (`agents/{agentId}/knowledge/{documentId}/…`) → create durable `knowledge_documents` row (`pending`) → enqueue `knowledge.process` on the Postgres job queue → worker extracts and cleans text → split into source-aware chunks (document, page/section, offsets) → embed via OpenRouter (AI SDK `embed`/`embedMany`, per-agent key then `OPENROUTER_API_KEY`) → store chunks and `vector(1536)` embeddings in PostgreSQL/pgvector → mark `ready` (or `failed`). Retries reuse embeddings already stored for unchanged chunk hashes so reprocessing does not re-pay completed vectors. Default embedding model is `openai/text-embedding-3-small` (`KNOWLEDGE_EMBEDDING_MODEL` / `KNOWLEDGE_EMBEDDING_DIMENSIONS` optional).
+
+Retrieval: agent-scoped `knowledge.search` tool (read-only) runs hybrid search — pgvector cosine similarity plus Postgres full-text (`tsvector`/`ts_rank_cd`) — merged with reciprocal rank fusion, then returns source-labelled passages with citation metadata. Every invocation goes through the policy gateway. The agent Knowledge tab lists documents with status, supports upload/replace/reprocess/delete, and includes a retrieval inspector for query → ranked chunks, scores and match reasons.
 
 Keep personality and operating rules in instructions, reference knowledge in RAG, and changing operational facts behind authenticated MCP/native tools. Support reprocessing, replacement, deletion and embedding invalidation.
 

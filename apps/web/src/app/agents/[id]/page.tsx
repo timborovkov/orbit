@@ -6,6 +6,7 @@ import { saveConfiguration } from '@/actions/workspace';
 import { AccessWorkbench } from '@/app/access-workbench';
 import { AgentAvatar } from '@/app/agent-avatar';
 import { ConfigFields } from '@/app/config-fields';
+import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { PlaygroundChat } from '@/app/playground-chat';
 import { ProposalReview } from '@/app/policy-settings';
@@ -17,8 +18,10 @@ import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { formatUtcTimestamp } from '@/lib/format';
+import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
+import { listKnowledgeDocuments } from '@/lib/server/knowledge-queries';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
@@ -44,7 +47,8 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
     skillIds,
     mcpSelections,
   } = workspace;
-  const [{ items: librarySkills }, { items: libraryMcp }] = await Promise.all([
+  const [knowledgeDocuments, { items: librarySkills }, { items: libraryMcp }] = await Promise.all([
+    listKnowledgeDocuments(id),
     listSkillSummaries(),
     listMcpConnections(),
   ]);
@@ -53,6 +57,9 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
   const viewedHistory = history;
   const hasPendingRuns = history.some(
     (run) => run.displayStatus === 'queued' || run.displayStatus === 'running',
+  );
+  const hasPendingKnowledge = knowledgeDocuments.some(
+    (doc) => doc.status === 'pending' || doc.status === 'processing',
   );
   const versionFor = (configurationId: string) =>
     versions.find((version) => version.id === configurationId)?.version;
@@ -213,11 +220,24 @@ export default async function AgentWorkspace({ params }: { params: Promise<{ id:
             <span className="muted">{openRouterConnectionLabel(keySource)}</span>
           </div>
         </div>
-        <PendingRunRefresh active={hasPendingRuns} />
+        <PendingRunRefresh active={hasPendingRuns || hasPendingKnowledge} />
         <WorkspaceTabs
           items={[
             { id: 'configure', label: 'Configuration', content: configuration },
             { id: 'playground', label: 'Playground', content: playground },
+            {
+              id: 'knowledge',
+              label: 'Knowledge',
+              count: knowledgeDocuments.length,
+              content: (
+                <KnowledgeWorkbench
+                  agentId={id}
+                  documents={knowledgeDocuments}
+                  storageReady={storageConfigured()}
+                  searchEnabled={agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)}
+                />
+              ),
+            },
             { id: 'history', label: 'History', count: history.length, content: historyPanel },
             {
               id: 'approvals',

@@ -14,6 +14,7 @@ import {
   type BudgetSnapshot,
 } from '@/lib/budgets';
 import { db } from '@/lib/db';
+import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
@@ -27,6 +28,10 @@ import {
   retryableStore,
   UnrecoverablePaidStepFinalizationError,
 } from '@/lib/runtime/errors';
+import {
+  consumeKnowledgeToolStep,
+  recordKnowledgeToolCall,
+} from '@/lib/runtime/knowledge/tool-step';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { prepareRunTools } from '@/lib/runtime/resources';
@@ -37,6 +42,7 @@ import {
   type SimulationResult,
 } from '@/lib/runtime/simulation';
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
+import { nativeTools } from '@/lib/runtime/tools/native';
 import { agents, configurations, credentials, jobs, runs, usageCounters } from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
@@ -678,6 +684,59 @@ async function processSimulationRun(
             skillVersions: resources.skillVersions,
             mcpConnections: resources.mcpConnections,
             toolCalls: resources.toolCalls,
+            retrieveKnowledge: agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
+              ? async (requestSignal) => {
+                  const query = run.input.slice(0, 2000);
+                  const args = { query, limit: 4 };
+                  const slot = consumeKnowledgeToolStep(
+                    resources.toolSteps,
+                    resources.toolCalls,
+                    args,
+                  );
+                  if (!slot.ok) {
+                    return { status: 'deny', reason: slot.reason, hits: [] };
+                  }
+                  try {
+                    const { policy, result: searchResult } = await nativeTools[
+                      KNOWLEDGE_SEARCH_TOOL
+                    ]({
+                      actor: run.actor,
+                      agentId: run.agentId,
+                      runId: run.id,
+                      query,
+                      limit: 4,
+                      idempotencyKey: idempotencyKey([run.id, KNOWLEDGE_SEARCH_TOOL]),
+                      execution: { runId: run.id, token: executionToken, signal: requestSignal },
+                    });
+                    const status = policy.decision === 'allow' ? 'allow' : 'deny';
+                    recordKnowledgeToolCall(resources.toolCalls, args, {
+                      policy: status,
+                      result: searchResult ? { hitCount: searchResult.hits.length } : null,
+                      error: status === 'allow' ? undefined : policy.reasons.join(' '),
+                    });
+                    return {
+                      status,
+                      reason: policy.reasons.join(' '),
+                      hits: searchResult?.hits ?? [],
+                    };
+                  } catch (error) {
+                    if (isBudgetError(error) || requestSignal.aborted) throw error;
+                    reportFailure('worker.runtime', failureCorrelation(), error);
+                    const reason =
+                      'Knowledge retrieval failed. Check the agent’s library and OpenRouter connection.';
+                    recordKnowledgeToolCall(resources.toolCalls, args, {
+                      policy: 'deny',
+                      result: null,
+                      error: reason,
+                    });
+                    return {
+                      status: 'failed',
+                      reason,
+                      hits: [],
+                    };
+                  }
+                }
+              : undefined,
             prepare: async (request, partial) => {
               try {
                 await telemetry.withSpan(

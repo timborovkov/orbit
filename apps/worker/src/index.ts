@@ -2,6 +2,7 @@ import { hostname } from 'node:os';
 import * as Sentry from '@sentry/bun';
 
 import { closeDb } from '@/lib/db';
+import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { registerErrorCapture } from '@/lib/observability/errors';
 import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import { startJobWorker } from '@/lib/queue/worker';
@@ -11,6 +12,12 @@ import {
   reconcileOrphanedSimulationRuns,
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
+import {
+  finalizeFailedKnowledgeJob,
+  processKnowledgeDocument,
+  reconcileDeadKnowledgeJobs,
+} from '@/lib/runtime/knowledge/process';
+import { resolveKnowledgeEmbedders } from '@/lib/runtime/knowledge/provider';
 import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
 import { workerEnvConfig } from '@/lib/worker-env';
 
@@ -47,6 +54,7 @@ function jobCorrelation(job: { id: string; payload: Record<string, unknown> }) {
     jobId: job.id,
     runId: typeof job.payload.runId === 'string' ? job.payload.runId : undefined,
     agentId: typeof job.payload.agentId === 'string' ? job.payload.agentId : undefined,
+    documentId: typeof job.payload.documentId === 'string' ? job.payload.documentId : undefined,
   };
 }
 
@@ -64,14 +72,37 @@ const worker = startJobWorker({
         throw error;
       }
     },
+    [KNOWLEDGE_JOB_TYPE]: async (job, signal) => {
+      try {
+        const agentId = typeof job.payload.agentId === 'string' ? job.payload.agentId : undefined;
+        if (!agentId) throw new Error('Knowledge job is missing agentId');
+        let provider: Awaited<ReturnType<typeof resolveKnowledgeEmbedders>> | undefined;
+        await processKnowledgeDocument(
+          job.payload,
+          async (values, abortSignal) => {
+            provider ??= await resolveKnowledgeEmbedders(agentId);
+            return provider.embedMany(values, abortSignal);
+          },
+          signal,
+        );
+      } catch (error) {
+        reportFailure('worker.runtime', jobCorrelation(job), error);
+        throw error;
+      }
+    },
   },
   onDeadLetter: async (job, error) => {
     reportFailure('worker.dead_letter', jobCorrelation(job), error);
-    if (job.type !== SIMULATION_JOB_TYPE) return;
-    await finalizeExhaustedSimulationJob(job.payload, error);
+    if (job.type === SIMULATION_JOB_TYPE) {
+      await finalizeExhaustedSimulationJob(job.payload, error);
+      return;
+    }
+    if (job.type === KNOWLEDGE_JOB_TYPE) {
+      await finalizeFailedKnowledgeJob(job.payload, error);
+    }
   },
   reconcileDeadLetters: async () => {
-    await reconcileOrphanedSimulationRuns();
+    await Promise.all([reconcileOrphanedSimulationRuns(), reconcileDeadKnowledgeJobs()]);
   },
   onError: (error) => {
     console.error('Worker queue operation failed.');

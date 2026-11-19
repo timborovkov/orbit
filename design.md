@@ -193,8 +193,10 @@ status. Its save bar is separated by a top border and subtle fill. Identity,
 Behaviour and Models section buttons show one field group at a time; hidden fields
 remain mounted. Invalid required fields reveal their section before receiving focus.
 
-Task tabs are Configuration, Playground, History, Approvals and Access, with one keyboard tab
-stop plus Left/Right/Home/End navigation. Hidden panels remain mounted, preserving
+Task tabs are Configuration, Playground, Knowledge, History, Approvals and Access. On
+viewports wider than 600px they use a horizontal tablist with Left/Right/Home/End
+keyboard navigation; at 600px and below they collapse to a full-width Select (same
+pattern as the UI redesign branch). Hidden panels remain mounted, preserving
 unsaved configuration and pasted input when changing tasks. Configuration presents
 one editor and one save bar. Playground is an AI SDK chat surface (`useChat` + AI Elements
 Conversation/Message/PromptInput/Reasoning/Tool/Loader) with a streaming route that still
@@ -202,6 +204,20 @@ enqueues the durable simulation job, watches run checkpoints, and streams evalua
 proposed actions and drafts. Empty conversation state explains what will appear; failures
 and interrupted runs show actual state. Paid inference and simulation-only actions remain
 explicit.
+Knowledge uses an Access-style left section nav (Documents, Inspector, Playground) with
+one section visible at a time; at ≤900px the section nav collapses to a Select and panels
+stay mounted. Documents is list-first: header Upload control and, when empty, a dashed
+dropzone (“Drop files or browse”, size limit once — types stay in the section heading).
+Rows show title + status Badge, then a muted sans meta line (type, size, chunk count,
+relative “Updated …” with full UTC in a tooltip). Row actions live in an ellipsis
+DropdownMenu; Delete confirms via AlertDialog. Failed rows surface the error with
+Retry. Inspector uses a single-line InputGroup with an adjacent Inspect control; results
+open with a “Found N passages” header (plus a “Dev stub embeddings” Badge when the stub
+embedder is active). Each hit shows title, rank, combined score and vector/text score
+Badges, with raw offsets/reasons behind a Details collapsible. Playground retrieval is a
+shadcn Switch row under its own section. A grounded answer uses numbered citations. Its
+source card shows the filename, page or section, and quoted passage. History keeps the
+same citations with the saved run.
 History uses native details/summary for run content and exact configuration snapshots.
 History shows the provider’s recorded cost and labels missing cost explicitly.
 Access uses a Configuration-style left nav (Lifecycle, Budgets, Approvals, Consent,
@@ -223,7 +239,7 @@ desktop grid, with No cap Switches on the same heading row as spend labels (`spa
   Access section nav switches to a Select at ≤900px (wider screens keep scrollable tablist/sub-nav
   with fade edges). Access panels stay mounted so drafts survive section switches. On narrow
   Budgets, each No cap Switch sits on its own row under the field label. Skip links stay
-  off-screen until `:focus-visible`; screenshot helpers blur focus so captures never show them.
+  visually hidden until `:focus-visible`; screenshot helpers blur focus so captures never show them.
   Consent records pair a recipient ID with a scope, choice and evidence reference. Approvals shows
   the pending queue first, with the draft and explicit approve and reject controls. Lifecycle
   clearly labels Live as simulation-only until adapters are configured. Access also shows which
@@ -274,6 +290,7 @@ This file is the single design reference for Orbit. Keep the lowercase filename 
 
 | Date       | Source                                                                                                         | Decision                                                                                                                                                                       |
 | ---------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-11-18 | User: merge #22 into knowledge PR; Knowledge matches Access nav                                                | Knowledge Documents/Inspector/Playground use Access-style left nav + ≤900px Select; Playground retrieval is a Switch; one helper block per section.                            |
 | 2026-11-18 | User: shared skill library + generic MCP connections with agent opt-in                                         | Add `/skills` and `/mcp` library pages and Access multi-select pickers; keep UI scoped to those surfaces to reduce conflict with concurrent UI work.                           |
 | 2026-11-18 | User screenshot review on PR #22: Linear-level polish for Skills/MCP                                           | List-first pages with dialog create/edit, Field spacing, chip allowlists + header KV rows + Fetch tools, shadcn Select for transport, Markdown Write/Preview, slug-from-title. |
 | 2026-11-16 | User: “dark and light mode, a mode switch, auto, responsive design. Use the logos.”                            | Support Light, Dark and Auto, responsive layouts, the supplied logo and a matching favicon.                                                                                    |
@@ -458,3 +475,15 @@ as the non-root runtime user. Captures are saved in
 `.impeccable/review/profile-picture-Light-1440.png` and
 `.impeccable/review/profile-picture-Dark-390.png`. No remote infrastructure was
 provisioned and no real OpenRouter call was made during this milestone.
+
+### Agent knowledge library — 18 November 2026
+
+The Knowledge tab uses Access-style Documents / Inspector / Playground sections (left nav
+desktop, Select ≤900px). Documents stay list-first with pending/processing/ready/failed
+Badges. Empty library uses a dashed dropzone; header Upload remains available once
+documents exist. Row meta is muted sans; actions use an ellipsis menu with delete
+confirmation. Inspector query is a single-line InputGroup; retrieval failures render a destructive
+shadcn Alert in the Inspector panel (not only under Documents). Hit counts and
+stub-embedding notices live in the inspector results header. Playground retrieval is a
+Switch. Soft refresh also covers in-flight knowledge jobs. Task tabs still use the
+compact Select at ≤600px.
