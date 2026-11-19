@@ -27,6 +27,7 @@ async function getSimulationRun(runId: string) {
     .limit(1);
   const run = rows.at(0);
   if (!run) return null;
+  // Only mid-flight running past deadline; queued waits for claim (fresh deadline).
   if (isExpiredSimulationRun(run)) {
     return {
       ...run,

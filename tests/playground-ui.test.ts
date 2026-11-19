@@ -77,14 +77,45 @@ describe('simulation run watch service', () => {
     expect(isTerminalSimulationStatus('awaiting_approval')).toBe(false);
   });
 
-  test('treats only running or queued past-deadline runs as expired', () => {
+  test('treats only mid-flight running past-deadline runs as expired', () => {
     const past = new Date(Date.now() - 60_000);
     const future = new Date(Date.now() + 60_000);
     expect(isExpiredSimulationRun({ status: 'running', expiresAt: past })).toBe(true);
-    expect(isExpiredSimulationRun({ status: 'queued', expiresAt: past })).toBe(true);
+    expect(isExpiredSimulationRun({ status: 'queued', expiresAt: past })).toBe(false);
     expect(isExpiredSimulationRun({ status: 'awaiting_approval', expiresAt: past })).toBe(false);
     expect(isExpiredSimulationRun({ status: 'completed', expiresAt: past })).toBe(false);
     expect(isExpiredSimulationRun({ status: 'running', expiresAt: future })).toBe(false);
+  });
+
+  test('keeps watching past-deadline queued runs until a persisted terminal status', async () => {
+    const past = new Date(Date.now() - 60_000);
+    const sequence = [
+      { id: 'run-1', status: 'queued', expiresAt: past },
+      { id: 'run-1', status: 'queued', expiresAt: past },
+      { id: 'run-1', status: 'completed', expiresAt: past },
+    ] as const;
+    let index = 0;
+    const observations: Array<{ status: string } | null> = [];
+    for await (const run of watchSimulationRunWithLookup(
+      async () => {
+        const next = sequence[index] ?? sequence.at(-1)!;
+        index += 1;
+        // Mirror playground-queries: only rewrite mid-flight expired runs.
+        if (isExpiredSimulationRun(next)) {
+          return { ...next, status: 'interrupted' as const };
+        }
+        return next;
+      },
+      'run-1',
+      {
+        intervalMs: 5,
+        deadlineMs: 1000,
+        sleep: async () => undefined,
+      },
+    )) {
+      observations.push(run);
+    }
+    expect(observations.map((run) => run?.status)).toEqual(['queued', 'queued', 'completed']);
   });
 
   test('polls through lookup until the run is terminal', async () => {
