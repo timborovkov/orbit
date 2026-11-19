@@ -18,6 +18,11 @@ import {
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
 import {
+  finalizeFailedFollowUpJob,
+  FOLLOW_UP_JOB_TYPE,
+  processFollowUpJob,
+} from '@/lib/runtime/follow-ups/process';
+import {
   finalizeFailedKnowledgeJob,
   processKnowledgeDocument,
   reconcileDeadKnowledgeJobs,
@@ -104,6 +109,14 @@ const worker = startJobWorker({
         throw error;
       }
     },
+    [FOLLOW_UP_JOB_TYPE]: async (job) => {
+      try {
+        await processFollowUpJob(job.payload, job.attempts);
+      } catch (error) {
+        reportFailure('worker.runtime', jobCorrelation(job), error);
+        throw error;
+      }
+    },
   },
   onDeadLetter: async (job, error) => {
     reportFailure('worker.dead_letter', jobCorrelation(job), error);
@@ -113,6 +126,10 @@ const worker = startJobWorker({
     }
     if (job.type === KNOWLEDGE_JOB_TYPE) {
       await finalizeFailedKnowledgeJob(job.payload, error);
+      return;
+    }
+    if (job.type === FOLLOW_UP_JOB_TYPE) {
+      await finalizeFailedFollowUpJob(job.payload, error);
     }
   },
   reconcileDeadLetters: async () => {

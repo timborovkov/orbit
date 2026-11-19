@@ -83,6 +83,25 @@ export const DEMO_KNOWLEDGE_CHUNKS = {
 export const DEMO_KNOWLEDGE_DOC_IDS = Object.values(DEMO_KNOWLEDGE_DOCS);
 export const DEMO_KNOWLEDGE_CHUNK_IDS = Object.values(DEMO_KNOWLEDGE_CHUNKS);
 
+/** Durable follow-ups and their delayed jobs owned by the demo seed. */
+export const DEMO_FOLLOW_UPS = {
+  johnScheduled: '00000000-0000-4000-a800-000000000001',
+  sarahCompleted: '00000000-0000-4000-a800-000000000011',
+} as const;
+
+export const DEMO_FOLLOW_UP_JOBS = {
+  johnScheduled: '00000000-0000-4000-a810-000000000001',
+  sarahCompleted: '00000000-0000-4000-a810-000000000011',
+} as const;
+
+export const DEMO_ACTIVITY = {
+  sarahFollowUpCompleted: '00000000-0000-4000-a820-000000000011',
+} as const;
+
+export const DEMO_FOLLOW_UP_IDS = Object.values(DEMO_FOLLOW_UPS);
+export const DEMO_FOLLOW_UP_JOB_IDS = Object.values(DEMO_FOLLOW_UP_JOBS);
+export const DEMO_ACTIVITY_IDS = Object.values(DEMO_ACTIVITY);
+
 export function isDemoAgentId(id: string): boolean {
   return (DEMO_AGENT_IDS as readonly string[]).includes(id);
 }

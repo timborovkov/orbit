@@ -5,6 +5,7 @@ import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
 import { lockApprovalAgent, recordApprovalReviews } from '@/lib/runtime/approval-work';
 import { EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
+import { skipScheduledFollowUpsForLifecycle } from '@/lib/runtime/follow-ups/process';
 import { actionIntents, agents, emailMessages, runs } from '@/lib/schema';
 
 /**
@@ -39,6 +40,9 @@ export async function cancelWorkForLifecycle(
     includeClaimed,
     excludeTypes: [KNOWLEDGE_JOB_TYPE, EMAIL_RECEIVE_JOB],
   });
+  // Follow-ups use skip-and-record: mark scheduled commitments skipped and
+  // write activity events when pause/stop cancels their delayed jobs.
+  await skipScheduledFollowUpsForLifecycle(agentId, next, store);
   if (next === 'stopped') {
     await store
       .update(runs)

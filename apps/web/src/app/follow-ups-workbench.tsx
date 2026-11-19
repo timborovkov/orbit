@@ -1,0 +1,219 @@
+'use client';
+
+import { useState, useTransition } from 'react';
+import { CalendarClock, ChevronDown } from 'lucide-react';
+
+import { cancelAgentFollowUp, scheduleAgentFollowUp } from '@/actions/follow-ups';
+import { WorkspaceForm } from '@/app/workspace-form';
+import { Button } from '@/components/ui/button';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { formatUtcTimestamp } from '@/lib/format';
+import { followUpStatusLabels, type FollowUpStatus } from '@/lib/runtime/follow-ups/types';
+
+export interface FollowUpRow {
+  id: string;
+  subject: string;
+  note: string;
+  dueAt: Date;
+  status: FollowUpStatus;
+  attempts: number;
+  createdBy: string;
+  source: string;
+  cancelledAt: Date | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+  finishedAt: Date | null;
+  outcome: string | null;
+  outcomeKind: string | null;
+  jobStatus: string | null;
+  jobAvailableAt: Date | null;
+  createdAt: Date;
+}
+
+function toDatetimeLocalValue(date: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function defaultDueLocal() {
+  return toDatetimeLocalValue(new Date(Date.now() + 60 * 60 * 1000));
+}
+
+function CancelFollowUpButton({ agentId, followUpId }: { agentId: string; followUpId: string }) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div className="follow-up-cancel">
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      <Button
+        type="button"
+        variant="destructive"
+        disabled={pending}
+        onClick={() => {
+          startTransition(async () => {
+            setError(null);
+            const form = new FormData();
+            form.set('agentId', agentId);
+            form.set('followUpId', followUpId);
+            const result = await cancelAgentFollowUp(form);
+            if (result.error) setError(result.error);
+          });
+        }}
+      >
+        {pending ? 'Cancelling…' : 'Cancel follow-up'}
+      </Button>
+    </div>
+  );
+}
+
+export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items: FollowUpRow[] }) {
+  const [dueDefault] = useState(defaultDueLocal);
+
+  return (
+    <div className="follow-ups-workbench">
+      <section className="follow-ups-schedule" aria-labelledby="follow-ups-schedule-heading">
+        <div className="editor-section-heading">
+          <h2 id="follow-ups-schedule-heading">Schedule a follow-up</h2>
+          <p className="muted">
+            Durable commitments survive worker restarts. When due, Orbit records an internal outcome
+            on the activity timeline — no external actions.
+          </p>
+        </div>
+        <WorkspaceForm action={scheduleAgentFollowUp} label="Schedule follow-up">
+          <input type="hidden" name="agentId" value={agentId} />
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="follow-up-subject">Subject</FieldLabel>
+              <Input
+                id="follow-up-subject"
+                name="subject"
+                required
+                maxLength={200}
+                placeholder="Check whether the demo was booked"
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="follow-up-due">Due</FieldLabel>
+              <Input
+                id="follow-up-due"
+                name="dueAt"
+                type="datetime-local"
+                required
+                defaultValue={dueDefault}
+              />
+              <FieldDescription>
+                Due times are stored in UTC and claimed by the durable job queue.
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="follow-up-note">Note</FieldLabel>
+              <Textarea
+                id="follow-up-note"
+                name="note"
+                maxLength={2000}
+                rows={3}
+                placeholder="Optional context for the internal outcome"
+              />
+            </Field>
+          </FieldGroup>
+        </WorkspaceForm>
+      </section>
+
+      <section className="follow-ups-list" aria-labelledby="follow-ups-list-heading">
+        <div className="editor-section-heading">
+          <h2 id="follow-ups-list-heading">Follow-ups</h2>
+          <p className="muted">Inspect status, attempts, cancellation and recorded outcomes.</p>
+        </div>
+        {!items.length && (
+          <div className="follow-ups-empty">
+            <CalendarClock size={24} aria-hidden="true" />
+            <p>No follow-ups yet. Schedule one above.</p>
+          </div>
+        )}
+        {items.map((item) => (
+          <details key={item.id} className="follow-up-detail" id={`follow-up-${item.id}`}>
+            <summary>
+              <div>
+                <span className="follow-up-title">{item.subject}</span>
+                <time dateTime={item.dueAt.toISOString()}>
+                  Due {formatUtcTimestamp(item.dueAt)}
+                  {item.jobStatus ? ` · job ${item.jobStatus}` : ''}
+                  {item.attempts > 0
+                    ? ` · ${item.attempts} attempt${item.attempts === 1 ? '' : 's'}`
+                    : ''}
+                </time>
+              </div>
+              <span className="state-label">{followUpStatusLabels[item.status]}</span>
+              <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
+            </summary>
+            <dl className="follow-up-inspect">
+              <div>
+                <dt>Source</dt>
+                <dd>{item.source}</dd>
+              </div>
+              <div>
+                <dt>Created by</dt>
+                <dd>{item.createdBy}</dd>
+              </div>
+              <div>
+                <dt>Created</dt>
+                <dd>
+                  <time dateTime={item.createdAt.toISOString()}>
+                    {formatUtcTimestamp(item.createdAt)}
+                  </time>
+                </dd>
+              </div>
+              {item.note ? (
+                <div>
+                  <dt>Note</dt>
+                  <dd>{item.note}</dd>
+                </div>
+              ) : null}
+              {item.outcome ? (
+                <div>
+                  <dt>Outcome</dt>
+                  <dd>{item.outcome}</dd>
+                </div>
+              ) : null}
+              {item.outcomeKind ? (
+                <div>
+                  <dt>Outcome kind</dt>
+                  <dd>{item.outcomeKind}</dd>
+                </div>
+              ) : null}
+              {item.finishedAt ? (
+                <div>
+                  <dt>Finished</dt>
+                  <dd>
+                    <time dateTime={item.finishedAt.toISOString()}>
+                      {formatUtcTimestamp(item.finishedAt)}
+                    </time>
+                  </dd>
+                </div>
+              ) : null}
+              {item.cancelReason ? (
+                <div>
+                  <dt>Cancel reason</dt>
+                  <dd>
+                    {item.cancelReason}
+                    {item.cancelledBy ? ` (${item.cancelledBy})` : ''}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+            {item.status === 'scheduled' && (
+              <CancelFollowUpButton agentId={agentId} followUpId={item.id} />
+            )}
+          </details>
+        ))}
+      </section>
+    </div>
+  );
+}

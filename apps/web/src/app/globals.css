@@ -4070,3 +4070,135 @@ textarea.library-field-control {
 .email-draft h4 {
   margin-bottom: 0.5rem;
 }
+
+.history-primary {
+  display: grid;
+  gap: 40px;
+  min-width: 0;
+}
+
+.activity-timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.activity-timeline-list > li {
+  border-top: 1px solid var(--border);
+  padding: 16px 0;
+}
+
+.activity-timeline-list > li:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.activity-summary {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.activity-detail {
+  margin-top: 6px;
+  max-width: 68ch;
+}
+
+.activity-timeline time {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.follow-ups-workbench {
+  display: grid;
+  gap: 40px;
+  max-width: 52rem;
+}
+
+.follow-ups-empty {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 36px 0;
+  border-block: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.follow-up-detail {
+  border-top: 1px solid var(--border);
+}
+
+.follow-up-detail:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.follow-up-detail > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 0;
+  cursor: pointer;
+}
+
+.follow-up-detail > summary > div {
+  min-width: 0;
+}
+
+.follow-up-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60ch;
+  font-weight: 500;
+  font-size: 0.8125rem;
+}
+
+.follow-up-detail time {
+  display: block;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.follow-up-inspect {
+  display: grid;
+  gap: 12px;
+  padding: 0 0 18px;
+  max-width: 68ch;
+}
+
+.follow-up-inspect > div {
+  display: grid;
+  gap: 4px;
+}
+
+.follow-up-inspect dt {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.follow-up-inspect dd {
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.follow-up-cancel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 18px;
+}
+
+@media (max-width: 600px) {
+  .follow-up-detail > summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
