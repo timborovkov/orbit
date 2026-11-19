@@ -174,6 +174,13 @@ The global pause action submits the desired state so repeating a request has
 the same effect. Show its current state in text and give the action a pending
 label while it saves.
 
+After authentication, Overview keeps its heading and navigation visible while
+the agent summary, table and activity load. Placeholders use the same responsive
+grid and table columns as the loaded view. Keep them static and out of the
+accessibility tree. A visible loading status announces the wait. Routes with
+variable content use a compact Orbit loading indicator. Spinner motion follows
+the reduced-motion preference.
+
 ### Sign-in and appearance
 
 Use a centred, scrollable 400px panel with the 64px emblem, a 24px heading and

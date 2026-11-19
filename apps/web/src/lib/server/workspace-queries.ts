@@ -38,20 +38,21 @@ export async function getPendingApprovalCount() {
 
 export async function getOverview() {
   const email = await requireAdmin();
-  const [team, events, state, presets, pendingApprovals] = await Promise.all([
+  return { email, pendingApprovalCount: countPendingApprovals(), data: loadOverviewData() };
+}
+
+async function loadOverviewData() {
+  const [team, events, state, presets] = await Promise.all([
     db().select().from(agents).orderBy(desc(agents.createdAt)),
     db().select().from(audit).orderBy(desc(audit.createdAt)).limit(12),
     db().select().from(controls),
     db().select().from(templates),
-    countPendingApprovals(),
   ]);
   return {
-    email,
     team,
     events,
     state,
     presets,
-    pendingApprovalCount: pendingApprovals,
   };
 }
 
