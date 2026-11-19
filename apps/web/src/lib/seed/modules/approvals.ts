@@ -3,7 +3,7 @@ import { demoTime } from '@/lib/seed/clock';
 import { DEMO_ACTOR, DEMO_AGENTS, DEMO_INTENTS, DEMO_POLICY, DEMO_RUNS } from '@/lib/seed/ids';
 import type { SeedModule } from '@/lib/seed/types';
 
-/** Pending / reviewed proposals so Approvals and Access screens look realistic. */
+/** Pending / reviewed / expiry-bound proposals so Approvals inbox looks realistic. */
 export const approvalsModule: SeedModule = {
   name: 'approvals',
   async apply({ tx, now }) {
@@ -17,6 +17,8 @@ export const approvalsModule: SeedModule = {
         reviewStatus: 'pending' as const,
         reviewedBy: null as string | null,
         reviewedAt: null as Date | null,
+        reviewExpiresAt: null as Date | null,
+        reviewNote: null as string | null,
         payload: {
           reason: 'Account-specific worker logs may need a human.',
           draft: null,
@@ -28,6 +30,27 @@ export const approvalsModule: SeedModule = {
         policyId: DEMO_POLICY.sarahEscalate,
       },
       {
+        id: DEMO_INTENTS.sarahEscalateSuspended,
+        agentId: DEMO_AGENTS.sarah,
+        runId: DEMO_RUNS.sarahAwaitingApproval,
+        actionType: 'escalate',
+        recipients: ['acct-support-42'],
+        reviewStatus: 'pending' as const,
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewExpiresAt: demoTime(now, 47 * 60 * 60 * 1000),
+        reviewNote: null,
+        payload: {
+          reason: 'Duplicate billing dispute needs human review of account ledger.',
+          draft: null,
+        },
+        decision: 'needs-approval',
+        reasons: ['escalate requires administrator approval for this agent.'],
+        idempotencyKey: 'orbit-demo:intent:sarah-escalate-suspended',
+        createdOffsetMs: -90 * 60 * 1000,
+        policyId: DEMO_POLICY.sarahEscalateSuspended,
+      },
+      {
         id: DEMO_INTENTS.mayaIntroduceApproved,
         agentId: DEMO_AGENTS.maya,
         runId: DEMO_RUNS.mayaSucceeded,
@@ -36,6 +59,8 @@ export const approvalsModule: SeedModule = {
         reviewStatus: 'approved' as const,
         reviewedBy: DEMO_ACTOR,
         reviewedAt: demoTime(now, -46 * 60 * 60 * 1000),
+        reviewExpiresAt: null,
+        reviewNote: 'Demo seed: mutual benefit confirmed.',
         payload: {
           reason: 'Complementary skills with mutual benefit.',
           draft:
@@ -56,6 +81,8 @@ export const approvalsModule: SeedModule = {
         reviewStatus: 'pending' as const,
         reviewedBy: null,
         reviewedAt: null,
+        reviewExpiresAt: demoTime(now, 70 * 60 * 60 * 1000),
+        reviewNote: null,
         payload: {
           reason: 'Design systems meet research ops — awaiting admin review.',
           draft: null,
@@ -81,6 +108,8 @@ export const approvalsModule: SeedModule = {
           reviewStatus: row.reviewStatus,
           reviewedBy: row.reviewedBy,
           reviewedAt: row.reviewedAt,
+          reviewExpiresAt: row.reviewExpiresAt,
+          reviewNote: row.reviewNote,
           payload: row.payload,
           idempotencyKey: row.idempotencyKey,
           decision: row.decision,
@@ -97,6 +126,8 @@ export const approvalsModule: SeedModule = {
             reviewStatus: row.reviewStatus,
             reviewedBy: row.reviewedBy,
             reviewedAt: row.reviewedAt,
+            reviewExpiresAt: row.reviewExpiresAt,
+            reviewNote: row.reviewNote,
             payload: row.payload,
             idempotencyKey: row.idempotencyKey,
             decision: row.decision,

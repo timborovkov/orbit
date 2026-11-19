@@ -21,7 +21,7 @@ import { getOverview } from '@/lib/server/workspace-queries';
 
 export const dynamic = 'force-dynamic';
 export default async function Home() {
-  const { email, team, events, state, presets } = await getOverview();
+  const { email, team, events, state, presets, pendingApprovalCount } = await getOverview();
   const paused = state.at(0)?.paused ?? true;
   const localAuth = env().AUTH_DISABLED;
   return (
@@ -57,6 +57,12 @@ export default async function Home() {
               Overview
             </Link>
             <a href="#agents">Agents</a>
+            <Link href="/approvals">
+              Approvals
+              {pendingApprovalCount > 0 && (
+                <span className="tab-count">{pendingApprovalCount}</span>
+              )}
+            </Link>
             <a href="#activity">Activity</a>
             <Link href="/templates">Templates</Link>
             <Link href="/skills">Skills</Link>

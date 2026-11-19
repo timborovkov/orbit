@@ -21,9 +21,18 @@ export async function createAgentFromTemplate(
         .returning()
     ).at(0);
     if (!agent) throw new Error('Agent insert failed');
-    await tx
-      .insert(configurations)
-      .values({ agentId: agent.id, version: 1, actor, config: { ...template.config, ...data } });
+    await tx.insert(configurations).values({
+      agentId: agent.id,
+      version: 1,
+      actor,
+      config: { ...template.config, ...data },
+      approvalSettings: {
+        approvalTools: [],
+        approvalExpiresAfterHours: null,
+        approvalOnReject: 'continue',
+        approvalSpendCents: null,
+      },
+    });
     await tx.insert(audit).values({
       actor,
       action: `Created shadow agent: ${data.name}`,

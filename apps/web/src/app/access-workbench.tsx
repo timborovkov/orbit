@@ -48,7 +48,11 @@ export function AccessWorkbench({
   lifecycle,
   budgets,
   usage,
+  configurationVersion,
   approvalTools,
+  approvalExpiresAfterHours,
+  approvalOnReject,
+  approvalSpendCents,
   consents,
   hasAgentCredential,
   keySource,
@@ -62,7 +66,11 @@ export function AccessWorkbench({
   lifecycle: LifecycleState;
   budgets: AgentBudgets;
   usage: BudgetUsageView;
+  configurationVersion: number;
   approvalTools: string[];
+  approvalExpiresAfterHours: number | null;
+  approvalOnReject: 'continue' | 'end';
+  approvalSpendCents: number | null;
   consents: Workspace['consents'];
   hasAgentCredential: boolean;
   keySource: OpenRouterKeySource;
@@ -96,7 +104,16 @@ export function AccessWorkbench({
   const panels: Record<(typeof sections)[number]['id'], ReactNode> = {
     lifecycle: <LifecycleControls agentId={agentId} lifecycle={lifecycle} />,
     budgets: <BudgetSettings agentId={agentId} budgets={budgets} usage={usage} />,
-    approvals: <ReviewSettings agentId={agentId} approvalTools={approvalTools} />,
+    approvals: (
+      <ReviewSettings
+        agentId={agentId}
+        configurationVersion={configurationVersion}
+        approvalTools={approvalTools}
+        approvalExpiresAfterHours={approvalExpiresAfterHours}
+        approvalOnReject={approvalOnReject}
+        approvalSpendCents={approvalSpendCents}
+      />
+    ),
     consent: <ConsentSettings agentId={agentId} consents={consents} />,
     skills: <SkillPicker agentId={agentId} skills={skills} selectedIds={skillIds} />,
     mcp: (

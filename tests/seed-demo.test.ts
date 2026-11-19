@@ -10,7 +10,14 @@ import {
   isLocalDatabaseUrl,
   listSeedModuleNames,
 } from '@/lib/seed';
-import { demoAgents, demoConfigurations, demoConsents, demoRuns } from '@/lib/seed/catalog';
+import {
+  demoAgents,
+  demoConfigurations,
+  demoConsents,
+  demoKnowledgeDocuments,
+  demoRuns,
+} from '@/lib/seed/catalog';
+import { DEMO_CONFIGS } from '@/lib/seed/ids';
 
 describe('demo seed guards', () => {
   test('accepts loopback development databases', () => {
@@ -101,13 +108,38 @@ describe('demo seed idempotency and markers', () => {
     expect(agents.some((agent) => agent.fakeOpenRouterKey?.includes('demo'))).toBe(true);
   });
 
-  test('runs include succeeded, failed and interrupted with tool steps', () => {
+  test('runs include succeeded, failed, interrupted and awaiting_approval', () => {
     const runs = demoRuns();
     const statuses = new Set(runs.map((run) => run.status));
-    expect(statuses).toEqual(new Set(['completed', 'failed', 'interrupted']));
+    expect(statuses).toEqual(
+      new Set(['completed', 'failed', 'interrupted', 'awaiting_approval']),
+    );
     expect(runs.some((run) => run.result.steps.length >= 2)).toBe(true);
     expect(runs.some((run) => run.result.error)).toBe(true);
+    expect(runs.some((run) => run.status === 'awaiting_approval' && run.deferReason)).toBe(true);
     expect(runs.every((run) => run.id.startsWith('00000000-0000-4000-a200-'))).toBe(true);
+  });
+
+  test('agents and configurations carry durable approval settings', () => {
+    const sarah = demoAgents().find((agent) => agent.id === DEMO_AGENTS.sarah);
+    expect(sarah?.approvalExpiresAfterHours).toBe(48);
+    expect(sarah?.approvalOnReject).toBe('continue');
+    expect(sarah?.approvalSpendCents).toBe(2_500);
+    expect(sarah?.enabledTools).toContain('knowledge.search');
+
+    const configs = demoConfigurations();
+    expect(configs.every((row) => row.approvalSettings)).toBe(true);
+    expect(
+      configs.find((row) => row.id === DEMO_CONFIGS.sarahV2)?.approvalSettings.approvalTools,
+    ).toEqual(['escalate']);
+  });
+
+  test('knowledge documents include ready chunks and a failed upload', () => {
+    const docs = demoKnowledgeDocuments();
+    expect(docs.length).toBeGreaterThanOrEqual(3);
+    expect(docs.some((doc) => doc.status === 'ready' && doc.chunks.length >= 2)).toBe(true);
+    expect(docs.some((doc) => doc.status === 'failed' && doc.error)).toBe(true);
+    expect(docs.every((doc) => doc.id.startsWith('00000000-0000-4000-a700-'))).toBe(true);
   });
 
   test('configuration versions and consents are present', () => {
@@ -124,6 +156,7 @@ describe('demo seed idempotency and markers', () => {
     expect(names).toContain('runs');
     expect(names).toContain('consents');
     expect(names).toContain('approvals');
+    expect(names).toContain('knowledge');
     expect(names).toContain('usage');
     expect(names).toContain('credentials');
     expect(names).toContain('controls');

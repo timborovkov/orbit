@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 
 import { budgetDefaults, budgetsSchema, type AgentBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
@@ -11,7 +11,7 @@ import {
   type LifecycleState,
 } from '@/lib/lifecycle';
 import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
-import { agents, audit } from '@/lib/schema';
+import { agents, audit, configurations, type ApprovalSettings } from '@/lib/schema';
 
 export async function persistLifecycle(actor: string, agentId: string, next: LifecycleState) {
   const parsed = lifecycleSchema.safeParse(next);
@@ -80,18 +80,50 @@ export async function persistBudgets(actor: string, agentId: string, budgets: Ag
 export async function persistApprovalTools(
   actor: string,
   agentId: string,
-  approvalTools: string[],
+  version: number,
+  settings: ApprovalSettings,
 ) {
   return db().transaction(async (tx) => {
-    const rows = await tx
-      .update(agents)
-      .set({ approvalTools })
-      .where(eq(agents.id, agentId))
-      .returning({ id: agents.id, name: agents.name });
-    if (!rows.length) return false;
+    const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
+      0,
+    );
+    if (!agent) return { error: 'Agent not found.' };
+    const current = (
+      await tx
+        .select()
+        .from(configurations)
+        .where(eq(configurations.agentId, agentId))
+        .orderBy(desc(configurations.version))
+        .limit(1)
+    ).at(0);
+    if (current?.version !== version) {
+      return { error: 'Configuration changed. Refresh the workspace and try again.' };
+    }
+    const { approvalTools, approvalExpiresAfterHours, approvalOnReject, approvalSpendCents } =
+      agent;
     await tx
-      .insert(audit)
-      .values({ actor, action: `Changed approval requirements for ${rows[0].name}` });
-    return true;
+      .update(configurations)
+      .set({
+        approvalSettings: {
+          approvalTools,
+          approvalExpiresAfterHours,
+          approvalOnReject,
+          approvalSpendCents,
+        },
+      })
+      .where(and(eq(configurations.agentId, agentId), isNull(configurations.approvalSettings)));
+    await tx.insert(configurations).values({
+      agentId,
+      version: version + 1,
+      config: current.config,
+      approvalSettings: settings,
+      actor,
+    });
+    await tx.update(agents).set(settings).where(eq(agents.id, agentId));
+    await tx.insert(audit).values({
+      actor,
+      action: `Changed approval requirements for ${agent.name} in configuration v${version + 1}`,
+    });
+    return { message: 'Approval requirements saved.' };
   });
 }

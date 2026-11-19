@@ -1,9 +1,19 @@
 import { budgetDefaults, type AgentBudgets } from '@/lib/budgets';
+import { KNOWLEDGE_SEARCH_TOOL, type KnowledgeContentKind } from '@/lib/knowledge/types';
 import type { LifecycleState } from '@/lib/lifecycle';
 import type { AgentConfig } from '@/lib/runtime/config';
 import type { SimulationResult } from '@/lib/runtime/simulation';
+import type { ApprovalOnReject, ApprovalSettings, RunStatus } from '@/lib/schema';
 import { demoTime, utcDay, utcMonthStart } from '@/lib/seed/clock';
-import { DEMO_AGENTS, DEMO_CONFIGS, DEMO_JOBS, DEMO_RUNS } from '@/lib/seed/ids';
+import {
+  DEMO_AGENTS,
+  DEMO_CONFIGS,
+  DEMO_JOBS,
+  DEMO_KNOWLEDGE_CHUNKS,
+  DEMO_KNOWLEDGE_DOCS,
+  DEMO_KNOWLEDGE_REVISIONS,
+  DEMO_RUNS,
+} from '@/lib/seed/ids';
 
 export interface DemoAgentSpec {
   id: string;
@@ -14,6 +24,9 @@ export interface DemoAgentSpec {
   lifecycle: LifecycleState;
   budgets: AgentBudgets;
   approvalTools: string[];
+  approvalExpiresAfterHours: number | null;
+  approvalOnReject: ApprovalOnReject;
+  approvalSpendCents: number | null;
   enabledTools: string[];
   /** Fake OpenRouter key plaintext when encryption is configured; omitted otherwise. */
   fakeOpenRouterKey?: string;
@@ -24,6 +37,7 @@ export interface DemoConfigSpec {
   agentId: string;
   version: number;
   config: AgentConfig;
+  approvalSettings: ApprovalSettings;
   createdOffsetMs: number;
 }
 
@@ -34,12 +48,40 @@ export interface DemoRunSpec {
   configurationId: string;
   input: string;
   recipients: string[];
-  status: 'completed' | 'failed' | 'interrupted';
+  status: Extract<RunStatus, 'completed' | 'failed' | 'interrupted' | 'awaiting_approval'>;
   result: SimulationResult;
   createdOffsetMs: number;
   finishedOffsetMs: number | null;
   expiresOffsetMs: number;
   deferReason: string | null;
+}
+
+export interface DemoKnowledgeChunkSpec {
+  id: string;
+  chunkIndex: number;
+  content: string;
+  contentHash: string;
+  section: string | null;
+  startOffset: number;
+  endOffset: number;
+}
+
+export interface DemoKnowledgeDocumentSpec {
+  id: string;
+  revision: string;
+  agentId: string;
+  filename: string;
+  title: string;
+  contentKind: KnowledgeContentKind;
+  mimeType: string;
+  byteSize: number;
+  objectKey: string;
+  status: 'ready' | 'failed' | 'pending';
+  error: string | null;
+  contentHash: string | null;
+  createdOffsetMs: number;
+  processedOffsetMs: number | null;
+  chunks: DemoKnowledgeChunkSpec[];
 }
 
 function baseConfig(
@@ -70,7 +112,10 @@ export function demoAgents(): DemoAgentSpec[] {
         monthlySpendCents: 8000,
       },
       approvalTools: [],
-      enabledTools: [],
+      approvalExpiresAfterHours: null,
+      approvalOnReject: 'continue',
+      approvalSpendCents: null,
+      enabledTools: [KNOWLEDGE_SEARCH_TOOL],
       fakeOpenRouterKey: 'sk-or-demo-john-not-a-real-key',
     },
     {
@@ -82,7 +127,10 @@ export function demoAgents(): DemoAgentSpec[] {
       lifecycle: 'live',
       budgets: { ...budgetDefaults },
       approvalTools: ['escalate'],
-      enabledTools: [],
+      approvalExpiresAfterHours: 48,
+      approvalOnReject: 'continue',
+      approvalSpendCents: 2_500,
+      enabledTools: [KNOWLEDGE_SEARCH_TOOL],
     },
     {
       id: DEMO_AGENTS.maya,
@@ -98,6 +146,9 @@ export function demoAgents(): DemoAgentSpec[] {
         monthlyOutboundActions: 400,
       },
       approvalTools: ['introduce'],
+      approvalExpiresAfterHours: 72,
+      approvalOnReject: 'end',
+      approvalSpendCents: 1_500,
       enabledTools: [],
     },
   ];
@@ -138,12 +189,31 @@ export function demoConfigurations(): DemoConfigSpec[] {
     mainModel: 'deepseek/deepseek-v4.1-flash-1017',
     evaluatorModel: 'deepseek/deepseek-v4.1-flash-1017',
   };
+  const johnApproval: ApprovalSettings = {
+    approvalTools: [],
+    approvalExpiresAfterHours: null,
+    approvalOnReject: 'continue',
+    approvalSpendCents: null,
+  };
+  const sarahApproval: ApprovalSettings = {
+    approvalTools: ['escalate'],
+    approvalExpiresAfterHours: 48,
+    approvalOnReject: 'continue',
+    approvalSpendCents: 2_500,
+  };
+  const mayaApproval: ApprovalSettings = {
+    approvalTools: ['introduce'],
+    approvalExpiresAfterHours: 72,
+    approvalOnReject: 'end',
+    approvalSpendCents: 1_500,
+  };
   return [
     {
       id: DEMO_CONFIGS.johnV1,
       agentId: DEMO_AGENTS.john,
       version: 1,
       config: baseConfig('John', johnBase),
+      approvalSettings: johnApproval,
       createdOffsetMs: -14 * 24 * 60 * 60 * 1000,
     },
     {
@@ -154,6 +224,7 @@ export function demoConfigurations(): DemoConfigSpec[] {
         ...johnBase,
         instructions: `${johnBase.instructions} Prefer short replies under 120 words.`,
       }),
+      approvalSettings: johnApproval,
       createdOffsetMs: -3 * 24 * 60 * 60 * 1000,
     },
     {
@@ -161,6 +232,7 @@ export function demoConfigurations(): DemoConfigSpec[] {
       agentId: DEMO_AGENTS.sarah,
       version: 1,
       config: baseConfig('Sarah', sarahBase),
+      approvalSettings: sarahApproval,
       createdOffsetMs: -10 * 24 * 60 * 60 * 1000,
     },
     {
@@ -171,6 +243,7 @@ export function demoConfigurations(): DemoConfigSpec[] {
         ...sarahBase,
         personality: `${sarahPersonality} Lead with empathy before steps.`,
       }),
+      approvalSettings: sarahApproval,
       createdOffsetMs: -2 * 24 * 60 * 60 * 1000,
     },
     {
@@ -178,6 +251,7 @@ export function demoConfigurations(): DemoConfigSpec[] {
       agentId: DEMO_AGENTS.maya,
       version: 1,
       config: baseConfig('Maya', mayaBase),
+      approvalSettings: mayaApproval,
       createdOffsetMs: -7 * 24 * 60 * 60 * 1000,
     },
   ];
@@ -438,6 +512,71 @@ export function demoRuns(): DemoRunSpec[] {
       deferReason: null,
     },
     {
+      id: DEMO_RUNS.sarahAwaitingApproval,
+      jobId: DEMO_JOBS.sarahAwaitingApproval,
+      agentId: DEMO_AGENTS.sarah,
+      configurationId: DEMO_CONFIGS.sarahV2,
+      input:
+        'Billing says we were charged twice for March. Please escalate to a human with account details.',
+      recipients: ['acct-support-42'],
+      status: 'awaiting_approval',
+      result: succeededResult({
+        actions: [
+          {
+            type: 'escalate',
+            reason: 'Duplicate billing dispute needs human review of account ledger.',
+            draft: null,
+            policy: 'needs-approval',
+            effect: 'Held for administrator review.',
+          },
+        ],
+        steps: [
+          {
+            stage: 'evaluator',
+            model: 'deepseek/deepseek-v4.1-flash-1017',
+            inputTokens: 380,
+            outputTokens: 70,
+            costMicros: 1000,
+            decision: {
+              relevant: true,
+              priority: 0.85,
+              reason: 'Billing dispute with account-specific risk.',
+              actions: [
+                {
+                  type: 'escalate',
+                  reason: 'Needs human review of ledger.',
+                  draft: null,
+                },
+              ],
+            },
+          },
+          {
+            stage: 'main',
+            model: 'deepseek/deepseek-v4.1-flash-1017',
+            inputTokens: 860,
+            outputTokens: 140,
+            costMicros: 3600,
+            decision: {
+              relevant: true,
+              priority: 0.9,
+              reason: 'Escalate before promising a refund.',
+              actions: [
+                {
+                  type: 'escalate',
+                  reason: 'Duplicate billing dispute needs human review of account ledger.',
+                  draft: null,
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      createdOffsetMs: -90 * 60 * 1000,
+      finishedOffsetMs: null,
+      expiresOffsetMs: 47 * 60 * 60 * 1000,
+      deferReason: 'Awaiting administrator approval.',
+    },
+    {
       id: DEMO_RUNS.mayaSucceeded,
       jobId: DEMO_JOBS.mayaSucceeded,
       agentId: DEMO_AGENTS.maya,
@@ -609,6 +748,108 @@ export function demoConsents(): DemoConsentSpec[] {
   ];
 }
 
+export function demoKnowledgeDocuments(): DemoKnowledgeDocumentSpec[] {
+  const sarahFaq0 =
+    'Orbit queues playground simulations as jobs. If a run stays queued, confirm the worker process is running and that job claim leases are renewing.';
+  const sarahFaq1 =
+    'Escalate account-specific billing, credential or data-deletion requests. Never ask for passwords or paste secrets into chat.';
+  const john0 =
+    'The Timeline is a work-history product for teams who need a clearer picture of what changed and why.';
+  const john1 =
+    'John books demos with a human closer. He never invents pricing, SLAs or customer logos.';
+  return [
+    {
+      id: DEMO_KNOWLEDGE_DOCS.sarahFaq,
+      revision: DEMO_KNOWLEDGE_REVISIONS.sarahFaq,
+      agentId: DEMO_AGENTS.sarah,
+      filename: 'support-faq.md',
+      title: 'Support FAQ',
+      contentKind: 'faq',
+      mimeType: 'text/markdown',
+      byteSize: sarahFaq0.length + sarahFaq1.length + 64,
+      objectKey: `agents/${DEMO_AGENTS.sarah}/knowledge/${DEMO_KNOWLEDGE_DOCS.sarahFaq}/${DEMO_KNOWLEDGE_REVISIONS.sarahFaq}/support-faq.md`,
+      status: 'ready',
+      error: null,
+      contentHash: 'demo-hash-sarah-faq-v1',
+      createdOffsetMs: -5 * 24 * 60 * 60 * 1000,
+      processedOffsetMs: -5 * 24 * 60 * 60 * 1000 + 30_000,
+      chunks: [
+        {
+          id: DEMO_KNOWLEDGE_CHUNKS.sarahFaq0,
+          chunkIndex: 0,
+          content: sarahFaq0,
+          contentHash: 'demo-hash-sarah-faq-chunk-0',
+          section: 'Worker health',
+          startOffset: 0,
+          endOffset: sarahFaq0.length,
+        },
+        {
+          id: DEMO_KNOWLEDGE_CHUNKS.sarahFaq1,
+          chunkIndex: 1,
+          content: sarahFaq1,
+          contentHash: 'demo-hash-sarah-faq-chunk-1',
+          section: 'Escalation',
+          startOffset: sarahFaq0.length + 2,
+          endOffset: sarahFaq0.length + 2 + sarahFaq1.length,
+        },
+      ],
+    },
+    {
+      id: DEMO_KNOWLEDGE_DOCS.sarahFailed,
+      revision: DEMO_KNOWLEDGE_REVISIONS.sarahFailed,
+      agentId: DEMO_AGENTS.sarah,
+      filename: 'corrupt-notes.pdf',
+      title: 'Corrupt upload (demo)',
+      contentKind: 'pdf',
+      mimeType: 'application/pdf',
+      byteSize: 2048,
+      objectKey: `agents/${DEMO_AGENTS.sarah}/knowledge/${DEMO_KNOWLEDGE_DOCS.sarahFailed}/${DEMO_KNOWLEDGE_REVISIONS.sarahFailed}/corrupt-notes.pdf`,
+      status: 'failed',
+      error: 'Demo seed: extraction failed for intentionally corrupt PDF.',
+      contentHash: null,
+      createdOffsetMs: -2 * 24 * 60 * 60 * 1000,
+      processedOffsetMs: -2 * 24 * 60 * 60 * 1000 + 5_000,
+      chunks: [],
+    },
+    {
+      id: DEMO_KNOWLEDGE_DOCS.johnOverview,
+      revision: DEMO_KNOWLEDGE_REVISIONS.johnOverview,
+      agentId: DEMO_AGENTS.john,
+      filename: 'product-overview.md',
+      title: 'Product overview',
+      contentKind: 'markdown',
+      mimeType: 'text/markdown',
+      byteSize: john0.length + john1.length + 48,
+      objectKey: `agents/${DEMO_AGENTS.john}/knowledge/${DEMO_KNOWLEDGE_DOCS.johnOverview}/${DEMO_KNOWLEDGE_REVISIONS.johnOverview}/product-overview.md`,
+      status: 'ready',
+      error: null,
+      contentHash: 'demo-hash-john-overview-v1',
+      createdOffsetMs: -4 * 24 * 60 * 60 * 1000,
+      processedOffsetMs: -4 * 24 * 60 * 60 * 1000 + 20_000,
+      chunks: [
+        {
+          id: DEMO_KNOWLEDGE_CHUNKS.johnOverview0,
+          chunkIndex: 0,
+          content: john0,
+          contentHash: 'demo-hash-john-overview-chunk-0',
+          section: 'What it is',
+          startOffset: 0,
+          endOffset: john0.length,
+        },
+        {
+          id: DEMO_KNOWLEDGE_CHUNKS.johnOverview1,
+          chunkIndex: 1,
+          content: john1,
+          contentHash: 'demo-hash-john-overview-chunk-1',
+          section: 'How John sells',
+          startOffset: john0.length + 2,
+          endOffset: john0.length + 2 + john1.length,
+        },
+      ],
+    },
+  ];
+}
+
 /** Fingerprint of the logical demo plan for idempotency tests (no DB). */
 export function demoPlanFingerprint(now: Date): string {
   const agents = demoAgents().map((agent) => ({
@@ -616,11 +857,15 @@ export function demoPlanFingerprint(now: Date): string {
     name: agent.name,
     lifecycle: agent.lifecycle,
     templateId: agent.templateId,
+    approvalExpiresAfterHours: agent.approvalExpiresAfterHours,
+    approvalOnReject: agent.approvalOnReject,
+    enabledTools: agent.enabledTools,
   }));
   const configs = demoConfigurations().map((row) => ({
     id: row.id,
     agentId: row.agentId,
     version: row.version,
+    approvalSettings: row.approvalSettings,
     createdAt: demoTime(now, row.createdOffsetMs).toISOString(),
   }));
   const runs = demoRuns().map((row) => ({
@@ -642,5 +887,12 @@ export function demoPlanFingerprint(now: Date): string {
     scope: row.scope,
     granted: row.granted,
   }));
-  return JSON.stringify({ agents, configs, runs, usage, consents });
+  const knowledge = demoKnowledgeDocuments().map((doc) => ({
+    id: doc.id,
+    agentId: doc.agentId,
+    status: doc.status,
+    chunkCount: doc.chunks.length,
+    createdAt: demoTime(now, doc.createdOffsetMs).toISOString(),
+  }));
+  return JSON.stringify({ agents, configs, runs, usage, consents, knowledge });
 }

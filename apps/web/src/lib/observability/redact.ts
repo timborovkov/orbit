@@ -27,6 +27,8 @@ const orbitTagKeys = [
   'orbit.budget_violation',
   'orbit.langfuse_trace_id',
   'orbit.outcome',
+  'orbit.intent_id',
+  'orbit.approval.decision',
 ] as const;
 
 const allowedTagKeys = new Set<string>(orbitTagKeys);
@@ -45,6 +47,8 @@ const allowedEnums = new Set([
   'allow',
   'deny',
   'needs-approval',
+  'approved',
+  'rejected',
   'suppressed',
   'denied',
   'reply',

@@ -2,14 +2,20 @@ import { inArray, sql } from 'drizzle-orm';
 
 import {
   actionIntents,
+  agentMcpConnections,
+  agentSkills,
   agents,
   audit,
   configurations,
   credentials,
   jobs,
+  knowledgeChunks,
+  knowledgeDocuments,
+  mcpConnections,
   policyDecisions,
   recipientConsents,
   runs,
+  skills,
   usageCounters,
 } from '@/lib/schema';
 import {
@@ -18,6 +24,8 @@ import {
   DEMO_AUDIT,
   DEMO_INTENTS,
   DEMO_JOBS,
+  DEMO_KNOWLEDGE_CHUNK_IDS,
+  DEMO_KNOWLEDGE_DOC_IDS,
   DEMO_POLICY,
   DEMO_RUNS,
 } from '@/lib/seed/ids';
@@ -48,6 +56,25 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
 
   await tx.delete(jobs).where(inArray(jobs.id, demoJobIds));
   await tx.delete(jobs).where(sql`${jobs.idempotencyKey} LIKE ${'orbit-demo:%'}`);
+
+  await tx.delete(knowledgeChunks).where(inArray(knowledgeChunks.id, [...DEMO_KNOWLEDGE_CHUNK_IDS]));
+  await tx
+    .delete(knowledgeChunks)
+    .where(inArray(knowledgeChunks.agentId, [...DEMO_AGENT_IDS]));
+  await tx
+    .delete(knowledgeDocuments)
+    .where(inArray(knowledgeDocuments.id, [...DEMO_KNOWLEDGE_DOC_IDS]));
+  await tx
+    .delete(knowledgeDocuments)
+    .where(inArray(knowledgeDocuments.agentId, [...DEMO_AGENT_IDS]));
+
+  // Junction rows for demo agents (skills/MCP library rows themselves stay if shared).
+  await tx.delete(agentSkills).where(inArray(agentSkills.agentId, [...DEMO_AGENT_IDS]));
+  await tx
+    .delete(agentMcpConnections)
+    .where(inArray(agentMcpConnections.agentId, [...DEMO_AGENT_IDS]));
+  await tx.delete(skills).where(sql`${skills.actor} = ${DEMO_ACTOR}`);
+  await tx.delete(mcpConnections).where(sql`${mcpConnections.actor} = ${DEMO_ACTOR}`);
 
   await tx.delete(usageCounters).where(inArray(usageCounters.agentId, [...DEMO_AGENT_IDS]));
   await tx.delete(recipientConsents).where(inArray(recipientConsents.agentId, [...DEMO_AGENT_IDS]));

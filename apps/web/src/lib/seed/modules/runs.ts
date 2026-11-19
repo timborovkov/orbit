@@ -11,8 +11,15 @@ export const runsModule: SeedModule = {
       const createdAt = demoTime(now, row.createdOffsetMs);
       const finishedAt = row.finishedOffsetMs === null ? null : demoTime(now, row.finishedOffsetMs);
       const expiresAt = demoTime(now, row.expiresOffsetMs);
+      // Suspended runs finish their simulation job; resume is a separate enqueue after review.
       const jobStatus =
-        row.status === 'completed' ? 'completed' : row.status === 'failed' ? 'failed' : 'cancelled';
+        row.status === 'completed' || row.status === 'awaiting_approval'
+          ? 'completed'
+          : row.status === 'failed'
+            ? 'failed'
+            : 'cancelled';
+      const jobFinishedAt =
+        row.status === 'awaiting_approval' ? demoTime(now, row.createdOffsetMs + 8_000) : finishedAt;
 
       await tx
         .insert(jobs)
@@ -27,11 +34,11 @@ export const runsModule: SeedModule = {
           claimedAt: createdAt,
           claimExpiresAt: expiresAt,
           claimedBy: 'demo-worker',
-          finishedAt,
+          finishedAt: jobFinishedAt,
           lastError: row.status === 'failed' ? row.result.error : null,
           idempotencyKey: `orbit-demo:run:${row.id}`,
           createdAt,
-          updatedAt: finishedAt ?? createdAt,
+          updatedAt: jobFinishedAt ?? createdAt,
         })
         .onConflictDoUpdate({
           target: jobs.id,
@@ -40,10 +47,10 @@ export const runsModule: SeedModule = {
             payload: { runId: row.id, agentId: row.agentId },
             status: jobStatus,
             attempts: row.status === 'failed' ? 2 : 1,
-            finishedAt,
+            finishedAt: jobFinishedAt,
             lastError: row.status === 'failed' ? row.result.error : null,
             idempotencyKey: `orbit-demo:run:${row.id}`,
-            updatedAt: finishedAt ?? createdAt,
+            updatedAt: jobFinishedAt ?? createdAt,
           },
         });
 

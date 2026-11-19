@@ -15,6 +15,7 @@ export const configurationsModule: SeedModule = {
           agentId: row.agentId,
           version: row.version,
           config: row.config,
+          approvalSettings: row.approvalSettings,
           actor: DEMO_ACTOR,
           createdAt: demoTime(now, row.createdOffsetMs),
         })
@@ -24,6 +25,7 @@ export const configurationsModule: SeedModule = {
             agentId: row.agentId,
             version: row.version,
             config: row.config,
+            approvalSettings: row.approvalSettings,
             actor: DEMO_ACTOR,
             createdAt: demoTime(now, row.createdOffsetMs),
           },

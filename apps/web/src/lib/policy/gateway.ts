@@ -1,5 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 
+import { notifyApprovalPending } from '@/lib/approvals/notify';
+import { actionNeedsApproval, mergeApprovalTools } from '@/lib/approvals/rules';
 import {
   BudgetError,
   budgetViolationMessage,
@@ -11,6 +13,7 @@ import {
   type BudgetViolation,
 } from '@/lib/budgets';
 import { db, type Db, type Tx } from '@/lib/db';
+import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import {
   canAcceptBackgroundWork,
   externalWritesPermitted,
@@ -18,12 +21,12 @@ import {
 } from '@/lib/lifecycle';
 import { mcpToolId, mcpToolIsReadOnly, normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
 import { missingRecipientConsent } from '@/lib/policy/consent';
-import { consentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
 import {
   actionIntents,
   agentMcpConnections,
   agents,
+  configurations,
   controls,
   mcpConnections,
   policyDecisions,
@@ -52,7 +55,9 @@ export interface PolicyContext {
   runId?: string | null;
   lifecycle: LifecycleState;
   enabledTools: string[];
-  approvalTools?: string[];
+  approvalTools: string[];
+  approvalSpendCents: number | null;
+  approvalExpiresAfterHours: number | null;
   budgets: ReturnType<typeof parseBudgets>;
   globalPaused: boolean;
   usage: BudgetSnapshot['day'] & { month: BudgetSnapshot['month']; activeRuns: number };
@@ -62,6 +67,7 @@ export interface PolicyResult {
   decision: PolicyDecision;
   reasons: string[];
   intentId: string;
+  payload?: Record<string, unknown>;
   violation?: BudgetViolation;
 }
 
@@ -83,6 +89,16 @@ export async function loadPolicyContext(
 ): Promise<PolicyContext | null> {
   const agent = (await store.select().from(agents).where(eq(agents.id, agentId))).at(0);
   if (!agent) return null;
+  const snapshot = runId
+    ? (
+        await store
+          .select({ settings: configurations.approvalSettings })
+          .from(runs)
+          .innerJoin(configurations, eq(configurations.id, runs.configurationId))
+          .where(and(eq(runs.id, runId), eq(runs.agentId, agentId)))
+      ).at(0)?.settings
+    : undefined;
+  const approval = snapshot ?? agent;
   const global = (await store.select().from(controls).where(eq(controls.id, 1))).at(0);
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -94,16 +110,17 @@ export async function loadPolicyContext(
   const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
   // Exclude the already-admitted run so in-run tool authorization does not trip
   // maxConcurrentRuns (defaults to 1). Admission still counts other runs.
+  // awaiting_approval holds a concurrency slot until review resumes or rejects.
   const active = runId
     ? await store.execute(sql`
         SELECT count(*)::int AS count FROM simulation_runs
         WHERE agent_id = ${agentId}
-          AND status IN ('queued','running')
+          AND status IN ('queued','running','awaiting_approval')
           AND id <> ${runId}
       `)
     : await store.execute(sql`
         SELECT count(*)::int AS count FROM simulation_runs
-        WHERE agent_id = ${agentId} AND status IN ('queued','running')
+        WHERE agent_id = ${agentId} AND status IN ('queued','running','awaiting_approval')
       `);
   const activeRows = Array.isArray(active) ? active : [];
   const first = activeRows[0] as { count?: number } | undefined;
@@ -115,7 +132,9 @@ export async function loadPolicyContext(
     runId: runId ?? null,
     lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
-    approvalTools: agent.approvalTools,
+    approvalTools: mergeApprovalTools(approval.approvalTools, global?.approvalTools),
+    approvalSpendCents: approval.approvalSpendCents,
+    approvalExpiresAfterHours: approval.approvalExpiresAfterHours,
     budgets: parseBudgets(agent.budgets),
     globalPaused: global?.paused ?? true,
     usage: {
@@ -171,13 +190,16 @@ export function evaluateCandidate(
   }
 
   const isMcp = action.type.startsWith('mcp:');
-  if (
-    isMcp
-      ? !mcpGranted
-      : action.type !== 'load_skill' &&
-        ctx.enabledTools.length > 0 &&
-        !ctx.enabledTools.includes(action.type)
-  ) {
+  // knowledge.search is opt-in and must not flip empty-list semantics for other native tools.
+  const nativeEnablementTools = ctx.enabledTools.filter((tool) => tool !== KNOWLEDGE_SEARCH_TOOL);
+  const toolDenied = isMcp
+    ? !mcpGranted
+    : action.type === 'load_skill'
+      ? false
+      : action.type === KNOWLEDGE_SEARCH_TOOL
+        ? !ctx.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
+        : nativeEnablementTools.length > 0 && !nativeEnablementTools.includes(action.type);
+  if (toolDenied) {
     reasons.push(`Tool ${action.type} is not enabled for this agent.`);
     return { decision: 'deny', reasons };
   }
@@ -190,7 +212,8 @@ export function evaluateCandidate(
       outboundActions: ctx.usage.outboundActions,
     },
     month: ctx.usage.month,
-    activeRuns: ctx.usage.activeRuns,
+    // A search inside an already admitted run does not open another concurrency slot.
+    activeRuns: ctx.runId && action.type === KNOWLEDGE_SEARCH_TOOL ? 0 : ctx.usage.activeRuns,
   };
 
   if (!action.readOnly) {
@@ -202,8 +225,13 @@ export function evaluateCandidate(
 
     if (consentFailure) return { decision: 'deny', reasons: [consentFailure] };
     if (
-      !action.preliminary &&
-      (consentScope.safeParse(action.type).success || ctx.approvalTools?.includes(action.type))
+      actionNeedsApproval({
+        actionType: action.type,
+        preliminary: action.preliminary,
+        approvalTools: ctx.approvalTools,
+        approvalSpendCents: ctx.approvalSpendCents,
+        daySpendMicros: ctx.usage.spendMicros,
+      })
     ) {
       return {
         decision: 'needs-approval',
@@ -334,7 +362,11 @@ export async function authorizeAction(
           intentId: existing.id,
           actor: current.actor,
         });
-        return { ...evaluated, intentId: existing.id };
+        return {
+          ...evaluated,
+          intentId: existing.id,
+          payload: existing.payload,
+        };
       }
       const audit = (
         await tx
@@ -358,9 +390,14 @@ export async function authorizeAction(
         decision: existing.decision as PolicyDecision,
         reasons: Array.isArray(existing.reasons) ? existing.reasons : [],
         intentId: existing.id,
+        payload: existing.payload,
       };
     }
 
+    const reviewExpiresAt =
+      evaluated.decision === 'needs-approval' && current.approvalExpiresAfterHours
+        ? new Date(Date.now() + current.approvalExpiresAfterHours * 60 * 60 * 1000)
+        : null;
     const intent = (
       await tx
         .insert(actionIntents)
@@ -371,6 +408,7 @@ export async function authorizeAction(
           payload: action.payload ?? {},
           recipients,
           reviewStatus: evaluated.decision === 'needs-approval' ? 'pending' : null,
+          reviewExpiresAt,
           idempotencyKey: action.idempotencyKey,
           decision: evaluated.decision,
           reasons: evaluated.reasons,
@@ -389,13 +427,53 @@ export async function authorizeAction(
       actor: ctx.actor,
     });
 
+    if (evaluated.decision === 'needs-approval') {
+      void notifyApprovalPending({
+        intentId: intent.id,
+        agentId: ctx.agentId,
+        runId: ctx.runId ?? null,
+        actionType: action.type,
+        reason: evaluated.reasons[0] ?? 'Approval required',
+        createdAt: intent.createdAt,
+      });
+    }
+
     return {
       decision: evaluated.decision,
       reasons: evaluated.reasons,
       intentId: intent.id,
+      payload: intent.payload,
       violation: evaluated.violation,
     };
   });
+}
+
+/** Record a dispatch blocked after authorization, such as a concurrent budget reservation. */
+export async function recordBlockedDispatch(
+  ctx: PolicyContext,
+  actionType: string,
+  intentId: string,
+  error: BudgetError,
+): Promise<PolicyResult> {
+  const decision = 'deny';
+  const reasons = [error.message];
+  await db()
+    .insert(policyDecisions)
+    .values({
+      agentId: ctx.agentId,
+      runId: ctx.runId ?? null,
+      actionType,
+      decision,
+      reasons,
+      intentId,
+      actor: ctx.actor,
+    });
+  return {
+    decision,
+    reasons,
+    intentId,
+    violation: error.kind === 'cancelled' ? undefined : error.kind,
+  };
 }
 
 async function recordRequestUsage(
@@ -431,6 +509,7 @@ export async function reserveRequestQuota(
     signal?: AbortSignal;
     /** When set, reservation is idempotent per run+stage across queue retries. */
     stage?: 'evaluator' | 'main';
+    requiredTool?: string;
     /**
      * Provider calls covered by this reservation (tool loops may issue several).
      * Defaults to 1. Request counters and request-cap checks use this value.
@@ -446,6 +525,12 @@ export async function reserveRequestQuota(
         0,
       );
       if (!agent || agent.lifecycle === 'stopped' || execution?.signal?.aborted) {
+        throw new BudgetError('cancelled');
+      }
+      if (
+        execution?.requiredTool &&
+        (agent.lifecycle === 'paused' || !agent.enabledTools.includes(execution.requiredTool))
+      ) {
         throw new BudgetError('cancelled');
       }
       let runRow:
@@ -628,8 +713,20 @@ export async function reserveRequestQuota(
 
 /** Pure evaluation helper for unit tests without persistence. */
 export function evaluateActionForTest(
-  ctx: Omit<PolicyContext, 'actor' | 'agentId' | 'runId' | 'usage'> & {
+  ctx: Omit<
+    PolicyContext,
+    | 'actor'
+    | 'agentId'
+    | 'runId'
+    | 'usage'
+    | 'approvalTools'
+    | 'approvalSpendCents'
+    | 'approvalExpiresAfterHours'
+  > & {
     usage?: PolicyContext['usage'];
+    approvalTools?: string[];
+    approvalSpendCents?: number | null;
+    approvalExpiresAfterHours?: number | null;
   },
   action: CandidateAction,
 ) {
@@ -638,6 +735,9 @@ export function evaluateActionForTest(
       actor: 'test',
       agentId: '00000000-0000-0000-0000-000000000000',
       runId: null,
+      approvalTools: ctx.approvalTools ?? [],
+      approvalSpendCents: ctx.approvalSpendCents ?? null,
+      approvalExpiresAfterHours: ctx.approvalExpiresAfterHours ?? null,
       usage: ctx.usage ?? {
         ...emptyUsage(),
         month: emptyUsage(),
