@@ -32,6 +32,10 @@ Before building or changing UI, read [design.md](design.md). Follow its current 
 - Heavy tests (Docker image builds, PostgreSQL simulation, Playwright) belong in the production-gated CI jobs or the E2E workflow so parallel work can extend those jobs without slowing every `main` PR.
 - React Doctor verification requires both score 100 and “No issues found”; an exit code without a score is insufficient.
 
+## Demo seed
+
+Local browser testing and screenshots use `bun run db:seed:demo` (optional `--reset` wipes only demo-owned rows marked by fixed IDs / `orbit-demo-seed`). The command refuses `NODE_ENV=production` and non-loopback `DATABASE_URL` unless `--allow-non-local` is passed. It never changes the workspace-wide global outbound pause unless `--release-global-pause` is passed. Seed modules live in `apps/web/src/lib/seed/modules` and are registered in `apps/web/src/lib/seed/registry.ts` — add one small module per feature area (skills/MCP library rows, and so on) when that feature lands. Knowledge documents/chunks and durable approval settings are already covered. Do not expand unrelated modules.
+
 ## Repository work
 
 - Use `@/*` for application imports. Prettier owns import ordering; run it after adding imports. Keep server actions grouped by feature and reusable authentication behaviour in `lib/auth.ts`.

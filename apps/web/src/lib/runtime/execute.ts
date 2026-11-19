@@ -18,6 +18,7 @@ import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
+import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
 import {
   lockApprovalAgent,
   recordApprovalReviews,
@@ -916,13 +917,13 @@ async function processSimulationRun(
                           preliminary: stage === 'evaluator',
                           executionToken,
                           payload: { draft: action.draft, reason: action.reason },
-                          idempotencyKey: idempotencyKey([
-                            run.id,
+                          idempotencyKey: actionIdempotencyKey({
+                            runId: run.id,
                             stage,
-                            action.type,
-                            String(index),
-                            action.reason,
-                          ]),
+                            actionType: action.type,
+                            index,
+                            reason: action.reason,
+                          }),
                         }),
                       ),
                   );
