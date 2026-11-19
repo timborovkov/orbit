@@ -6,6 +6,7 @@ import './shim-server-only';
 
 import { budgetDefaults } from '@/lib/budgets';
 import { db } from '@/lib/db';
+import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
 import { claimJobs, completeJob, enqueueJob } from '@/lib/queue/jobs';
 import {
   proposeEmailReplyFromDraft,
@@ -15,10 +16,12 @@ import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
 import {
   finalizeExhaustedOutboundJob,
   processEmailSendJob,
+  reconcileCancelledOutboundJobs,
   reconcileDeadOutboundJobs,
 } from '@/lib/runtime/email/send';
 import { EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import { createStubEmailTransport } from '@/lib/runtime/email/transport';
+import { isRetryableInfrastructureError, retryableStore } from '@/lib/runtime/errors';
 import { processEmailDraftJob } from '@/lib/runtime/execute';
 import { EMAIL_SEND_JOB } from '@/lib/runtime/outbound/types';
 import { setEmailEnabled } from '@/lib/server/email-mutations';
@@ -482,4 +485,65 @@ test('inbox pending stays true while outbound is queued or sending', async () =>
   const done = await getEmailInbox(agent.id, seeded.threadId, 1, 1);
   expect(done.pending).toBe(false);
   expect(done.messages[0]?.sendOutcome?.status).toBe('sent');
+});
+
+test('proposal persistence failures are classified as retryable', async () => {
+  try {
+    await retryableStore(async () => {
+      throw new Error('connection reset during proposal insert');
+    });
+    expect.unreachable('retryableStore should have thrown');
+  } catch (error) {
+    expect(isRetryableInfrastructureError(error)).toBe(true);
+  }
+});
+
+test('pausing an agent finalizes queued outbound when email.send is cancelled', async () => {
+  await releasePause();
+  const agent = await createAgent('live');
+  const seeded = await seedDraft(agent.id, agent.version);
+  expect(await reviewProposedAction(admin, agent.id, seeded.intentId, 'approved')).toMatchObject({
+    message: expect.stringContaining('queued'),
+  });
+
+  const [before] =
+    await sql`SELECT id, job_id, status FROM outbound_actions WHERE intent_id=${seeded.intentId}`;
+  expect(before?.status).toBe('queued');
+  expect(before?.job_id).toBeTruthy();
+
+  const cancelled = await cancelWorkForLifecycle(agent.id, 'paused');
+  expect(cancelled).toContain(before!.job_id);
+
+  const [job] = await sql`SELECT status FROM jobs WHERE id=${before!.job_id}`;
+  expect(job?.status).toBe('cancelled');
+
+  const [outbound] = await sql`SELECT status, reason FROM outbound_actions WHERE id=${before!.id}`;
+  expect(outbound?.status).toBe('blocked');
+  expect(String(outbound?.reason)).toContain('paused');
+
+  const inbox = await getEmailInbox(agent.id, seeded.threadId, 1, 1);
+  expect(inbox.pending).toBe(false);
+  expect(inbox.messages[0]?.sendOutcome?.status).toBe('blocked');
+});
+
+test('reconcileCancelledOutboundJobs repairs stranded queued rows after cancelled jobs', async () => {
+  await releasePause();
+  const agent = await createAgent('live');
+  const seeded = await seedDraft(agent.id, agent.version);
+  expect(await reviewProposedAction(admin, agent.id, seeded.intentId, 'approved')).toMatchObject({
+    message: expect.stringContaining('queued'),
+  });
+
+  const [outbound] =
+    await sql`SELECT id, job_id FROM outbound_actions WHERE intent_id=${seeded.intentId}`;
+  await sql`UPDATE jobs SET status='cancelled', finished_at=now() WHERE id=${outbound!.job_id}`;
+  // Simulate a lifecycle cancel that updated jobs but failed before outbound finalize.
+  await sql`UPDATE outbound_actions SET status='queued', reason=null, completed_at=null WHERE id=${outbound!.id}`;
+
+  await reconcileCancelledOutboundJobs();
+  const [repaired] =
+    await sql`SELECT status, reason, completed_at FROM outbound_actions WHERE id=${outbound!.id}`;
+  expect(repaired?.status).toBe('blocked');
+  expect(String(repaired?.reason)).toContain('cancelled');
+  expect(repaired?.completed_at).toBeTruthy();
 });

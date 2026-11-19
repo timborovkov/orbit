@@ -1,6 +1,6 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 
-import { db } from '@/lib/db';
+import { db, type Tx } from '@/lib/db';
 import { recipientConsentFailure } from '@/lib/policy/consent';
 import { evaluateCandidate, loadPolicyContext } from '@/lib/policy/gateway';
 import type { JobRecord } from '@/lib/queue/types';
@@ -375,6 +375,59 @@ export async function reconcileDeadOutboundJobs() {
       AND EXISTS (
         SELECT 1 FROM jobs AS j
         WHERE j.status = 'dead'
+          AND j.type = ${EMAIL_SEND_JOB}
+          AND (
+            j.id = o.job_id
+            OR j.payload->>'outboundId' = o.id::text
+          )
+      )
+  `);
+  await reconcileCancelledOutboundJobs();
+}
+
+/**
+ * When lifecycle pause/stop cancels pending `email.send` jobs, mark linked
+ * non-terminal outbound rows blocked so the Email tab does not stay on Queued.
+ */
+export async function finalizeOutboundForCancelledJobs(
+  store: Tx,
+  cancelledJobIds: string[],
+  reason: string,
+) {
+  if (!cancelledJobIds.length) return;
+  const now = new Date();
+  const message = reason.trim().slice(0, 500) || 'Outbound send cancelled.';
+  await store
+    .update(outboundActions)
+    .set({
+      status: 'blocked',
+      reason: message,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        inArray(outboundActions.jobId, cancelledJobIds),
+        inArray(outboundActions.status, ['queued', 'sending']),
+      ),
+    );
+}
+
+/** Repair outbound rows whose send jobs were cancelled but never finalized. */
+export async function reconcileCancelledOutboundJobs() {
+  const reason = 'Outbound send cancelled before dispatch.';
+  await db().execute(sql`
+    UPDATE outbound_actions AS o
+    SET
+      status = 'blocked',
+      reason = coalesce(nullif(o.reason, ''), ${reason}),
+      completed_at = coalesce(o.completed_at, now()),
+      updated_at = now()
+    WHERE o.status IN ('queued', 'sending')
+      AND o.provider_message_id IS NULL
+      AND EXISTS (
+        SELECT 1 FROM jobs AS j
+        WHERE j.status = 'cancelled'
           AND j.type = ${EMAIL_SEND_JOB}
           AND (
             j.id = o.job_id
