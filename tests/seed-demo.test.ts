@@ -17,7 +17,8 @@ import {
   demoKnowledgeDocuments,
   demoRuns,
 } from '@/lib/seed/catalog';
-import { DEMO_CONFIGS } from '@/lib/seed/ids';
+import { DEMO_CONFIGS, DEMO_JOBS, DEMO_RUNS } from '@/lib/seed/ids';
+import { isDemoOwnedJob } from '@/lib/seed/reset';
 
 describe('demo seed guards', () => {
   test('accepts loopback development databases', () => {
@@ -158,6 +159,50 @@ describe('demo seed idempotency and markers', () => {
     expect(names).toContain('usage');
     expect(names).toContain('credentials');
     expect(names).toContain('controls');
+  });
+});
+
+describe('demo seed reset job ownership', () => {
+  test('includes runtime resume jobs for demo runs regardless of key prefix', () => {
+    const resumeKey = `simulation:${DEMO_RUNS.sarahAwaitingApproval}:resume:${DEMO_JOBS.sarahAwaitingApproval}`;
+    expect(
+      isDemoOwnedJob({
+        id: '11111111-1111-4111-a111-111111111111',
+        idempotencyKey: resumeKey,
+        payload: {
+          runId: DEMO_RUNS.sarahAwaitingApproval,
+          agentId: DEMO_AGENTS.sarah,
+        },
+      }),
+    ).toBe(true);
+
+    expect(
+      isDemoOwnedJob({
+        id: '11111111-1111-4111-a111-111111111112',
+        idempotencyKey: `simulation:${DEMO_RUNS.sarahAwaitingApproval}`,
+        payload: { runId: DEMO_RUNS.sarahAwaitingApproval, agentId: DEMO_AGENTS.sarah },
+      }),
+    ).toBe(true);
+
+    expect(
+      isDemoOwnedJob({
+        id: DEMO_JOBS.sarahAwaitingApproval,
+        idempotencyKey: `orbit-demo:run:${DEMO_RUNS.sarahAwaitingApproval}`,
+        payload: { runId: DEMO_RUNS.sarahAwaitingApproval, agentId: DEMO_AGENTS.sarah },
+      }),
+    ).toBe(true);
+  });
+
+  test('excludes unrelated agents and runs', () => {
+    const otherRun = '11111111-1111-4111-b111-111111111111';
+    const otherAgent = '11111111-1111-4111-b111-111111111222';
+    expect(
+      isDemoOwnedJob({
+        id: '11111111-1111-4111-a111-111111111113',
+        idempotencyKey: `simulation:${otherRun}:resume:initial`,
+        payload: { runId: otherRun, agentId: otherAgent },
+      }),
+    ).toBe(false);
   });
 });
 
