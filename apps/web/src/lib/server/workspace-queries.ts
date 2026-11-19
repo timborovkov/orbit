@@ -137,7 +137,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     db()
       .select()
       .from(runs)
-      .where(eq(runs.agentId, id))
+      .where(and(eq(runs.agentId, id), eq(runs.origin, 'playground')))
       .orderBy(
         ...(focusRunId ? [desc(sql`${runs.id} = ${focusRunId}::uuid`)] : []),
         desc(runs.createdAt),

@@ -3,7 +3,7 @@ import postgres from 'postgres';
 
 const sql = postgres('postgres://orbit:orbit_dev@127.0.0.1:5432/orbit_test');
 test.beforeAll(async () => {
-  await sql`TRUNCATE knowledge_chunks, knowledge_documents, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 test.afterAll(async () => {

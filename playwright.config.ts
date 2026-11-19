@@ -31,6 +31,7 @@ export default defineConfig({
     'pictures.spec.ts',
     'runtime-safety.spec.ts',
     'knowledge.spec.ts',
+    'inbound-email.spec.ts',
   ],
   workers: 1,
   use: {
@@ -42,5 +43,10 @@ export default defineConfig({
   webServer: {
     command: 'bun scripts/playwright-stack.ts',
     ...orbitTestWebServer,
+    env: {
+      ...orbitTestWebServer.env,
+      RESEND_INBOUND_DOMAIN: 'inbound.example.test',
+      RESEND_WEBHOOK_SECRET: `whsec_${Buffer.alloc(32, 17).toString('base64')}`,
+    },
   },
 });

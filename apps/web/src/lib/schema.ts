@@ -2,6 +2,7 @@ import {
   bigint,
   boolean,
   date,
+  foreignKey,
   integer,
   jsonb,
   pgTable,
@@ -135,6 +136,7 @@ export const runs = pgTable('simulation_runs', {
   configurationId: uuid('configuration_id')
     .notNull()
     .references(() => configurations.id),
+  origin: text('origin').$type<'playground' | 'email'>().notNull().default('playground'),
   input: text('input').notNull(),
   recipients: jsonb('recipients').$type<string[]>().notNull().default([]),
   status: text('status').$type<RunStatus>().notNull().default('queued'),
@@ -148,6 +150,64 @@ export const runs = pgTable('simulation_runs', {
   /** Rotated whenever a worker takes ownership of a running execution; fences stale writers. */
   executionToken: uuid('execution_token'),
 });
+
+export const emailMailboxes = pgTable('email_mailboxes', {
+  agentId: uuid('agent_id')
+    .primaryKey()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  address: text('address').notNull().unique(),
+  enabled: boolean('enabled').notNull(),
+});
+
+export const emailThreads = pgTable(
+  'email_threads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    provisional: boolean('provisional').notNull().default(false),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+  },
+  (table) => [unique().on(table.agentId, table.id)],
+);
+
+export const emailMessages = pgTable(
+  'email_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    resendEmailId: text('resend_email_id').notNull(),
+    event: jsonb('event').$type<Record<string, unknown>>().notNull(),
+    sender: text('sender').notNull(),
+    subject: text('subject').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    configurationId: uuid('configuration_id').references(() => configurations.id, {
+      onDelete: 'set null',
+    }),
+    receiveJobId: uuid('receive_job_id')
+      .unique()
+      .references(() => jobs.id, { onDelete: 'set null' }),
+    runId: uuid('run_id')
+      .unique()
+      .references(() => runs.id, { onDelete: 'set null' }),
+    threadId: uuid('thread_id').notNull(),
+    messageId: text('message_id'),
+    inReplyTo: text('in_reply_to').array().notNull().default([]),
+    referenceIds: text('reference_ids').array().notNull().default([]),
+    body: text('body'),
+    skipReason: text('skip_reason'),
+    waitingForCapacity: boolean('waiting_for_capacity').notNull().default(false),
+  },
+  (table) => [
+    unique().on(table.agentId, table.resendEmailId),
+    foreignKey({
+      columns: [table.agentId, table.threadId],
+      foreignColumns: [emailThreads.agentId, emailThreads.id],
+    }).onDelete('cascade'),
+  ],
+);
 
 export const actionIntents = pgTable('action_intents', {
   id: uuid('id').defaultRandom().primaryKey(),

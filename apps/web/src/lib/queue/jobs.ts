@@ -223,6 +223,7 @@ export async function releaseClaim(
   jobId: string,
   workerId: string,
   store: Store = db(),
+  availableAt = new Date(),
 ): Promise<JobRecord | null> {
   const now = new Date();
   const updated = (
@@ -231,7 +232,7 @@ export async function releaseClaim(
       .set({
         status: 'pending',
         attempts: sql`greatest(${jobs.attempts} - 1, 0)`,
-        availableAt: now,
+        availableAt,
         claimedAt: null,
         claimExpiresAt: null,
         claimedBy: null,

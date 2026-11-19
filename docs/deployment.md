@@ -85,3 +85,29 @@ agent. Browser capture needs `NEXT_PUBLIC_SENTRY_DSN` at web image build, as
 above. Source map upload needs `SENTRY_AUTH_TOKEN` and is skipped without it.
 See [architecture.md](../architecture.md) §12 and the Phase 2 observability
 decision for tracing behaviour, redaction and evaluations.
+
+## Inbound email
+
+Apply `apps/web/drizzle/0014_inbound_email.sql` with `bun run db:migrate` before deploying
+either service. Deploy the worker with `RESEND_API_KEY` for the Resend Receiving API,
+then deploy the web service with `RESEND_INBOUND_DOMAIN` and
+`RESEND_WEBHOOK_SECRET`. All three variables are optional for deployments without
+email. The receiving API key belongs on the worker only.
+
+In Resend, enable receiving for a dedicated subdomain and verify the MX record shown
+for that domain. Create a webhook for `email.received` at
+`https://<app-host>/api/webhooks/resend` and use that webhook’s signing secret.
+Turn on delivery after the migration, worker, and web service are ready. Store
+credentials as runtime secrets. Old mailbox addresses keep their original domain
+if the environment value changes, so keep receiving configured for those addresses.
+
+Enable email for Sarah in Orbit and send a message and a reply to the displayed
+address. Check the Email tab for a single thread, local drafts, citations when
+knowledge supports the response, and terminal run statuses. Verify there were no
+outbound sends. Enable other agents after the smoke test passes. The fixture tests
+mock Resend retrieval and inference. The staged smoke test verifies real delivery.
+
+For rollback, disable webhook delivery first. Drain pending email drafts or pause
+the email-enabled agents to cancel pending drafting. Keep the additive migration
+and the stored mail. Older worker builds ignore the dedicated `email.receive` and
+`email.draft` job types.
