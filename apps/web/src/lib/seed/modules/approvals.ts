@@ -1,4 +1,5 @@
 import { actionIntents, policyDecisions } from '@/lib/schema';
+import { DEMO_SARAH_SUSPENDED_ESCALATE, demoSarahSuspendedEscalateKey } from '@/lib/seed/catalog';
 import { demoTime } from '@/lib/seed/clock';
 import { DEMO_ACTOR, DEMO_AGENTS, DEMO_INTENTS, DEMO_POLICY, DEMO_RUNS } from '@/lib/seed/ids';
 import type { SeedModule } from '@/lib/seed/types';
@@ -41,12 +42,12 @@ export const approvalsModule: SeedModule = {
         reviewExpiresAt: demoTime(now, 47 * 60 * 60 * 1000),
         reviewNote: null,
         payload: {
-          reason: 'Duplicate billing dispute needs human review of account ledger.',
+          reason: DEMO_SARAH_SUSPENDED_ESCALATE.reason,
           draft: null,
         },
         decision: 'needs-approval',
         reasons: ['escalate requires administrator approval for this agent.'],
-        idempotencyKey: 'orbit-demo:intent:sarah-escalate-suspended',
+        idempotencyKey: demoSarahSuspendedEscalateKey(),
         createdOffsetMs: -90 * 60 * 1000,
         policyId: DEMO_POLICY.sarahEscalateSuspended,
       },

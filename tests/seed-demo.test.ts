@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
 import {
   assertSafeToSeed,
   DEMO_ACTOR,
@@ -11,11 +12,13 @@ import {
   listSeedModuleNames,
 } from '@/lib/seed';
 import {
+  DEMO_SARAH_SUSPENDED_ESCALATE,
   demoAgents,
   demoConfigurations,
   demoConsents,
   demoKnowledgeDocuments,
   demoRuns,
+  demoSarahSuspendedEscalateKey,
 } from '@/lib/seed/catalog';
 import { DEMO_CONFIGS, DEMO_JOBS, DEMO_RUNS } from '@/lib/seed/ids';
 import { isDemoOwnedJob } from '@/lib/seed/reset';
@@ -159,6 +162,28 @@ describe('demo seed idempotency and markers', () => {
     expect(names).toContain('usage');
     expect(names).toContain('credentials');
     expect(names).toContain('controls');
+  });
+});
+
+describe('demo seed suspended approval key', () => {
+  test('matches the runtime action idempotency formula for Sarah’s escalate', () => {
+    const run = demoRuns().find((row) => row.id === DEMO_RUNS.sarahAwaitingApproval);
+    expect(run).toBeDefined();
+    const mainEscalate = run?.result.steps
+      .find((step) => step.stage === 'main')
+      ?.decision.actions.find((action) => action.type === 'escalate');
+    expect(mainEscalate?.reason).toBe(DEMO_SARAH_SUSPENDED_ESCALATE.reason);
+    expect(demoSarahSuspendedEscalateKey()).toBe(
+      actionIdempotencyKey({
+        runId: DEMO_RUNS.sarahAwaitingApproval,
+        stage: 'main',
+        actionType: 'escalate',
+        index: 0,
+        reason: DEMO_SARAH_SUSPENDED_ESCALATE.reason,
+      }),
+    );
+    expect(demoSarahSuspendedEscalateKey()).toMatch(/^[a-f0-9]{64}$/);
+    expect(demoSarahSuspendedEscalateKey()).not.toContain('orbit-demo:');
   });
 });
 

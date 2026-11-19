@@ -1,6 +1,7 @@
 import { budgetDefaults, type AgentBudgets } from '@/lib/budgets';
 import { KNOWLEDGE_SEARCH_TOOL, type KnowledgeContentKind } from '@/lib/knowledge/types';
 import type { LifecycleState } from '@/lib/lifecycle';
+import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
 import type { AgentConfig } from '@/lib/runtime/config';
 import type { SimulationResult } from '@/lib/runtime/simulation';
 import type { ApprovalOnReject, ApprovalSettings, RunStatus } from '@/lib/schema';
@@ -14,6 +15,24 @@ import {
   DEMO_KNOWLEDGE_REVISIONS,
   DEMO_RUNS,
 } from '@/lib/seed/ids';
+
+/** Main-stage escalate on Sarah’s awaiting_approval run — seed intent key must match. */
+export const DEMO_SARAH_SUSPENDED_ESCALATE = {
+  stage: 'main' as const,
+  actionType: 'escalate' as const,
+  index: 0,
+  reason: 'Duplicate billing dispute needs human review of account ledger.',
+};
+
+export function demoSarahSuspendedEscalateKey(): string {
+  return actionIdempotencyKey({
+    runId: DEMO_RUNS.sarahAwaitingApproval,
+    stage: DEMO_SARAH_SUSPENDED_ESCALATE.stage,
+    actionType: DEMO_SARAH_SUSPENDED_ESCALATE.actionType,
+    index: DEMO_SARAH_SUSPENDED_ESCALATE.index,
+    reason: DEMO_SARAH_SUSPENDED_ESCALATE.reason,
+  });
+}
 
 export interface DemoAgentSpec {
   id: string;
@@ -524,7 +543,7 @@ export function demoRuns(): DemoRunSpec[] {
         actions: [
           {
             type: 'escalate',
-            reason: 'Duplicate billing dispute needs human review of account ledger.',
+            reason: DEMO_SARAH_SUSPENDED_ESCALATE.reason,
             draft: null,
             policy: 'needs-approval',
             effect: 'Held for administrator review.',
@@ -562,8 +581,8 @@ export function demoRuns(): DemoRunSpec[] {
               reason: 'Escalate before promising a refund.',
               actions: [
                 {
-                  type: 'escalate',
-                  reason: 'Duplicate billing dispute needs human review of account ledger.',
+                  type: DEMO_SARAH_SUSPENDED_ESCALATE.actionType,
+                  reason: DEMO_SARAH_SUSPENDED_ESCALATE.reason,
                   draft: null,
                 },
               ],
