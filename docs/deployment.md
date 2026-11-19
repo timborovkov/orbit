@@ -32,7 +32,7 @@ The web image includes the self-hosted fonts, favicon and brand assets. `/health
 
 The Dockerfiles use the base image's trust store for dependency installation. Railway's Docker builder does not support BuildKit secret mounts.
 
-Production web builds use webpack so the standalone image includes the server instrumentation dependencies.
+Production web builds use webpack. The web image installs locked production dependencies in its runtime stage so server instrumentation is available when the standalone server starts.
 
 ## RustFS object storage
 
