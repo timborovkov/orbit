@@ -194,6 +194,29 @@ test('failJob does not overwrite a cancelled or reclaimed claim', async () => {
   expect(row.status).toBe('cancelled');
 });
 
+test('cancelPendingJobsForAgent can exclude knowledge ingestion jobs', async () => {
+  const agentId = `${prefix}-agent-knowledge-exclude`;
+  const runtime = await enqueueJob(db(), {
+    type: `${prefix}.runtime`,
+    payload: { agentId },
+    idempotencyKey: `${prefix}:runtime-exclude`,
+  });
+  const knowledge = await enqueueJob(db(), {
+    type: 'knowledge.process',
+    payload: { agentId, documentId: `${prefix}-doc` },
+    idempotencyKey: `${prefix}:knowledge-exclude`,
+  });
+
+  expect(
+    await cancelPendingJobsForAgent(agentId, db(), { excludeTypes: ['knowledge.process'] }),
+  ).toEqual([runtime.id]);
+
+  const [runtimeRow] = await sqlClient()`SELECT status FROM jobs WHERE id = ${runtime.id}`;
+  const [knowledgeRow] = await sqlClient()`SELECT status FROM jobs WHERE id = ${knowledge.id}`;
+  expect(runtimeRow.status).toBe('cancelled');
+  expect(knowledgeRow.status).toBe('pending');
+});
+
 test('pause cancels pending jobs only; stop also cancels claimed jobs', async () => {
   const agentId = `${prefix}-agent-pause`;
   const pending = await enqueueJob(db(), {

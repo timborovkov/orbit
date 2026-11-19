@@ -193,8 +193,10 @@ status. Its save bar is separated by a top border and subtle fill. Identity,
 Behaviour and Models section buttons show one field group at a time; hidden fields
 remain mounted. Invalid required fields reveal their section before receiving focus.
 
-Task tabs are Configuration, Playground, History, Approvals and Access, with one keyboard tab
-stop plus Left/Right/Home/End navigation. Hidden panels remain mounted, preserving
+Task tabs are Configuration, Playground, Knowledge, History, Approvals and Access. On
+viewports wider than 600px they use a horizontal tablist with Left/Right/Home/End
+keyboard navigation; at 600px and below they collapse to a full-width Select (same
+pattern as the UI redesign branch). Hidden panels remain mounted, preserving
 unsaved configuration and pasted input when changing tasks. Configuration presents
 one editor and one save bar. Playground is an AI SDK chat surface (`useChat` + AI Elements
 Conversation/Message/PromptInput/Reasoning/Tool/Loader) with a streaming route that still
@@ -202,18 +204,35 @@ enqueues the durable simulation job, watches run checkpoints, and streams evalua
 proposed actions and drafts. Empty conversation state explains what will appear; failures
 and interrupted runs show actual state. Paid inference and simulation-only actions remain
 explicit.
+Knowledge uses an Access-style left section nav (Documents, Inspector, Playground) with
+one section visible at a time; at ≤900px the section nav collapses to a Select and panels
+stay mounted. Documents is list-first: header Upload control and, when empty, a dashed
+dropzone (“Drop files or browse”, size limit once — types stay in the section heading).
+Rows show title + status Badge, then a muted sans meta line (type, size, chunk count,
+relative “Updated …” with full UTC in a tooltip). Row actions live in an ellipsis
+DropdownMenu; Delete confirms via AlertDialog. Failed rows surface the error with
+Retry. Inspector uses a single-line InputGroup with an adjacent Inspect control; results
+open with a “Found N passages” header (plus a “Dev stub embeddings” Badge when the stub
+embedder is active). Each hit shows title, rank, combined score and vector/text score
+Badges, with raw offsets/reasons behind a Details collapsible. Playground retrieval is a
+shadcn Switch row under its own section. A grounded answer uses numbered citations. Its
+source card shows the filename, page or section, and quoted passage. History keeps the
+same citations with the saved run.
 History uses native details/summary for run content and exact configuration snapshots.
 History shows the provider’s recorded cost and labels missing cost explicitly.
 Access uses a Configuration-style left nav (Lifecycle, Budgets, Approvals, Consent,
-OpenRouter) with one section visible at a time. Budgets use card groups and a two-column
+Skills, MCP, OpenRouter) with one section visible at a time. Budgets use card groups and a two-column
 desktop grid, with No cap Switches on the same heading row as spend labels (`space-between`
 gap, switch never overlapping the label) and inline unit suffixes. Per-field copy is only
 the short usage line; longer explanations stay in the card description. Approval
 requirements in Access use Switch rows (label, description, control) plus optional spend
 (InputGroup `$`), expiry and rejection behaviour. Saving per-agent approval settings creates
-a configuration version. Pause, consent and tool availability are checked live. Queued, running
-and awaiting-approval runs share the per-agent concurrency limit. Consent and Playground
-version pickers use shadcn Select. Lifecycle uses radio-card rows with consistent actions.
+a configuration version. Skills/MCP pickers use shadcn Checkbox rows (label, description, control).
+Attached MCP connections show a nested checklist of administrator-classified read-only tools.
+New attachments start with an empty tool checklist. Pause, consent and tool availability are
+checked live. Queued, running and awaiting-approval runs share the per-agent concurrency limit.
+Consent and Playground version pickers use shadcn Select. Lifecycle uses radio-card rows with
+consistent actions.
 Playground is a single chat column: toolbar settings (version Select, recipients Collapsible),
 AI Elements Conversation with status/Loader messages, and PromptInput (text-only for now —
 file attachments stay off until the simulation runtime can consume them — one bordered
@@ -247,7 +266,17 @@ Access.
 
 Templates are flat disclosure rows with title, role and revision. Expanding a row
 uses the same section editor and save bar; saving defaults leaves existing agents
-unchanged. Appearance, sign-in and the native create dialog retain the behavior in
+unchanged. Skills and MCP connections are list-first library pages (`/skills`,
+`/mcp`): a heading with a primary New action, a bordered table (name, description
+or URL, agent count, updated-at, actions) when data exists, and an illustration-free
+empty card with the same primary CTA when not. Create and edit open a shadcn Dialog
+with Field spacing, descriptions under labels, and Orbit control styling. Skill
+bodies use Write/Preview Markdown tabs; the slug auto-derives from the title until
+edited. MCP transport uses the shadcn Select. Tool allowlists are chip rows with an
+optional Fetch tools action; auth headers are key/value rows with masked values and
+never echo stored secrets. Newly added tools start as Mutating. Editing the MCP endpoint
+requires replacing or clearing any stored headers before discovery or save. Overview and workspace headers link to Templates, Skills
+and MCP. Appearance, sign-in and the native create dialog retain the behavior in
 Layout and the historical decisions below.
 
 ## Do's and Don'ts
@@ -267,11 +296,14 @@ Verify desktop (1440), laptop (1024), tablet (768), phone (390) and narrow phone
 
 This file is the single design reference for Orbit. Keep the lowercase filename `design.md`; do not create a competing `DESIGN.md` or move the guidance into a skill's private context file.
 
-| Date       | Source                                                                                                         | Decision                                                                                                                                                                      |
-| ---------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-11-16 | User: “dark and light mode, a mode switch, auto, responsive design. Use the logos.”                            | Support Light, Dark and Auto, responsive layouts, the supplied logo and a matching favicon.                                                                                   |
-| 2026-11-16 | User rejected the first dashboard and chose “Vercel inspired”.                                                 | Use the Vercel-inspired direction documented above as the design brief. Generic marketing copy and a large promotional hero are rejected precedents for this admin interface. |
-| 2026-11-16 | User: “Let's also use all of these. Install them” and “capture our decisions and style guidance in design.md”. | Use the installed design collections as complementary guidance; record decisions and relevant implementation guidance here after UI changes.                                  |
+| Date       | Source                                                                                                         | Decision                                                                                                                                                                       |
+| ---------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-11-18 | User: merge #22 into knowledge PR; Knowledge matches Access nav                                                | Knowledge Documents/Inspector/Playground use Access-style left nav + ≤900px Select; Playground retrieval is a Switch; one helper block per section.                            |
+| 2026-11-18 | User: shared skill library + generic MCP connections with agent opt-in                                         | Add `/skills` and `/mcp` library pages and Access multi-select pickers; keep UI scoped to those surfaces to reduce conflict with concurrent UI work.                           |
+| 2026-11-18 | User screenshot review on PR #22: Linear-level polish for Skills/MCP                                           | List-first pages with dialog create/edit, Field spacing, chip allowlists + header KV rows + Fetch tools, shadcn Select for transport, Markdown Write/Preview, slug-from-title. |
+| 2026-11-16 | User: “dark and light mode, a mode switch, auto, responsive design. Use the logos.”                            | Support Light, Dark and Auto, responsive layouts, the supplied logo and a matching favicon.                                                                                    |
+| 2026-11-16 | User rejected the first dashboard and chose “Vercel inspired”.                                                 | Use the Vercel-inspired direction documented above as the design brief. Generic marketing copy and a large promotional hero are rejected precedents for this admin interface.  |
+| 2026-11-16 | User: “Let's also use all of these. Install them” and “capture our decisions and style guidance in design.md”. | Use the installed design collections as complementary guidance; record decisions and relevant implementation guidance here after UI changes.                                   |
 
 The exact typography, token values, table layout and modal behaviour above describe the current implementation. They are not separate user mandates. Preserve them for consistency during refinement; distinguish a proposed change from a preference the user has explicitly chosen. Record user-stated reasons when available; do not invent reasons or turn a local preference into a universal ban.
 
@@ -451,3 +483,15 @@ as the non-root runtime user. Captures are saved in
 `.impeccable/review/profile-picture-Light-1440.png` and
 `.impeccable/review/profile-picture-Dark-390.png`. No remote infrastructure was
 provisioned and no real OpenRouter call was made during this milestone.
+
+### Agent knowledge library — 18 November 2026
+
+The Knowledge tab uses Access-style Documents / Inspector / Playground sections (left nav
+desktop, Select ≤900px). Documents stay list-first with pending/processing/ready/failed
+Badges. Empty library uses a dashed dropzone; header Upload remains available once
+documents exist. Row meta is muted sans; actions use an ellipsis menu with delete
+confirmation. Inspector query is a single-line InputGroup; retrieval failures render a destructive
+shadcn Alert in the Inspector panel (not only under Documents). Hit counts and
+stub-embedding notices live in the inspector results header. Playground retrieval is a
+Switch. Soft refresh also covers in-flight knowledge jobs. Task tabs still use the
+compact Select at ≤600px.

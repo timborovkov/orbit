@@ -198,7 +198,7 @@ describe('bounded manual simulation', () => {
     expect(result.error).not.toBeNull();
     expect(result.actions).toEqual([]);
   });
-  test('retries resume checkpointed stages without reusing the step allowance', async () => {
+  test('retries resume checkpointed stages with a one-tool budget', async () => {
     const { RetryableInfrastructureError } = await import('@/lib/runtime/errors');
     const models: string[] = [];
     let checkpointed: SimulationResult | undefined;
@@ -213,7 +213,7 @@ describe('bounded manual simulation', () => {
         checkpointed = structuredClone(partial);
       },
       {
-        maxSteps: 2,
+        maxToolSteps: 1,
         onActions: async () => {
           throw new RetryableInfrastructureError('policy persistence blip');
         },
@@ -236,13 +236,174 @@ describe('bounded manual simulation', () => {
         };
       },
       async () => {},
-      { maxSteps: 2, initial: checkpointed },
+      { maxToolSteps: 1, initial: checkpointed },
     );
     // Evaluator once, then main — policy failure must not redo the paid evaluator call.
     expect(models).toEqual(['test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
     expect(resumed.steps[0].stage).toBe('evaluator');
     expect(resumed.steps[1].stage).toBe('main');
+  });
+  test('knowledge retrieval runs with a one-slot tool budget', async () => {
+    let retrieved = 0;
+    const result = await simulate(
+      config,
+      'What is the refund policy?',
+      async () => ({ decision, inputTokens: 1, outputTokens: 1 }),
+      async () => {},
+      {
+        maxToolSteps: 1,
+        retrieveKnowledge: async () => {
+          retrieved += 1;
+          return {
+            status: 'allow',
+            hits: [
+              {
+                chunkId: '00000000-0000-4000-8000-000000000099',
+                documentId: '00000000-0000-4000-8000-000000000098',
+                agentId: '00000000-0000-4000-8000-000000000097',
+                content: 'Refunds within 30 days.',
+                sourceTitle: 'FAQ',
+                sourceFilename: 'faq.md',
+                page: null,
+                section: null,
+                startOffset: 0,
+                endOffset: 22,
+                rankScore: 1,
+                vectorScore: 0.9,
+                textScore: 0.8,
+                reasons: ['vector'],
+              },
+            ],
+          };
+        },
+      },
+    );
+    expect(retrieved).toBe(1);
+    expect(result.knowledge?.status).toBe('allow');
+    expect(result.knowledge?.hits).toHaveLength(1);
+    // Contrast: the previous >= 3 gate skipped retrieval for maxToolSteps 1.
+    expect(result.steps.length).toBeGreaterThan(0);
+  });
+  test('fresh runs share skill version records so load_skill flips loaded', async () => {
+    const versions = [
+      {
+        skillId: '00000000-0000-4000-8000-000000000088',
+        name: 'research-brief',
+        version: 1,
+        loaded: false,
+      },
+    ];
+    const result = await simulate(
+      config,
+      'question',
+      async (request) => {
+        if (request.stage === 'main') versions[0]!.loaded = true;
+        return { decision, inputTokens: 1, outputTokens: 1 };
+      },
+      async () => {},
+      { maxToolSteps: 2, skillVersions: versions },
+    );
+    expect(result.skillVersions).toBe(versions);
+    expect(result.skillVersions?.[0]?.loaded).toBe(true);
+  });
+  test('resume keeps checkpointed skill attribution when the catalogue changes', async () => {
+    const checkpointed: SimulationResult = {
+      steps: [
+        {
+          stage: 'main',
+          model: 'test/main',
+          decision,
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+      ],
+      actions: decision.actions.map((action) => ({
+        ...action,
+        policy: 'suppressed' as const,
+        effect: 'Simulation only. No external action performed.',
+      })),
+      skillVersions: [
+        {
+          skillId: '00000000-0000-4000-8000-000000000099',
+          name: 'research-brief',
+          version: 3,
+          loaded: true,
+        },
+      ],
+      error: null,
+    };
+    const resumed = await simulate(
+      config,
+      'question',
+      async () => {
+        throw new Error('main must not re-run');
+      },
+      async () => {},
+      {
+        maxToolSteps: 2,
+        initial: checkpointed,
+        skillVersions: [
+          {
+            skillId: '00000000-0000-4000-8000-000000000099',
+            name: 'research-brief',
+            version: 99,
+            loaded: false,
+          },
+        ],
+      },
+    );
+    expect(resumed.skillVersions).toEqual([
+      {
+        skillId: '00000000-0000-4000-8000-000000000099',
+        name: 'research-brief',
+        version: 3,
+        loaded: true,
+      },
+    ]);
+  });
+  test('evaluator-only resume adopts the live skill catalogue for main', async () => {
+    const checkpointed: SimulationResult = {
+      steps: [
+        {
+          stage: 'evaluator',
+          model: 'test/evaluator',
+          decision,
+          inputTokens: 1,
+          outputTokens: 1,
+        },
+      ],
+      actions: [],
+      skillVersions: [
+        {
+          skillId: '00000000-0000-4000-8000-000000000099',
+          name: 'research-brief',
+          version: 3,
+          loaded: false,
+        },
+      ],
+      error: null,
+    };
+    const live = [
+      {
+        skillId: '00000000-0000-4000-8000-000000000099',
+        name: 'research-brief',
+        version: 4,
+        loaded: false,
+      },
+    ];
+    const resumed = await simulate(
+      config,
+      'question',
+      async (request) => {
+        expect(request.stage).toBe('main');
+        return { decision, inputTokens: 2, outputTokens: 2 };
+      },
+      async () => {},
+      { maxToolSteps: 2, initial: checkpointed, skillVersions: live },
+    );
+    expect(resumed.skillVersions).toBe(live);
+    expect(resumed.skillVersions?.[0]?.version).toBe(4);
   });
   test('pre-dispatch infrastructure faults release the reservation for retry', async () => {
     const { PreDispatchInfrastructureError } = await import('@/lib/runtime/errors');
@@ -259,7 +420,7 @@ describe('bounded manual simulation', () => {
         durable = structuredClone(partial);
       },
       {
-        maxSteps: 2,
+        maxToolSteps: 2,
         prepare: async () => {
           throw new PreDispatchInfrastructureError('quota reservation db blip');
         },
@@ -282,7 +443,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2, initial: durable },
+      { maxToolSteps: 2, initial: durable },
     );
     expect(models).toEqual(['test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
@@ -302,7 +463,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      { maxToolSteps: 2 },
     ).catch((error: unknown) => error);
     expect(first).toBeInstanceOf(RetryableInfrastructureError);
     expect(models).toEqual(['test/evaluator']);
@@ -321,7 +482,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2, initial: durable },
+      { maxToolSteps: 2, initial: durable },
     );
     expect(models).toEqual(['test/evaluator', 'test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
@@ -352,7 +513,7 @@ describe('bounded manual simulation', () => {
         durable = structuredClone(partial);
       },
       {
-        maxSteps: 2,
+        maxToolSteps: 2,
         prepare: async () => {
           throw new PreDispatchInfrastructureError('quota reservation db blip');
         },
@@ -375,7 +536,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2, initial: durable },
+      { maxToolSteps: 2, initial: durable },
     );
     expect(models).toEqual(['test/evaluator', 'test/main']);
     expect(resumed.steps).toHaveLength(2);
@@ -403,7 +564,7 @@ describe('bounded manual simulation', () => {
         }
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      { maxToolSteps: 2 },
     ).catch((error: unknown) => error);
     expect(first).toBeInstanceOf(RetryableInfrastructureError);
     expect(models).toEqual(['test/evaluator']);
@@ -422,7 +583,7 @@ describe('bounded manual simulation', () => {
       async (partial) => {
         durable = structuredClone(partial);
       },
-      { maxSteps: 2, initial: durable },
+      { maxToolSteps: 2, initial: durable },
     );
     // Must not re-dispatch evaluator or continue to main — dispatch already burned the slot.
     expect(models).toEqual(['test/evaluator']);
@@ -456,7 +617,7 @@ describe('bounded manual simulation', () => {
         }
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      { maxToolSteps: 2 },
     );
     expect(models).toEqual(['test/evaluator']);
     expect(first.error).toContain('already used this model step');
@@ -486,7 +647,7 @@ describe('bounded manual simulation', () => {
         }
         durable = structuredClone(partial);
       },
-      { maxSteps: 2 },
+      { maxToolSteps: 2 },
     );
     expect(models).toEqual(['test/evaluator']);
     expect(burnSeen).toBe(true);
@@ -613,6 +774,29 @@ test('OpenRouter adapter sends credentials only as authorization and parses stru
   }
 });
 
+test('OpenRouter costMicros stays unknown unless every step has cost metadata', async () => {
+  const { costMicrosFromSteps } = await import('@/lib/runtime/openrouter');
+  expect(
+    costMicrosFromSteps([
+      { providerMetadata: { openrouter: { usage: { cost: 0.01 } } } },
+      { providerMetadata: { openrouter: { usage: { cost: 0.02 } } } },
+    ]),
+  ).toBe(30_000);
+  expect(
+    costMicrosFromSteps([
+      { providerMetadata: { openrouter: { usage: { cost: 0.01 } } } },
+      { providerMetadata: { openrouter: { usage: {} } } },
+    ]),
+  ).toBeUndefined();
+  expect(
+    costMicrosFromSteps([
+      { providerMetadata: { openrouter: { usage: { cost: 0.01 } } } },
+      { providerMetadata: {} },
+    ]),
+  ).toBeUndefined();
+  expect(costMicrosFromSteps([])).toBeUndefined();
+});
+
 test('OpenRouter pricing needs an exact model and a compatible priced endpoint', async () => {
   const { spyOn } = await import('bun:test');
   const { openRouterInference } = await import('@/lib/runtime/openrouter');
@@ -643,7 +827,27 @@ test('OpenRouter pricing needs an exact model and a compatible priced endpoint',
         },
       }),
     )
-    .mockResolvedValueOnce(Response.json({ data: { endpoints: [] } }));
+    .mockResolvedValueOnce(Response.json({ data: { endpoints: [] } }))
+    .mockResolvedValueOnce(
+      Response.json({
+        data: {
+          endpoints: [
+            {
+              tag: 'cheap/no-tools',
+              context_length: 10_000,
+              pricing: { prompt: '0.0000001', completion: '0.0000002', request: '0' },
+              supported_parameters: ['max_tokens', 'structured_outputs'],
+            },
+            {
+              tag: 'tools/ok',
+              context_length: 10_000,
+              pricing: { prompt: '0.000001', completion: '0.000002', request: '0.004' },
+              supported_parameters: ['max_tokens', 'structured_outputs', 'tools'],
+            },
+          ],
+        },
+      }),
+    );
   try {
     const call = openRouterInference('test-secret');
     const signal = AbortSignal.timeout(1000);
@@ -653,7 +857,10 @@ test('OpenRouter pricing needs an exact model and a compatible priced endpoint',
       upperBoundMicros: 20_000,
     });
     expect(await call.quote?.('test/no-price', signal)).toBeUndefined();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await call.quote?.('test/tools', signal, { requireTools: true })).toMatchObject({
+      endpoint: 'tools/ok',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   } finally {
     fetchMock.mockRestore();
   }

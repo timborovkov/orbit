@@ -4,7 +4,10 @@ import { withSentryConfig } from '@sentry/nextjs/config';
 
 const nextConfig: NextConfig = {
   output: 'standalone',
-  experimental: { serverActions: { bodySizeLimit: '6mb' } },
+  // Keep screenshots and review captures free of the Next.js corner badge.
+  devIndicators: false,
+  // 10 MB knowledge + multipart overhead for knowledge uploads through Server Actions.
+  experimental: { serverActions: { bodySizeLimit: '12mb' } },
   outputFileTracingRoot: join(import.meta.dirname, '../..'),
   turbopack: { root: join(import.meta.dirname, '../..') },
   serverExternalPackages: [

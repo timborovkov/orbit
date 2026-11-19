@@ -8,7 +8,9 @@ import { db } from '@/lib/db';
 import { openRouterKeySource } from '@/lib/runtime/openrouter-key';
 import {
   actionIntents,
+  agentMcpConnections,
   agents,
+  agentSkills,
   audit,
   configurations,
   controls,
@@ -103,70 +105,85 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
   await requireAdmin();
   const agent = (await db().select().from(agents).where(eq(agents.id, id))).at(0);
   if (!agent) return null;
-  const [versions, keys, history, reviews, consents, counters, pendingApprovals, activeRuns] =
-    await Promise.all([
-      db()
-        .select()
-        .from(configurations)
-        .where(eq(configurations.agentId, id))
-        .orderBy(desc(configurations.version)),
-      db()
-        .select({ agentId: credentials.agentId })
-        .from(credentials)
-        .where(eq(credentials.agentId, id)),
-      db()
-        .select()
-        .from(runs)
-        .where(eq(runs.agentId, id))
-        .orderBy(
-          ...(focusRunId ? [desc(sql`${runs.id} = ${focusRunId}::uuid`)] : []),
-          desc(runs.createdAt),
-        )
-        .limit(50),
-      db()
-        .select({
-          id: actionIntents.id,
-          actionType: actionIntents.actionType,
-          draft: sql<string | null>`${actionIntents.payload}->>'draft'`,
-          reason: sql<string | null>`${actionIntents.payload}->>'reason'`,
-          recipients: actionIntents.recipients,
-          status: actionIntents.reviewStatus,
-          createdAt: actionIntents.createdAt,
-          reviewedBy: actionIntents.reviewedBy,
-        })
-        .from(actionIntents)
-        .where(and(eq(actionIntents.agentId, id), isNotNull(actionIntents.reviewStatus)))
-        .orderBy(
-          sql`(${actionIntents.reviewStatus} = 'pending') DESC`,
-          desc(actionIntents.createdAt),
-        )
-        .limit(50),
-      db()
-        .select({
-          recipient: recipientConsents.recipient,
-          scope: recipientConsents.scope,
-          evidence: recipientConsents.evidence,
-          granted: recipientConsents.granted,
-        })
-        .from(recipientConsents)
-        .where(eq(recipientConsents.agentId, id))
-        .orderBy(desc(recipientConsents.updatedAt))
-        .limit(50),
-      db().select().from(usageCounters).where(eq(usageCounters.agentId, id)),
-      db()
-        .select({ count: sql<number>`count(*)::int` })
-        .from(actionIntents)
-        .where(eq(actionIntents.reviewStatus, 'pending')),
-      db()
-        .select({ count: sql<number>`count(*)::int` })
-        .from(runs)
-        .where(
-          and(
-            eq(runs.agentId, id),
-            inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
-          ),
-        ),
-    ]);
+  const [
+    versions,
+    keys,
+    history,
+    reviews,
+    consents,
+    counters,
+    pendingApprovals,
+    activeRuns,
+    skillRows,
+    mcpRows,
+  ] = await Promise.all([
+    db()
+      .select()
+      .from(configurations)
+      .where(eq(configurations.agentId, id))
+      .orderBy(desc(configurations.version)),
+    db()
+      .select({ agentId: credentials.agentId })
+      .from(credentials)
+      .where(eq(credentials.agentId, id)),
+    db()
+      .select()
+      .from(runs)
+      .where(eq(runs.agentId, id))
+      .orderBy(
+        ...(focusRunId ? [desc(sql`${runs.id} = ${focusRunId}::uuid`)] : []),
+        desc(runs.createdAt),
+      )
+      .limit(50),
+    db()
+      .select({
+        id: actionIntents.id,
+        actionType: actionIntents.actionType,
+        draft: sql<string | null>`${actionIntents.payload}->>'draft'`,
+        reason: sql<string | null>`${actionIntents.payload}->>'reason'`,
+        recipients: actionIntents.recipients,
+        status: actionIntents.reviewStatus,
+        createdAt: actionIntents.createdAt,
+        reviewedBy: actionIntents.reviewedBy,
+      })
+      .from(actionIntents)
+      .where(and(eq(actionIntents.agentId, id), isNotNull(actionIntents.reviewStatus)))
+      .orderBy(sql`(${actionIntents.reviewStatus} = 'pending') DESC`, desc(actionIntents.createdAt))
+      .limit(50),
+    db()
+      .select({
+        recipient: recipientConsents.recipient,
+        scope: recipientConsents.scope,
+        evidence: recipientConsents.evidence,
+        granted: recipientConsents.granted,
+      })
+      .from(recipientConsents)
+      .where(eq(recipientConsents.agentId, id))
+      .orderBy(desc(recipientConsents.updatedAt))
+      .limit(50),
+    db().select().from(usageCounters).where(eq(usageCounters.agentId, id)),
+    db()
+      .select({ count: sql<number>`count(*)::int` })
+      .from(actionIntents)
+      .where(eq(actionIntents.reviewStatus, 'pending')),
+    db()
+      .select({ count: sql<number>`count(*)::int` })
+      .from(runs)
+      .where(
+        and(eq(runs.agentId, id), inArray(runs.status, ['queued', 'running', 'awaiting_approval'])),
+      ),
+    db()
+      .select({ skillId: agentSkills.skillId })
+      .from(agentSkills)
+      .where(eq(agentSkills.agentId, id)),
+    db()
+      .select({
+        connectionId: agentMcpConnections.connectionId,
+        toolNames: agentMcpConnections.toolNames,
+      })
+      .from(agentMcpConnections)
+      .where(eq(agentMcpConnections.agentId, id)),
+  ]);
   const current = versions.at(0);
   if (!current) return null;
   const jobIds = history.map((run) => run.jobId).filter((jobId): jobId is string => !!jobId);
@@ -208,6 +225,8 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     pendingApprovalCount: pendingApprovals[0]?.count ?? 0,
     consents,
     current,
+    skillIds: skillRows.map((row) => row.skillId),
+    mcpSelections: mcpRows,
     usage: {
       day: {
         spendMicros: day.spendMicros,

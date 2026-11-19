@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   accessSectionPanelHidden,
+  knowledgeSectionPanelHidden,
   PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
   playgroundAttachmentRejection,
   playgroundEffectiveConfigurationId,
@@ -82,6 +83,8 @@ describe('access section panel visibility', () => {
   test('keeps inactive panels mounted via hidden rather than unmounting', () => {
     expect(accessSectionPanelHidden('budgets', 'budgets')).toBe(false);
     expect(accessSectionPanelHidden('budgets', 'consent')).toBe(true);
+    expect(knowledgeSectionPanelHidden('documents', 'documents')).toBe(false);
+    expect(knowledgeSectionPanelHidden('documents', 'inspector')).toBe(true);
   });
 });
 

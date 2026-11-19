@@ -6,6 +6,7 @@ import { saveConfiguration } from '@/actions/workspace';
 import { AccessWorkbench } from '@/app/access-workbench';
 import { AgentAvatar } from '@/app/agent-avatar';
 import { ConfigFields } from '@/app/config-fields';
+import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { PlaygroundChat } from '@/app/playground-chat';
 import { ProposalReview } from '@/app/policy-settings';
@@ -17,8 +18,12 @@ import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { formatUtcTimestamp } from '@/lib/format';
+import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
+import { listKnowledgeDocuments } from '@/lib/server/knowledge-queries';
+import { listMcpConnections } from '@/lib/server/mcp-queries';
+import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
 
@@ -48,7 +53,14 @@ export default async function AgentWorkspace({
     pendingApprovalCount,
     consents,
     usage,
+    skillIds,
+    mcpSelections,
   } = workspace;
+  const [knowledgeDocuments, { items: librarySkills }, { items: libraryMcp }] = await Promise.all([
+    listKnowledgeDocuments(id),
+    listSkillSummaries(),
+    listMcpConnections(),
+  ]);
   const lifecycle = agent.lifecycle;
   const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
@@ -58,6 +70,9 @@ export default async function AgentWorkspace({
       run.displayStatus === 'queued' ||
       run.displayStatus === 'running' ||
       run.displayStatus === 'awaiting_approval',
+  );
+  const hasPendingKnowledge = knowledgeDocuments.some(
+    (doc) => doc.status === 'pending' || doc.status === 'processing',
   );
   const versionFor = (configurationId: string) =>
     versions.find((version) => version.id === configurationId)?.version;
@@ -101,6 +116,18 @@ export default async function AgentWorkspace({
       consents={consents}
       hasAgentCredential={hasAgentCredential}
       keySource={keySource}
+      skills={librarySkills}
+      skillIds={skillIds}
+      mcpConnections={libraryMcp.map(({ id, name, url, transport, toolAllowlist, updatedAt }) => ({
+        id,
+        name,
+        url,
+        transport,
+        revision: updatedAt.toISOString(),
+        readOnlyTools:
+          toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [],
+      }))}
+      mcpSelections={mcpSelections}
     />
   );
   const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;
@@ -218,13 +245,26 @@ export default async function AgentWorkspace({
             <span className="muted">{openRouterConnectionLabel(keySource)}</span>
           </div>
         </div>
-        <PendingRunRefresh active={hasPendingRuns} />
+        <PendingRunRefresh active={hasPendingRuns || hasPendingKnowledge} />
         <WorkspaceTabs
           key={focusRunId ?? id}
           initialTab={focusRunId ? 'history' : undefined}
           items={[
             { id: 'configure', label: 'Configuration', content: configuration },
             { id: 'playground', label: 'Playground', content: playground },
+            {
+              id: 'knowledge',
+              label: 'Knowledge',
+              count: knowledgeDocuments.length,
+              content: (
+                <KnowledgeWorkbench
+                  agentId={id}
+                  documents={knowledgeDocuments}
+                  storageReady={storageConfigured()}
+                  searchEnabled={agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)}
+                />
+              ),
+            },
             { id: 'history', label: 'History', count: history.length, content: historyPanel },
             {
               id: 'approvals',

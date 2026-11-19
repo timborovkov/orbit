@@ -89,9 +89,11 @@ Use pgvector for semantic matching of knowledge passages, long-term textual memo
 
 ## 8. Native knowledge base and RAG
 
-Each agent has a private document library for PDFs, Markdown, plain text, FAQs, product descriptions, brand materials and documentation. Files are stored in object storage; PostgreSQL stores ownership, versions, extraction state, chunks, metadata and optional embeddings.
+Each agent has a private document library for PDFs, Markdown, plain text, FAQs, product descriptions, brand materials and documentation. Files are stored in object storage; PostgreSQL stores ownership, extraction state, chunks, metadata and embeddings.
 
-Upload flow: authenticate admin → upload original → create durable document record → worker extracts and cleans text → split into source-aware chunks → embed → store chunks in PostgreSQL/pgvector → mark searchable. Retrieval: agent-scoped hybrid search → source-labelled passages → answer grounded in retrieved evidence. Provide a knowledge inspection screen showing retrieved chunks and source documents.
+Upload flow: authenticate admin → upload original to RustFS (`agents/{agentId}/knowledge/{documentId}/…`) → create durable `knowledge_documents` row (`pending`) → enqueue `knowledge.process` on the Postgres job queue → worker extracts and cleans text → split into source-aware chunks (document, page/section, offsets) → embed via OpenRouter (AI SDK `embed`/`embedMany`, per-agent key then `OPENROUTER_API_KEY`) → store chunks and `vector(1536)` embeddings in PostgreSQL/pgvector → mark `ready` (or `failed`). Retries reuse embeddings already stored for unchanged chunk hashes so reprocessing does not re-pay completed vectors. Default embedding model is `openai/text-embedding-3-small` (`KNOWLEDGE_EMBEDDING_MODEL` / `KNOWLEDGE_EMBEDDING_DIMENSIONS` optional).
+
+Retrieval: agent-scoped `knowledge.search` tool (read-only) runs hybrid search — pgvector cosine similarity plus Postgres full-text (`tsvector`/`ts_rank_cd`) — merged with reciprocal rank fusion, then returns source-labelled passages with citation metadata. Every invocation goes through the policy gateway. The agent Knowledge tab lists documents with status, supports upload/replace/reprocess/delete, and includes a retrieval inspector for query → ranked chunks, scores and match reasons.
 
 Keep personality and operating rules in instructions, reference knowledge in RAG, and changing operational facts behind authenticated MCP/native tools. Support reprocessing, replacement, deletion and embedding invalidation.
 
@@ -104,6 +106,33 @@ Tools may complete synchronously or return a pending external identifier. Long-r
 Matchmaking is optional, not a universal agent feature. A superconnector can search profiles and propose mutually useful introductions; John can introduce an interested prospect to a demo host; Sarah can direct a customer to human support. Private introductions require consent appropriate to the information being shared.
 
 Use natural-language guidance to describe when a tool is appropriate, but enforce permissions in deterministic code. Support per-tool automatic execution, approval-required execution or disabled state; record consent scope and evidence. For generic MCP, restrict exposed operations, credentials, timeouts and high-risk effects.
+
+## 9a. Shared skill library and generic MCP connections
+
+Orbit keeps reusable resources that are defined once and opted into per agent. Skills and MCP connections are workspace-scoped libraries, not per-agent copies. Agents reference them through join tables; deleting or editing a library record affects every attached agent on the next run. These are not separate runtimes—every agent still executes through the shared worker and policy gateway.
+
+### Skill library
+
+| Concern | Behaviour |
+| --- | --- |
+| Data model | `skills` stores a stable slug `name`, human title, short when-to-use `description`, Markdown `body`, integer `version` (incremented on each body/description change), `updated_at` and audit actor. `agent_skills` is the many-to-many opt-in. Names are unique workspace-wide. |
+| Admin UI | Dedicated Skills list page (Templates-style disclosure rows) to create, edit and delete skills. Agent Access includes a multi-select picker of available skills. Secret material never appears in skill bodies intended for prompts. |
+| Runtime loading | At run start the runtime loads only the agent’s selected skills. The system prompt receives a compact catalogue of **name + description** (progressive disclosure). Full Markdown bodies stay out of the default context. |
+| Built-in tool | A first-party `load_skill` tool lets the model request one selected skill by name. The tool is read-only, subject to the same policy gateway, step budget and run deadline as other tools. It returns the body for that skill version and refuses skills the agent has not opted into. |
+| Versioning / history | Each simulation result records which skill versions were attached and which were loaded (`skillVersions` / tool-call steps). Editing a skill bumps `version` so historical runs remain attributable to the version used at the time. |
+
+### Generic MCP connections
+
+| Concern | Behaviour |
+| --- | --- |
+| Data model | `mcp_connections` stores a unique `name`, remote `url`, transport (`http` or `sse`), optional encrypted auth headers (AES-GCM with the connection id as AAD, same master key as agent credentials), optional tool allowlist JSON, timestamps and actor. `agent_mcp_connections` opts agents in. |
+| Admin UI | Dedicated MCP connections page to create/edit/delete connections and set headers without ever echoing stored secrets back. Agent Access includes a connection multi-select. Optional per-connection allowlists restrict which remote tools Orbit will register. |
+| Runtime loading | For each selected connection the runtime opens an AI SDK MCP client (`@ai-sdk/mcp`) over HTTP or SSE, lists tools, applies the allowlist, and registers them into the model’s tool set for that run. Clients are closed when the run finishes. |
+| Policy and safety | Every MCP tool invocation is typed as `mcp:<connection>:<tool>` (or an equivalent stable capability id) and must pass `authorizeAction`: enabled-tool checks, lifecycle, global pause (for non-read-only), budgets, approval tools, consent where applicable, and step limits. There is no bypass around the gateway. Tool arguments and results are untrusted content—they cannot change instructions, permissions or credentials. |
+| Failure handling | Connection, handshake or discovery failures degrade that connection only: the run continues with remaining tools, and the result records a connection error entry. A denied or failed individual tool call is recorded as a tool step without aborting unrelated work. |
+| Observability | Tool-policy steps and MCP/skill tool calls appear in run history. When Langfuse/Sentry telemetry is configured, the same correlation ids used for model stages cover tool spans and failures; secrets and auth headers are never logged. |
+
+Administrators manage library records under global navigation; per-agent pickers only assign membership. Phase 4 delivery includes authenticated remote MCP; the skill library ships alongside it as shared prompt/tool infrastructure.
 
 ## 10. Communication and research integrations
 | Integration | Initial role / approach |
@@ -142,13 +171,13 @@ Use one Langfuse production project (and optionally a separate development proje
 
 ## 13. Dashboard and administration
 
-Global navigation: Agents, Activity, Approvals, Conversations, People, Playground/Evaluations, Integrations and Settings. Each agent has Overview, Identity/Personality, Mission/Goals, Models, Tools, Triggers, Channels, Knowledge, Memory, Activity, Conversations, Analytics and Permissions.
+Global navigation: Agents, Activity, Approvals, Conversations, People, Playground/Evaluations, Skills, MCP connections, Integrations and Settings. Each agent has Overview, Identity/Personality, Mission/Goals, Models, Tools, Triggers, Channels, Knowledge, Memory, Activity, Conversations, Analytics and Permissions. Skills and MCP connections are managed as shared libraries and attached per agent from Access.
 
 Admin access initially uses environment-configured email/password credentials; trusted OAuth with allowlisted emails is planned. No open registration. The dashboard provides per-agent pause/resume, shadow/live mode, credential health, a global Approvals inbox with a pending-count badge, usage and action audit trails.
 
 ## 14. Suggested data domains (not a fixed schema)
 
-Agents and versions; templates and campaigns; credentials and integrations; inbound events and evaluations; jobs, tasks and actions; people, identities, follows, conversations and messages; consent and blocklists; knowledge documents, chunks and embeddings; memory objects; execution traces and evaluation cases; approvals, schedules and budgets.
+Agents and versions; templates and campaigns; credentials and integrations; shared skill library and agent–skill membership; generic MCP connections (encrypted headers, allowlists) and agent–connection membership; inbound events and evaluations; jobs, tasks and actions; people, identities, follows, conversations and messages; consent and blocklists; knowledge documents, chunks and embeddings; memory objects; execution traces and evaluation cases; approvals, schedules and budgets.
 
 Every agent-owned record needs an explicit agent scope; shared or cross-agent access must be intentional. Add unique provider-event keys and outbound idempotency keys. Store provider payloads alongside normalised fields when allowed by provider retention terms.
 
@@ -161,7 +190,7 @@ Orbit's **full platform design is the implementation backbone**. Delivery is inc
 | 1. Foundation | Private environment-configured administrator login and guarded local development AUTH_DISABLED bypass; OAuth and magic-link login and allowlist later, agents/templates, versioned configuration, optional OpenRouter env default plus encrypted per-agent credential overrides, Drizzle/Postgres, Zod environment validation, Docker/Compose/Railway configuration. |
 | 2. Runtime and safety | Bun worker, durable jobs and recovery, OpenRouter/AI SDK, model configuration, policy gateway, human-in-the-loop approval queue with run suspend/resume, hard budgets, consent, agent lifecycle, Langfuse traces, Sentry monitoring and audit trails. |
 | 3. Evaluation and UI | Full agent workspace, playground for single inputs and multi-step scenarios, simulation and shadow mode, detailed timelines, production-derived regression datasets and side-by-side comparisons. |
-| 4. Channels and research | Approved X discovery, mentions, posting and other permitted actions; Resend virtual inboxes; web search and read; authenticated remote MCP tools. |
+| 4. Channels and research | Approved X discovery, mentions, posting and other permitted actions; Resend virtual inboxes; web search and read; shared skill library (progressive disclosure + `load_skill`) and admin-defined generic MCP connections (HTTP/SSE) selected per agent, with all remote tools gated by the policy gateway. |
 | 5. Intelligence and memory | Cheap multi-action evaluator, adaptive context retrieval, proactive planning, conversations, structured and JSONB memories, reversible identity linking, agent-scoped and shared-library RAG with pgvector. |
 | 6. Durable outcomes | Future tasks, event-driven waits, follow-ups, channel approval pings (Telegram/Slack), evidence-based outcomes, introductions, relationship review and escalation. |
 | 7. Validation and live readiness | Exercise all six templates plus blank agent, with detailed end-to-end tests for John, Sarah and the superconnector. Verify evaluations and safeguards, then require explicit administrator activation for live mode. |

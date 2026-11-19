@@ -15,6 +15,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 
+import { KnowledgeToolResult } from '@/app/knowledge-citations';
 import {
   Conversation,
   ConversationContent,
@@ -494,6 +495,8 @@ function PlaygroundMessagePart({
     return <PlaygroundReasoningPart text={part.text} state={part.state} />;
   }
   if (!isToolUIPart(part)) return null;
+  if (part.type === 'tool-knowledge.search' && 'output' in part)
+    return <KnowledgeToolResult output={part.output} />;
   return <PlaygroundToolPart part={part} />;
 }
 

@@ -35,7 +35,7 @@ async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 test.beforeEach(async () => {
-  await sql`TRUNCATE recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE knowledge_chunks, knowledge_documents, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 test.afterAll(async () => {
@@ -199,7 +199,9 @@ test('validation, failed requests and pending feedback preserve entries', async 
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toBeVisible();
   release();
-  await expect(page.locator('p[role=alert]')).toContainText('Check your connection and try again');
+  await expect(page.getByRole('dialog').locator('.form-error')).toContainText(
+    'Check your connection and try again',
+  );
   await expect(page.getByLabel(/^Name/)).toHaveValue('Sarah');
   await expect(page.getByLabel(/^Mission/)).toHaveValue('Help customers.');
   await page.unrouteAll();

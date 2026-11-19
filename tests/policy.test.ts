@@ -64,11 +64,14 @@ test('shadow and live suppress writes when adapters are absent', () => {
 });
 
 test('read-only tools can allow when budgets permit', () => {
-  const result = evaluateActionForTest(base, {
-    type: 'knowledge.search',
-    idempotencyKey: 'k8',
-    readOnly: true,
-  });
+  const result = evaluateActionForTest(
+    { ...base, enabledTools: ['knowledge.search'] },
+    {
+      type: 'knowledge.search',
+      idempotencyKey: 'k8',
+      readOnly: true,
+    },
+  );
   expect(result.decision).toBe('allow');
 });
 

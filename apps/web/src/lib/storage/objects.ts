@@ -13,12 +13,14 @@ const storageSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().min(1),
   S3_SECRET_ACCESS_KEY: z.string().min(1),
 });
+
 export function storageConfigured() {
   return storageSchema.safeParse(process.env).success;
 }
+
 function connection() {
   const result = storageSchema.safeParse(process.env);
-  if (!result.success) throw new Error('Picture storage is not configured.');
+  if (!result.success) throw new Error('Object storage is not configured.');
   const config = result.data;
   return {
     bucket: config.S3_BUCKET,
@@ -35,35 +37,58 @@ function connection() {
     }),
   };
 }
-export async function putPicture(key: string, body: Uint8Array) {
+
+export async function putObject(key: string, body: Uint8Array, contentType: string) {
   const { client, bucket } = connection();
   try {
     await client.send(
-      new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: 'image/webp' }),
-      { abortSignal: AbortSignal.timeout(15000) },
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+      }),
+      { abortSignal: AbortSignal.timeout(60_000) },
     );
   } finally {
     client.destroy();
   }
 }
-export async function getPicture(key: string) {
+
+export async function getObject(key: string) {
   const { client, bucket } = connection();
   try {
     const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), {
-      abortSignal: AbortSignal.timeout(15000),
+      abortSignal: AbortSignal.timeout(60_000),
     });
-    return await object.Body?.transformToByteArray();
+    const body = await object.Body?.transformToByteArray();
+    if (!body) return undefined;
+    return { body, contentType: object.ContentType ?? undefined };
   } finally {
     client.destroy();
   }
 }
-export async function deletePicture(key: string) {
+
+export async function deleteObject(key: string) {
   const { client, bucket } = connection();
   try {
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }), {
-      abortSignal: AbortSignal.timeout(15000),
+      abortSignal: AbortSignal.timeout(15_000),
     });
   } finally {
     client.destroy();
   }
+}
+
+export async function putPicture(key: string, body: Uint8Array) {
+  await putObject(key, body, 'image/webp');
+}
+
+export async function getPicture(key: string) {
+  const object = await getObject(key);
+  return object?.body;
+}
+
+export async function deletePicture(key: string) {
+  await deleteObject(key);
 }

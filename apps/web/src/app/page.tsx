@@ -65,6 +65,8 @@ export default async function Home() {
             </Link>
             <a href="#activity">Activity</a>
             <Link href="/templates">Templates</Link>
+            <Link href="/skills">Skills</Link>
+            <Link href="/mcp">MCP</Link>
             <a href="#controls">Controls</a>
           </div>
         </nav>
