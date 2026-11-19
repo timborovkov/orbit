@@ -56,7 +56,7 @@ export interface DemoRunSpec {
   deferReason: string | null;
 }
 
-export interface DemoKnowledgeChunkSpec {
+interface DemoKnowledgeChunkSpec {
   id: string;
   chunkIndex: number;
   content: string;

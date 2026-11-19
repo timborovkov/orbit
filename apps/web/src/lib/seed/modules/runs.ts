@@ -19,7 +19,9 @@ export const runsModule: SeedModule = {
             ? 'failed'
             : 'cancelled';
       const jobFinishedAt =
-        row.status === 'awaiting_approval' ? demoTime(now, row.createdOffsetMs + 8_000) : finishedAt;
+        row.status === 'awaiting_approval'
+          ? demoTime(now, row.createdOffsetMs + 8_000)
+          : finishedAt;
 
       await tx
         .insert(jobs)

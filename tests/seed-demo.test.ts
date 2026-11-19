@@ -111,9 +111,7 @@ describe('demo seed idempotency and markers', () => {
   test('runs include succeeded, failed, interrupted and awaiting_approval', () => {
     const runs = demoRuns();
     const statuses = new Set(runs.map((run) => run.status));
-    expect(statuses).toEqual(
-      new Set(['completed', 'failed', 'interrupted', 'awaiting_approval']),
-    );
+    expect(statuses).toEqual(new Set(['completed', 'failed', 'interrupted', 'awaiting_approval']));
     expect(runs.some((run) => run.result.steps.length >= 2)).toBe(true);
     expect(runs.some((run) => run.result.error)).toBe(true);
     expect(runs.some((run) => run.status === 'awaiting_approval' && run.deferReason)).toBe(true);

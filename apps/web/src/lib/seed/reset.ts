@@ -3,8 +3,8 @@ import { inArray, sql } from 'drizzle-orm';
 import {
   actionIntents,
   agentMcpConnections,
-  agentSkills,
   agents,
+  agentSkills,
   audit,
   configurations,
   credentials,
@@ -57,10 +57,10 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
   await tx.delete(jobs).where(inArray(jobs.id, demoJobIds));
   await tx.delete(jobs).where(sql`${jobs.idempotencyKey} LIKE ${'orbit-demo:%'}`);
 
-  await tx.delete(knowledgeChunks).where(inArray(knowledgeChunks.id, [...DEMO_KNOWLEDGE_CHUNK_IDS]));
   await tx
     .delete(knowledgeChunks)
-    .where(inArray(knowledgeChunks.agentId, [...DEMO_AGENT_IDS]));
+    .where(inArray(knowledgeChunks.id, [...DEMO_KNOWLEDGE_CHUNK_IDS]));
+  await tx.delete(knowledgeChunks).where(inArray(knowledgeChunks.agentId, [...DEMO_AGENT_IDS]));
   await tx
     .delete(knowledgeDocuments)
     .where(inArray(knowledgeDocuments.id, [...DEMO_KNOWLEDGE_DOC_IDS]));
