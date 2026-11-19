@@ -1259,17 +1259,20 @@ test('introductions honor independent consent and administrator review settings'
   ids.push(id);
   await sql`UPDATE controls SET paused=false`;
   await sql`INSERT INTO agents(id,name,mission,budgets) VALUES (${id}, 'Consent', 'Fixture', ${sql.json(uncapped)})`;
-  const [version] = await sql`
+  await sql`
     INSERT INTO agent_configurations(agent_id,version,config,actor)
-    SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id
+    SELECT ${id},1,config,'test' FROM templates WHERE id='support'
   `;
   await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'consent-fixture')})`;
   const actor = 'test@example.com';
   const run = async () => {
+    const [latest] = await sql`
+      SELECT id FROM agent_configurations WHERE agent_id=${id} ORDER BY version DESC LIMIT 1
+    `;
     const queued = await enqueueSimulation({
       actor,
       agentId: id,
-      configurationId: version.id,
+      configurationId: latest.id,
       input: 'Synthetic introduction',
       recipients: ['fixture-a', 'fixture-b'],
     });
@@ -1319,7 +1322,12 @@ test('introductions honor independent consent and administrator review settings'
     await sql`SELECT review_status FROM action_intents WHERE id=${autonomous.proposal.intentId}`;
   expect(autonomousIntent.review_status).toBeNull();
 
-  await persistApprovalTools(actor, id, ['introduce']);
+  await persistApprovalTools(actor, id, 1, {
+    approvalTools: ['introduce'],
+    approvalExpiresAfterHours: null,
+    approvalOnReject: 'continue',
+    approvalSpendCents: null,
+  });
   const proposed = await run();
   expect(proposed.proposal.policy).toBe('needs-approval');
   const [suspended] =
