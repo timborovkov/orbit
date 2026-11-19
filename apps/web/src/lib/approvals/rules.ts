@@ -1,3 +1,5 @@
+import { alwaysRequiresApproval } from '@/lib/runtime/outbound/types';
+
 export const approvalReviewLimit = 50;
 
 /** Merge agent and global approval tool lists (order-stable unique). */
@@ -18,7 +20,8 @@ export function mergeApprovalTools(
 /**
  * True when this write action requires administrator approval under configured
  * approvalTools or the spend threshold. Introduce/escalate are opt-in via
- * approvalTools like other actions. Preliminary (evaluator) proposals skip this.
+ * approvalTools like other actions. Outbound email replies always require
+ * approval. Preliminary (evaluator) proposals skip this.
  */
 export function actionNeedsApproval(input: {
   actionType: string;
@@ -29,6 +32,7 @@ export function actionNeedsApproval(input: {
   daySpendMicros: bigint;
 }): boolean {
   if (input.preliminary) return false;
+  if (alwaysRequiresApproval(input.actionType)) return true;
   if (input.approvalTools.includes(input.actionType)) return true;
   if (
     input.approvalSpendCents !== null &&

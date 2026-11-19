@@ -1,10 +1,13 @@
-import { emailMessages, emailThreads, runs } from '@/lib/schema';
-import { DEMO_ACTOR, DEMO_AGENTS, DEMO_CONFIGS } from '@/lib/seed/ids';
+import {
+  actionIntents,
+  emailMailboxes,
+  emailMessages,
+  emailThreads,
+  policyDecisions,
+  runs,
+} from '@/lib/schema';
+import { DEMO_ACTOR, DEMO_AGENTS, DEMO_CONFIGS, DEMO_EMAIL } from '@/lib/seed/ids';
 import type { SeedModule } from '@/lib/seed/types';
-
-const threadId = '00000000-0000-4000-a800-000000000001';
-const messageId = '00000000-0000-4000-a800-000000000002';
-const runId = '00000000-0000-4000-a800-000000000003';
 
 export const emailModule: SeedModule = {
   name: 'email',
@@ -12,11 +15,28 @@ export const emailModule: SeedModule = {
     const agentId = DEMO_AGENTS.sarah;
     const configurationId = DEMO_CONFIGS.sarahV2;
     const body = 'Where can I find my invoices?';
-    await tx.insert(emailThreads).values({ id: threadId, agentId }).onConflictDoNothing();
+    const draft = 'You can find your invoices under Billing in your workspace settings.';
+
+    await tx
+      .insert(emailMailboxes)
+      .values({
+        agentId,
+        address: 'sarah@inbound.example.test',
+        enabled: true,
+      })
+      .onConflictDoUpdate({
+        target: emailMailboxes.agentId,
+        set: { address: 'sarah@inbound.example.test', enabled: true },
+      });
+
+    await tx
+      .insert(emailThreads)
+      .values({ id: DEMO_EMAIL.threadId, agentId })
+      .onConflictDoNothing();
     await tx
       .insert(runs)
       .values({
-        id: runId,
+        id: DEMO_EMAIL.runId,
         agentId,
         configurationId,
         actor: DEMO_ACTOR,
@@ -39,7 +59,7 @@ export const emailModule: SeedModule = {
                 priority: 0.6,
                 reason: 'Billing question',
                 actions: [],
-                answer: 'You can find your invoices under Billing in your workspace settings.',
+                answer: draft,
                 citations: [],
               },
             },
@@ -50,18 +70,52 @@ export const emailModule: SeedModule = {
     await tx
       .insert(emailMessages)
       .values({
-        id: messageId,
+        id: DEMO_EMAIL.messageId,
         agentId,
-        threadId,
-        runId,
+        threadId: DEMO_EMAIL.threadId,
+        runId: DEMO_EMAIL.runId,
         configurationId,
-        resendEmailId: messageId,
+        resendEmailId: DEMO_EMAIL.messageId,
         event: { fixture: DEMO_ACTOR },
         sender: 'customer@example.test',
         subject: 'Invoice history',
         receivedAt: now,
         body,
         messageId: 'invoice-history@example.test',
+      })
+      .onConflictDoNothing();
+
+    await tx
+      .insert(actionIntents)
+      .values({
+        id: DEMO_EMAIL.intentId,
+        agentId,
+        runId: DEMO_EMAIL.runId,
+        actionType: 'email.send',
+        recipients: ['customer@example.test'],
+        reviewStatus: 'pending',
+        payload: {
+          draft,
+          reason: 'Inbound email reply draft',
+          emailMessageId: DEMO_EMAIL.messageId,
+          threadId: DEMO_EMAIL.threadId,
+        },
+        idempotencyKey: `email.send:${DEMO_EMAIL.messageId}`,
+        decision: 'needs-approval',
+        reasons: ['An administrator must review this proposal.'],
+      })
+      .onConflictDoNothing();
+    await tx
+      .insert(policyDecisions)
+      .values({
+        id: DEMO_EMAIL.policyId,
+        agentId,
+        runId: DEMO_EMAIL.runId,
+        actionType: 'email.send',
+        decision: 'needs-approval',
+        reasons: ['An administrator must review this proposal.'],
+        intentId: DEMO_EMAIL.intentId,
+        actor: DEMO_ACTOR,
       })
       .onConflictDoNothing();
   },

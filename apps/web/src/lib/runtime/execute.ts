@@ -25,6 +25,7 @@ import {
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
 import { emailKnowledgeQuery } from '@/lib/runtime/email/input';
+import { proposeEmailReplyFromDraft } from '@/lib/runtime/email/propose';
 import { EMAIL_DRAFT_JOB } from '@/lib/runtime/email/settings';
 import {
   isRetryableInfrastructureError,
@@ -1038,6 +1039,19 @@ async function processSimulationRun(
                 ),
         );
         if (!owned.length) return;
+        if (origin === 'email' && !result.error) {
+          try {
+            await proposeEmailReplyFromDraft({
+              agentId: run.agentId,
+              runId: run.id,
+              actor: run.actor,
+              result: traceResult,
+            });
+          } catch {
+            // Proposal persistence failures must not undo a completed draft; the
+            // administrator can still open a review from the Email tab later.
+          }
+        }
       } catch (error) {
         // Paid-step burn: never complete the job while the run is still running. Persist the burn
         // markers when possible, then Retryable so the queue retries finalization only (simulate

@@ -13,8 +13,17 @@ import {
   recordApprovalReviews,
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
+import { enqueueApprovedOutbound } from '@/lib/runtime/outbound/dispatch';
+import { EMAIL_SEND_ACTION } from '@/lib/runtime/outbound/types';
 import { recordApprovalDecision } from '@/lib/runtime/telemetry';
-import { actionIntents, agents, audit, policyDecisions, recipientConsents } from '@/lib/schema';
+import {
+  actionIntents,
+  agents,
+  audit,
+  emailMailboxes,
+  policyDecisions,
+  recipientConsents,
+} from '@/lib/schema';
 
 export async function persistConsentRequirements(
   actor: string,
@@ -110,6 +119,7 @@ export async function reviewProposedAction(
       approved && options.editedPayload
         ? { ...intent.payload, ...options.editedPayload }
         : intent.payload;
+    let approvalDecision: 'allow' | 'suppressed' = 'suppressed';
     if (approved) {
       const ctx = await loadPolicyContext(agentId, actor, intent.runId, tx);
       if (!ctx) return { error: 'Agent not found.' };
@@ -126,8 +136,11 @@ export async function reviewProposedAction(
           type: intent.actionType,
           idempotencyKey: intent.idempotencyKey,
           payload,
+          recipients: intent.recipients,
         },
         consent,
+        false,
+        { skipApproval: true },
       );
       if (policy.decision === 'deny') {
         await tx.insert(policyDecisions).values({
@@ -140,6 +153,20 @@ export async function reviewProposedAction(
           actor,
         });
         return { error: policy.reasons.join(' ') };
+      }
+      approvalDecision = policy.decision === 'allow' ? 'allow' : 'suppressed';
+      if (approvalDecision === 'allow' && intent.actionType === EMAIL_SEND_ACTION) {
+        const mailbox = (
+          await tx
+            .select({ enabled: emailMailboxes.enabled })
+            .from(emailMailboxes)
+            .where(eq(emailMailboxes.agentId, agentId))
+        ).at(0);
+        if (!mailbox?.enabled) {
+          return { error: 'Enable the agent mailbox before approving an email reply.' };
+        }
+        const draft = typeof payload.draft === 'string' ? payload.draft.trim() : '';
+        if (!draft) return { error: 'Approved email replies need a non-empty draft.' };
       }
     }
 
@@ -156,12 +183,33 @@ export async function reviewProposedAction(
       now,
       payload,
       note: options.note,
+      decision: approved ? approvalDecision : 'deny',
     });
+
+    if (approved && approvalDecision === 'allow' && intent.actionType === EMAIL_SEND_ACTION) {
+      const draft = typeof payload.draft === 'string' ? payload.draft : '';
+      const emailMessageId =
+        typeof payload.emailMessageId === 'string' ? payload.emailMessageId : null;
+      const threadId = typeof payload.threadId === 'string' ? payload.threadId : null;
+      await enqueueApprovedOutbound(tx, {
+        agentId,
+        intentId: intent.id,
+        actionType: intent.actionType,
+        body: draft,
+        idempotencyKey: intent.idempotencyKey,
+        emailMessageId,
+        threadId,
+        actor,
+      });
+    }
+
     const settled = intent.runId && (await settleApprovalRun(tx, agent, intent.runId, actor));
     return {
       outcome: {
         message: approved
-          ? 'Proposal approved.'
+          ? approvalDecision === 'allow'
+            ? 'Proposal approved and queued for send.'
+            : 'Proposal approved.'
           : settled === 'ended'
             ? 'Proposal rejected; run ended.'
             : 'Proposal rejected.',

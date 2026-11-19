@@ -30,6 +30,7 @@ const actionLabels = {
   bookmark: 'Bookmark',
   introduce: 'Introduce',
   escalate: 'Escalate',
+  'email.send': 'Email reply',
 } as Record<string, string>;
 
 export interface ApprovalItem {

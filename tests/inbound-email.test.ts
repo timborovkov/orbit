@@ -51,6 +51,8 @@ afterAll(async () => {
   }
   try {
     for (const id of ids) {
+      await sql`DELETE FROM outbound_actions WHERE agent_id=${id}`;
+      await sql`DELETE FROM email_messages WHERE agent_id=${id}`;
       await sql`DELETE FROM email_threads WHERE agent_id=${id}`;
       await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
       await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
@@ -314,9 +316,16 @@ test('signed inbound mail isolates Sarah and a Live agent, threads replies, and 
   expect(draftAnswerFromResult(sarahRows[1]!.result)?.sources[0]).toMatchObject({
     sourceFilename: 'billing.md',
   });
+  const intents = await sql`SELECT action_type, decision, review_status FROM action_intents
+      WHERE agent_id IN (${sarah.id}, ${john.id})
+        AND action_type NOT IN ('knowledge.search')`;
+  expect(intents.length).toBeGreaterThan(0);
+  expect(intents.every((row) => row.action_type === 'email.send')).toBe(true);
   expect(
-    await sql`SELECT 1 FROM action_intents WHERE agent_id IN (${sarah.id}, ${john.id})
-    AND (action_type NOT IN ('knowledge.search') OR review_status IS NOT NULL)`,
+    intents.every((row) => row.decision === 'needs-approval' && row.review_status === 'pending'),
+  ).toBe(true);
+  expect(
+    await sql`SELECT 1 FROM outbound_actions WHERE agent_id IN (${sarah.id}, ${john.id})`,
   ).toHaveLength(0);
   const [usage] =
     await sql`SELECT sum(requests) AS requests, sum(outbound_actions) AS outbound FROM usage_counters WHERE agent_id IN (${sarah.id}, ${john.id})`;

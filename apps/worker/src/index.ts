@@ -9,7 +9,8 @@ import { startJobWorker } from '@/lib/queue/worker';
 import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
 import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
 import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
-import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
+import { processEmailSendJob } from '@/lib/runtime/email/send';
+import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB, EMAIL_SEND_JOB } from '@/lib/runtime/email/settings';
 import {
   finalizeExhaustedSimulationJob,
   processEmailDraftJob,
@@ -74,6 +75,11 @@ const worker = startJobWorker({
       processEmailDraftJob(job.payload, undefined, signal, {
         jobId: job.id,
         workerId,
+      }),
+    [EMAIL_SEND_JOB]: (job, signal) =>
+      processEmailSendJob(job, signal, undefined, {
+        apiKey: config.RESEND_API_KEY,
+        sendingDomain: config.RESEND_SENDING_DOMAIN,
       }),
     [SIMULATION_JOB_TYPE]: async (job, signal) => {
       try {
