@@ -99,7 +99,10 @@ const worker = startJobWorker({
     },
     [X_DISCOVERY_POLL_JOB]: async (job, signal) => {
       try {
-        const result = await processDiscoveryPoll(job, signal, { adapter: xAdapter });
+        const result = await processDiscoveryPoll(job, signal, {
+          adapter: xAdapter,
+          jobId: job.id,
+        });
         if (result.deferUntil) return { deferUntil: result.deferUntil };
       } catch (error) {
         reportFailure('worker.queue', jobCorrelation(job), error);

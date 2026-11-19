@@ -20,7 +20,10 @@ export type XSearchAvailability = { available: true } | { available: false; reas
 
 export interface XSearchResult {
   posts: XSearchPost[];
-  /** Newest provider id observed in this page (for since_id). */
+  /**
+   * Newest provider id across the full result set (all pages).
+   * Callers advance since_id only after every page has been consumed.
+   */
   newestId: string | null;
 }
 

@@ -6,7 +6,7 @@ import {
   createFixtureXSearchAdapter,
   FIXTURE_X_POSTS,
 } from '@/lib/runtime/x/fixture';
-import { createLiveXSearchAdapter } from '@/lib/runtime/x/live';
+import { createLiveXSearchAdapter, X_RECENT_SEARCH_MAX_PAGES } from '@/lib/runtime/x/live';
 import { formatDiscoveryInput } from '@/lib/runtime/x/poll';
 import { optionalXBearerToken } from '@/lib/runtime/x/settings';
 
@@ -37,6 +37,78 @@ test('live adapter is unavailable without a bearer token', () => {
     available: false,
     reason: 'X_BEARER_TOKEN is not set. X discovery polling is unavailable.',
   });
+});
+
+test('live adapter walks next_token pages before returning newest_id', async () => {
+  const calls: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    calls.push(url.searchParams.get('pagination_token') ?? '');
+    if (!url.searchParams.get('pagination_token')) {
+      return Response.json({
+        data: [
+          {
+            id: '2001',
+            text: 'page one older',
+            author_id: 'u1',
+            created_at: '2026-11-18T10:00:00.000Z',
+          },
+          {
+            id: '2002',
+            text: 'page one newer',
+            author_id: 'u1',
+            created_at: '2026-11-18T10:01:00.000Z',
+          },
+        ],
+        includes: { users: [{ id: 'u1', username: 'pager' }] },
+        meta: { newest_id: '2002', next_token: 'page-2', result_count: 2 },
+      });
+    }
+    expect(url.searchParams.get('pagination_token')).toBe('page-2');
+    expect(url.searchParams.get('since_id')).toBe('1000');
+    return Response.json({
+      data: [
+        {
+          id: '2003',
+          text: 'page two newest',
+          author_id: 'u1',
+          created_at: '2026-11-18T10:02:00.000Z',
+        },
+      ],
+      includes: { users: [{ id: 'u1', username: 'pager' }] },
+      meta: { newest_id: '2003', result_count: 1 },
+    });
+  }) as unknown as typeof fetch;
+
+  const adapter = createLiveXSearchAdapter('test-bearer', fetchImpl);
+  const result = await adapter.searchRecent({ query: 'orbit', sinceId: '1000' });
+  expect(calls).toEqual(['', 'page-2']);
+  expect(result.posts.map((post) => post.id)).toEqual(['2001', '2002', '2003']);
+  expect(result.newestId).toBe('2003');
+});
+
+test('live adapter stops at max pages and still reports the highest newest_id', async () => {
+  let pages = 0;
+  const fetchImpl = (async () => {
+    pages += 1;
+    const id = String(3000 + pages);
+    return Response.json({
+      data: [
+        { id, text: `page ${pages}`, author_id: 'u2', created_at: '2026-11-18T11:00:00.000Z' },
+      ],
+      meta: {
+        newest_id: id,
+        next_token: pages < 10 ? `tok-${pages}` : undefined,
+        result_count: 1,
+      },
+    });
+  }) as unknown as typeof fetch;
+
+  const adapter = createLiveXSearchAdapter('test-bearer', fetchImpl);
+  const result = await adapter.searchRecent({ query: 'orbit' });
+  expect(pages).toBe(X_RECENT_SEARCH_MAX_PAGES);
+  expect(result.posts).toHaveLength(X_RECENT_SEARCH_MAX_PAGES);
+  expect(result.newestId).toBe(String(3000 + X_RECENT_SEARCH_MAX_PAGES));
 });
 
 test('fixture adapter returns posts after since_id and supports restart cursors', async () => {

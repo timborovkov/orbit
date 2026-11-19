@@ -4,6 +4,9 @@ import { eq } from 'drizzle-orm';
 
 import { budgetDefaults } from '@/lib/budgets';
 import { db } from '@/lib/db';
+import { canAcceptBackgroundWork } from '@/lib/lifecycle';
+import { configSchema } from '@/lib/runtime/config';
+import { ensureDiscoveryPollJob } from '@/lib/runtime/x/poll';
 import { agents, audit, configurations, templates } from '@/lib/schema';
 
 export async function createAgentFromTemplate(
@@ -13,6 +16,7 @@ export async function createAgentFromTemplate(
 ) {
   const template = (await db().select().from(templates).where(eq(templates.id, templateId))).at(0);
   if (!template) return { ok: false as const, errors: { name: ['Choose an available template.'] } };
+  const config = configSchema.parse({ ...template.config, ...data });
   await db().transaction(async (tx) => {
     const agent = (
       await tx
@@ -25,7 +29,7 @@ export async function createAgentFromTemplate(
       agentId: agent.id,
       version: 1,
       actor,
-      config: { ...template.config, ...data },
+      config,
       approvalSettings: {
         approvalTools: [],
         approvalExpiresAfterHours: null,
@@ -37,6 +41,9 @@ export async function createAgentFromTemplate(
       actor,
       action: `Created shadow agent: ${data.name}`,
     });
+    if (config.xSearchQuery.trim() && canAcceptBackgroundWork(agent.lifecycle)) {
+      await ensureDiscoveryPollJob(agent.id, tx);
+    }
   });
   return { ok: true as const };
 }
