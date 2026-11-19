@@ -31,7 +31,7 @@ async function shot(page: Page, name: string, size: { width: number; height: num
 }
 
 test.beforeEach(async () => {
-  await sql`TRUNCATE recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE knowledge_chunks, knowledge_documents, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 
@@ -141,7 +141,7 @@ test('saved Skills and authenticated MCP grants reach the worker and run history
 
     await page.reload();
     await openWorkspaceTab(page, /^History/);
-    await page.locator('.run-detail > summary').click();
+    await page.locator('#history .run-detail > summary').click();
     const history = page.getByRole('region', { name: 'Skills and tools' });
     await expect(history).toContainText('release-check · v1 · loaded');
     await expect(history).toContainText('mcp:http-fixture:http_lookup · allow');

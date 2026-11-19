@@ -1,6 +1,7 @@
 import { Inbox } from 'lucide-react';
 
-import { reviewProposal, saveConsent } from '@/actions/policy';
+import { reviewProposal, saveConsent, saveConsentRequirements } from '@/actions/policy';
+import { ActionRequirementsForm } from '@/app/action-requirements-form';
 import { ApprovalToolsForm } from '@/app/approval-tools-form';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
@@ -12,6 +13,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty';
 import { FieldGroup } from '@/components/ui/field';
+import type { ConsentScope } from '@/lib/policy/scopes';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
 type Workspace = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>;
@@ -25,6 +27,11 @@ const actionLabels = {
   introduce: 'Introduce',
   escalate: 'Escalate',
 } as Record<string, string>;
+
+const consentOptions = [
+  { value: 'introduce', label: 'Introductions' },
+  { value: 'escalate', label: 'Escalations' },
+];
 
 export function ReviewSettings({
   agentId,
@@ -47,7 +54,8 @@ export function ReviewSettings({
         <h2>Approval requirements</h2>
         <p className="muted">
           Off by default. Enable actions that must pause for an administrator before continuing.
-          Introductions and escalations always require consent and approval.
+          Introductions and escalations are optional here; recipient consent is configured
+          separately.
         </p>
       </div>
       <ApprovalToolsForm
@@ -65,9 +73,11 @@ export function ReviewSettings({
 export function ConsentSettings({
   agentId,
   consents,
+  consentRequiredTools,
 }: {
   agentId: string;
   consents: Workspace['consents'];
+  consentRequiredTools: ConsentScope[];
 }) {
   return (
     <section className="access-workbench">
@@ -77,6 +87,16 @@ export function ConsentSettings({
           Record a recipient’s choice and the source of their consent for this agent.
         </p>
       </div>
+      <ActionRequirementsForm
+        agentId={agentId}
+        idPrefix="consent-tool"
+        options={consentOptions}
+        selected={consentRequiredTools}
+        action={saveConsentRequirements}
+        label="Save consent requirements"
+        legend="Require recipient consent"
+        description="Choose which actions require recorded permission from everyone involved. Recorded refusals and revocations always block the action."
+      />
       <div className="consent-records-block">
         <h3 className="consent-records-title">Existing consents</h3>
         {consents.length > 0 ? (
@@ -109,10 +129,7 @@ export function ConsentSettings({
             name="scope"
             label="Consent scope"
             initialValue="introduce"
-            options={[
-              { value: 'introduce', label: 'Introductions' },
-              { value: 'escalate', label: 'Escalations' },
-            ]}
+            options={consentOptions}
           />
           <WorkspaceSelect
             id="consent-outcome"

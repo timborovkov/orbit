@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   createPlaygroundStreamProgress,
-  lastUserText,
   playgroundChunksFromResult,
 } from '../apps/web/src/lib/runtime/chat-ui';
 import type { SimulationResult } from '../apps/web/src/lib/runtime/simulation';
@@ -14,15 +13,6 @@ const baseResult = (): SimulationResult => ({
 });
 
 describe('playground chat UI helpers', () => {
-  test('lastUserText reads the latest user text part', () => {
-    expect(
-      lastUserText([
-        { role: 'assistant', parts: [{ type: 'text', text: 'earlier' }] },
-        { role: 'user', parts: [{ type: 'text', text: '  hello world  ' }] },
-      ]),
-    ).toBe('hello world');
-  });
-
   test('streams reasoning, tools and summary when a run completes', () => {
     const progress = createPlaygroundStreamProgress();
     const result: SimulationResult = {
@@ -95,6 +85,20 @@ describe('playground chat UI helpers', () => {
       runId: 'run-2',
     });
     expect(chunks.some((chunk) => chunk.type === 'text-delta')).toBe(true);
+    expect(chunks.at(-1)).toEqual({ type: 'finish', finishReason: 'error' });
+  });
+
+  test('reports the reason for an interrupted run', () => {
+    const chunks = playgroundChunksFromResult(baseResult(), createPlaygroundStreamProgress(), {
+      status: 'interrupted',
+      runId: 'run-4',
+      deferReason: 'Agent paused. The queued job was cancelled.',
+    });
+    expect(chunks).toContainEqual({
+      type: 'text-delta',
+      id: 'reply',
+      delta: 'The simulation was interrupted. Agent paused. The queued job was cancelled.',
+    });
     expect(chunks.at(-1)).toEqual({ type: 'finish', finishReason: 'error' });
   });
 

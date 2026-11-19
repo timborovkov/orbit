@@ -7,6 +7,7 @@ import { checkOrigin, requireAdmin } from '@/lib/auth';
 import { consentScope, proposalTypes, recipientId } from '@/lib/policy/scopes';
 import { persistApprovalTools } from '@/lib/server/lifecycle-mutations';
 import {
+  persistConsentRequirements,
   recordConsent,
   reviewProposedAction,
   reviewProposedActionsBulk,
@@ -82,6 +83,20 @@ export async function saveConsent(form: FormData) {
   const { outcome, ...fields } = parsed.data;
   const result = await recordConsent({ ...fields, actor, granted: outcome === 'grant' });
   revalidatePath(`/agents/${fields.agentId}`);
+  return result;
+}
+
+export async function saveConsentRequirements(form: FormData) {
+  await checkOrigin();
+  const actor = await requireAdmin();
+  const agentId = z.uuid().parse(form.get('agentId'));
+  const tools = z
+    .array(consentScope)
+    .max(consentScope.options.length)
+    .safeParse(form.getAll('tool'));
+  if (!tools.success) return { error: 'Choose valid action types.' };
+  const result = await persistConsentRequirements(actor, agentId, [...new Set(tools.data)]);
+  revalidatePath(`/agents/${agentId}`);
   return result;
 }
 

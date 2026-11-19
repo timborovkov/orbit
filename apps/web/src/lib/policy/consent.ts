@@ -1,14 +1,15 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
 import type { Tx } from '@/lib/db';
-import { consentScope } from '@/lib/policy/scopes';
+import { consentScope, type ConsentScope } from '@/lib/policy/scopes';
 import { recipientConsents } from '@/lib/schema';
 
-export async function missingRecipientConsent(
+export async function recipientConsentFailure(
   tx: Tx,
   agentId: string,
   type: string,
   recipients: string[],
+  requiredTools: ConsentScope[],
 ) {
   const scope = consentScope.safeParse(type);
   if (!scope.success) return null;
@@ -21,18 +22,21 @@ export async function missingRecipientConsent(
       : 'Escalation requires one recipient.';
   }
 
-  const grants = await tx
-    .select({ recipient: recipientConsents.recipient })
+  const decisions = await tx
+    .select({ granted: recipientConsents.granted })
     .from(recipientConsents)
     .where(
       and(
         eq(recipientConsents.agentId, agentId),
         eq(recipientConsents.scope, scope.data),
-        eq(recipientConsents.granted, true),
         inArray(recipientConsents.recipient, distinct),
       ),
     );
-  return grants.length === expected
-    ? null
-    : 'Current consent is required from every recipient for this action.';
+  if (decisions.some(({ granted }) => !granted)) {
+    return 'A recipient declined or revoked consent for this action.';
+  }
+  if (requiredTools.includes(scope.data) && decisions.length !== expected) {
+    return 'Current consent is required from every recipient for this action.';
+  }
+  return null;
 }

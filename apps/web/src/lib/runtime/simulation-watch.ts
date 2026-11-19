@@ -7,6 +7,15 @@ export function isTerminalSimulationStatus(status: string) {
   return terminalStatuses.has(status);
 }
 
+/**
+ * True when a mid-flight run has passed its execution deadline.
+ * Queued runs keep their pre-claim `expiresAt` until the worker claims them and
+ * starts a fresh deadline — do not treat that wait as a terminal interrupt.
+ */
+export function isExpiredSimulationRun(run: { status: string; expiresAt: Date }) {
+  return run.status === 'running' && run.expiresAt.getTime() < Date.now();
+}
+
 interface WatchOptions {
   signal?: AbortSignal;
   deadlineMs?: number;

@@ -6,6 +6,7 @@ import { evaluateActionForTest } from '@/lib/policy/gateway';
 const base = {
   lifecycle: 'shadow' as const,
   enabledTools: [] as string[],
+  consentRequiredTools: [],
   budgets: budgetDefaults,
   globalPaused: false,
 };
@@ -75,6 +76,18 @@ test('read-only tools can allow when budgets permit', () => {
   expect(result.decision).toBe('allow');
 });
 
+test('administrator review is opt-in for introductions and escalations', () => {
+  for (const type of ['introduce', 'escalate']) {
+    const action = { type, idempotencyKey: type };
+    const configured = { ...base, approvalTools: [type] };
+    expect(evaluateActionForTest(base, action).decision).toBe('suppressed');
+    expect(evaluateActionForTest(configured, action).decision).toBe('needs-approval');
+    expect(evaluateActionForTest(configured, { ...action, preliminary: true }).decision).toBe(
+      'suppressed',
+    );
+  }
+});
+
 test('approval rules are disabled by default for ordinary writes', () => {
   const result = evaluateActionForTest(
     { ...base, approvalTools: [] },
@@ -87,14 +100,6 @@ test('configured approval tools return needs-approval', () => {
   const result = evaluateActionForTest(
     { ...base, approvalTools: ['reply'] },
     { type: 'reply', idempotencyKey: 'k10' },
-  );
-  expect(result.decision).toBe('needs-approval');
-});
-
-test('introduce still needs approval without configured tools', () => {
-  const result = evaluateActionForTest(
-    { ...base, approvalTools: [] },
-    { type: 'introduce', idempotencyKey: 'k11' },
   );
   expect(result.decision).toBe('needs-approval');
 });

@@ -3,9 +3,10 @@ import 'server-only';
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
-import { parseBudgets } from '@/lib/budgets';
+import { budgetViolationMessage, parseBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import { openRouterKeySource } from '@/lib/runtime/openrouter-key';
+import { isExpiredSimulationRun } from '@/lib/runtime/simulation-watch';
 import {
   actionIntents,
   agentMcpConnections,
@@ -193,11 +194,11 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
   const jobsById = new Map(linkedJobs.map((job) => [job.id, job]));
   const viewedHistory = history.map((run) => {
     // awaiting_approval waits on reviewExpiresAt, not the execution deadline.
-    const expired =
-      (run.status === 'running' || run.status === 'queued') && run.expiresAt < new Date();
+    const expired = isExpiredSimulationRun(run);
     const deferred = Boolean(run.deferReason) && (run.status === 'failed' || expired);
     return {
       ...run,
+      deferReason: run.deferReason ?? (expired ? budgetViolationMessage('run-deadline') : null),
       interrupted: expired || run.status === 'interrupted',
       displayStatus: expired
         ? ('interrupted' as const)

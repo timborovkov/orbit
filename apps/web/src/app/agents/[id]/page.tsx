@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import { ChevronDown, History } from 'lucide-react';
 import { z } from 'zod';
@@ -21,6 +22,7 @@ import { formatUtcTimestamp } from '@/lib/format';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
+import { latestPersistedRun } from '@/lib/runtime/playground-ui';
 import { listKnowledgeDocuments } from '@/lib/server/knowledge-queries';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
@@ -64,7 +66,7 @@ export default async function AgentWorkspace({
   const lifecycle = agent.lifecycle;
   const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
-  const viewedHistory = history;
+  const latestRun = latestPersistedRun(history);
   const hasPendingRuns = history.some(
     (run) =>
       run.displayStatus === 'queued' ||
@@ -113,6 +115,7 @@ export default async function AgentWorkspace({
       approvalExpiresAfterHours={approvalSettings.approvalExpiresAfterHours}
       approvalOnReject={approvalSettings.approvalOnReject}
       approvalSpendCents={approvalSettings.approvalSpendCents}
+      consentRequiredTools={agent.consentRequiredTools}
       consents={consents}
       hasAgentCredential={hasAgentCredential}
       keySource={keySource}
@@ -134,12 +137,33 @@ export default async function AgentWorkspace({
   const playground = (
     <section id="simulation" className="playground-panel">
       <PlaygroundChat
+        key={id}
         agentId={id}
         agentName={agent.name}
         canSimulate={canSimulate}
         lifecycle={lifecycle}
-        versions={versions}
+        versions={versions.map(({ id, version, config }) => ({ id, version, name: config.name }))}
         currentConfigurationId={current.id}
+        latestRun={
+          latestRun && (
+            <section className="playground-latest-run" aria-label="Latest persisted run">
+              <h3>Latest persisted run</h3>
+              <details key={latestRun.id} className="run-detail">
+                <summary>
+                  <div>
+                    <span className="run-title">{latestRun.input}</span>
+                    <span className="muted">Version {versionFor(latestRun.configurationId)}</span>
+                  </div>
+                  <span className="state-label" role="status">
+                    {latestRun.displayStatus}
+                  </span>
+                  <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
+                </summary>
+                <RunContent run={latestRun} interrupted={latestRun.interrupted} />
+              </details>
+            </section>
+          )
+        }
         runStatuses={Object.fromEntries(history.map(({ id, status }) => [id, status]))}
       />
     </section>
@@ -160,7 +184,7 @@ export default async function AgentWorkspace({
             <p>No runs yet. Start in the Playground to test your agent.</p>
           </div>
         )}
-        {viewedHistory.map((run) => (
+        {history.map((run) => (
           <details
             key={run.id}
             id={`run-${run.id}`}
@@ -246,35 +270,36 @@ export default async function AgentWorkspace({
           </div>
         </div>
         <PendingRunRefresh active={hasPendingRuns || hasPendingKnowledge} />
-        <WorkspaceTabs
-          key={focusRunId ?? id}
-          initialTab={focusRunId ? 'history' : undefined}
-          items={[
-            { id: 'configure', label: 'Configuration', content: configuration },
-            { id: 'playground', label: 'Playground', content: playground },
-            {
-              id: 'knowledge',
-              label: 'Knowledge',
-              count: knowledgeDocuments.length,
-              content: (
-                <KnowledgeWorkbench
-                  agentId={id}
-                  documents={knowledgeDocuments}
-                  storageReady={storageConfigured()}
-                  searchEnabled={agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)}
-                />
-              ),
-            },
-            { id: 'history', label: 'History', count: history.length, content: historyPanel },
-            {
-              id: 'approvals',
-              label: 'Approvals',
-              count: reviews.filter((review) => review.status === 'pending').length,
-              content: approvalQueue,
-            },
-            { id: 'access', label: 'Access', content: access },
-          ]}
-        />
+        <Suspense>
+          <WorkspaceTabs
+            key={id}
+            items={[
+              { id: 'configure', label: 'Configuration', content: configuration },
+              { id: 'playground', label: 'Playground', content: playground },
+              {
+                id: 'knowledge',
+                label: 'Knowledge',
+                count: knowledgeDocuments.length,
+                content: (
+                  <KnowledgeWorkbench
+                    agentId={id}
+                    documents={knowledgeDocuments}
+                    storageReady={storageConfigured()}
+                    searchEnabled={agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)}
+                  />
+                ),
+              },
+              { id: 'history', label: 'History', count: history.length, content: historyPanel },
+              {
+                id: 'approvals',
+                label: 'Approvals',
+                count: reviews.filter((review) => review.status === 'pending').length,
+                content: approvalQueue,
+              },
+              { id: 'access', label: 'Access', content: access },
+            ]}
+          />
+        </Suspense>
       </main>
     </div>
   );

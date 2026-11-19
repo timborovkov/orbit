@@ -46,6 +46,10 @@ export const agents = pgTable('agents', {
   lifecycle: text('lifecycle').$type<LifecycleState>().notNull().default('shadow'),
   budgets: jsonb('budgets').$type<AgentBudgets>().notNull(),
   approvalTools: jsonb('approval_tools').$type<string[]>().notNull().default([]),
+  consentRequiredTools: jsonb('consent_required_tools')
+    .$type<ConsentScope[]>()
+    .notNull()
+    .default(['introduce', 'escalate']),
   /** Optional hours until a pending approval auto-rejects; null disables expiry. */
   approvalExpiresAfterHours: integer('approval_expires_after_hours'),
   approvalOnReject: text('approval_on_reject')

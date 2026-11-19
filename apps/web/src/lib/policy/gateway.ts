@@ -20,7 +20,8 @@ import {
   type LifecycleState,
 } from '@/lib/lifecycle';
 import { mcpToolId, mcpToolIsReadOnly, normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
-import { missingRecipientConsent } from '@/lib/policy/consent';
+import { recipientConsentFailure } from '@/lib/policy/consent';
+import type { ConsentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
 import {
   actionIntents,
@@ -58,6 +59,7 @@ export interface PolicyContext {
   approvalTools: string[];
   approvalSpendCents: number | null;
   approvalExpiresAfterHours: number | null;
+  consentRequiredTools: ConsentScope[];
   budgets: ReturnType<typeof parseBudgets>;
   globalPaused: boolean;
   usage: BudgetSnapshot['day'] & { month: BudgetSnapshot['month']; activeRuns: number };
@@ -135,6 +137,7 @@ export async function loadPolicyContext(
     approvalTools: mergeApprovalTools(approval.approvalTools, global?.approvalTools),
     approvalSpendCents: approval.approvalSpendCents,
     approvalExpiresAfterHours: approval.approvalExpiresAfterHours,
+    consentRequiredTools: agent.consentRequiredTools,
     budgets: parseBudgets(agent.budgets),
     globalPaused: global?.paused ?? true,
     usage: {
@@ -306,7 +309,13 @@ export async function authorizeAction(
     const recipients = action.recipients ?? [];
     const consentFailure = action.readOnly
       ? null
-      : await missingRecipientConsent(tx, ctx.agentId, action.type, recipients);
+      : await recipientConsentFailure(
+          tx,
+          current.agentId,
+          action.type,
+          recipients,
+          current.consentRequiredTools,
+        );
     const mcp = action.type.startsWith('mcp:') && action.readOnly ? action.mcp : undefined;
     const grant =
       mcp &&
@@ -722,11 +731,13 @@ export function evaluateActionForTest(
     | 'approvalTools'
     | 'approvalSpendCents'
     | 'approvalExpiresAfterHours'
+    | 'consentRequiredTools'
   > & {
     usage?: PolicyContext['usage'];
     approvalTools?: string[];
     approvalSpendCents?: number | null;
     approvalExpiresAfterHours?: number | null;
+    consentRequiredTools?: ConsentScope[];
   },
   action: CandidateAction,
 ) {
@@ -738,6 +749,7 @@ export function evaluateActionForTest(
       approvalTools: ctx.approvalTools ?? [],
       approvalSpendCents: ctx.approvalSpendCents ?? null,
       approvalExpiresAfterHours: ctx.approvalExpiresAfterHours ?? null,
+      consentRequiredTools: ctx.consentRequiredTools ?? [],
       usage: ctx.usage ?? {
         ...emptyUsage(),
         month: emptyUsage(),

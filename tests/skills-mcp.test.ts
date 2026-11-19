@@ -29,6 +29,7 @@ const policy = {
   lifecycle: 'shadow' as const,
   enabledTools: [] as string[],
   approvalTools: [] as string[],
+  consentRequiredTools: [],
   approvalSpendCents: null as number | null,
   approvalExpiresAfterHours: null as number | null,
   budgets: budgetDefaults,
@@ -155,6 +156,7 @@ test('policy requires a separate MCP tool grant when a proposal allowlist is set
   const base = {
     lifecycle: 'shadow' as const,
     enabledTools: ['like'],
+    consentRequiredTools: [],
     budgets: budgetDefaults,
     globalPaused: false,
   };
@@ -618,6 +620,7 @@ test('read-only authorization still enforces concurrency from the policy snapsho
       lifecycle: 'shadow',
       enabledTools: [],
       approvalTools: undefined,
+      consentRequiredTools: [],
       budgets: budgetDefaults,
       globalPaused: false,
       usage: {
@@ -655,6 +658,7 @@ test('load_skill and read-only MCP do not require spare inference quota', () => 
     lifecycle: 'shadow' as const,
     enabledTools: [] as string[],
     approvalTools: [] as string[],
+    consentRequiredTools: [],
     approvalSpendCents: null as number | null,
     approvalExpiresAfterHours: null as number | null,
     budgets: {

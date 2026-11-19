@@ -154,13 +154,13 @@ Spacing follows a mostly 4px rhythm. The workspace header is at least 64px tall;
 main content starts with 36px top padding, reduced to 24px below 600px. The configuration
 editor uses a 192px section navigator (156px below 900px) and a flexible field area;
 below 600px the navigator becomes a horizontal row and identity fields stack.
-Playground uses 0.9fr/1.1fr composer/result columns; history uses a flexible run list
-and 280px version column. Both become single-column below 900px. Task tabs can scroll
-horizontally on narrow screens. Overview-specific responsive behavior remains below.
+Playground uses a single column at every width. History uses a flexible run list and a
+280px version column, stacking below 900px. Workspace tabs use a compact Select at
+600px and below.
 
 A compact identity header sits above workspace tabs. The overview contains three database-derived agent counts, an agent table, recent audit activity and a global outbound control. The sidebar and decorative statistic cards have been removed. At tablet widths, activity stacks below the agent area; at phone widths, controls stack and names wrap within the table. Missions appear directly beneath agent names as muted, wrapping text. Show the full value without a disclosure, repeated “View mission” controls or hover-only access. Preserve line breaks and allow long words to wrap.
 
-Create agent opens a native modal dialog with a visible title, field labels, initial focus, an inert background, native dialog tab behaviour, Escape/cancel behaviour, pending feedback, explicit required indicators, and field-specific server validation linked through aria-describedby/aria-invalid. Pending text fields are read-only so focus can return to a validation error. Failed requests retain entries and name a recovery action. Success closes the dialog only after the server action completes. Agents start paused in shadow mode; the UI explains that execution is not yet configured.
+Create agent opens a native modal dialog with a visible title, field labels, initial focus, an inert background, native dialog tab behaviour, Escape/cancel behaviour, pending feedback, explicit required indicators, and field-specific server validation linked through aria-describedby/aria-invalid. Pending text fields are read-only so focus can return to a validation error. Failed requests retain entries and name a recovery action. Success closes the dialog only after the server action completes. Agents start in Shadow. The UI explains that external writes are suppressed.
 
 Sign-in is a centred 400px form panel with one primary action, the supplied 64px orbital emblem, and a 24px heading. The form uses 44px-high inputs and submit action; a keyboard-accessible eye button reveals or hides the password without submitting the form or changing its value. Appearance uses a compact three-segment native radio control: sun (Light), moon (Dark), and monitor (Auto). The selected segment has a visible border and surface treatment. One tab stop and native arrow-key navigation change selection; touch targets grow to 44px. Preference persists locally and applies before paint; Auto tracks OS preference changes, and the browser theme-color follows the resolved appearance. There is no public registration. A skip link, explicit navigation labels, semantic table headers and visible focus rings support keyboard and assistive technology use.
 
@@ -203,7 +203,8 @@ Conversation/Message/PromptInput/Reasoning/Tool/Loader) with a streaming route t
 enqueues the durable simulation job, watches run checkpoints, and streams evaluation,
 proposed actions and drafts. Empty conversation state explains what will appear; failures
 and interrupted runs show actual state. Paid inference and simulation-only actions remain
-explicit.
+explicit. **Stop watching** explains that inference can continue and links directly to the
+matching History entry.
 Knowledge uses an Access-style left section nav (Documents, Inspector, Playground) with
 one section visible at a time; at ≤900px the section nav collapses to a Select and panels
 stay mounted. Documents is list-first: header Upload control and, when empty, a dashed
@@ -224,10 +225,13 @@ Access uses a Configuration-style left nav (Lifecycle, Budgets, Approvals, Conse
 Skills, MCP, OpenRouter) with one section visible at a time. Budgets use card groups and a two-column
 desktop grid, with No cap Switches on the same heading row as spend labels (`space-between`
 gap, switch never overlapping the label) and inline unit suffixes. Per-field copy is only
-the short usage line; longer explanations stay in the card description. Approval
-requirements in Access use Switch rows (label, description, control) plus optional spend
-(InputGroup `$`), expiry and rejection behaviour. Saving per-agent approval settings creates
-a configuration version. Skills/MCP pickers use shadcn Checkbox rows (label, description, control).
+the short usage line; longer explanations stay in the card description. Access → Approvals
+lists every action, including introductions and escalations, with administrator review off
+by default. Access → Consent lets the administrator choose which of those two actions
+require recorded permission; both consent requirements start on. Approval requirements in
+Access use Switch rows (label, description, control) plus optional spend (InputGroup `$`),
+expiry and rejection behaviour. Saving per-agent approval settings creates a configuration
+version. Skills/MCP pickers use shadcn Checkbox rows (label, description, control).
 Attached MCP connections show a nested checklist of administrator-classified read-only tools.
 New attachments start with an empty tool checklist. Pause, consent and tool availability are
 checked live. Queued, running and awaiting-approval runs share the per-agent concurrency limit.
@@ -448,13 +452,20 @@ or screen-reader speech output.
 
 Shared workspace and auth forms now compose the installed shadcn `Field`,
 `FieldLabel`, `FieldDescription`, `FieldError`, `Input` and `Textarea` primitives
-alongside existing Orbit `.workspace-form` styles. Native `<select>` and native
-`<dialog>` remain for create-agent and version pickers so form posts and modal
-focus/Escape behaviour stay unchanged. Optional `error` / `description` props on
+alongside existing Orbit `.workspace-form` styles. The create-agent dialog retains
+native focus and Escape behavior. Its template picker, the Playground version picker
+and Consent choices use shadcn Select. Optional `error` / `description` props on
 `WorkspaceField` and `WorkspaceSelect` surface inline validation without changing
 server-action contracts. Consent records render as a dedicated list above the
 consent form; proposal and overview empty states use the `Empty` primitive.
 Overview workspace nav scrolls horizontally on narrow viewports instead of wrapping.
+
+### Playground recovery verification — 18 November 2026
+
+Playwright queues a run, uses Stop watching to open its History entry, then reloads
+while the run is pending. A deterministic worker fixture completes it, and the test
+checks that Playground shows the saved draft. The workspace checks also cover
+320px right-to-left layout, keyboard lifecycle controls and sign-in errors.
 
 ### Agent profile pictures — 16 November 2026
 

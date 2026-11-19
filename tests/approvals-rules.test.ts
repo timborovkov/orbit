@@ -47,3 +47,24 @@ test('actionNeedsApproval honours tool lists and spend gates', () => {
     }),
   ).toBe(true);
 });
+
+test('introduce and escalate are opt-in via approvalTools', () => {
+  for (const actionType of ['introduce', 'escalate']) {
+    expect(
+      actionNeedsApproval({
+        actionType,
+        approvalTools: [],
+        approvalSpendCents: null,
+        daySpendMicros: BigInt(0),
+      }),
+    ).toBe(false);
+    expect(
+      actionNeedsApproval({
+        actionType,
+        approvalTools: [actionType],
+        approvalSpendCents: null,
+        daySpendMicros: BigInt(0),
+      }),
+    ).toBe(true);
+  }
+});

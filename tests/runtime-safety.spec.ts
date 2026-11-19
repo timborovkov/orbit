@@ -47,7 +47,11 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
   await expect(
     page.getByText('no external action adapters exist yet', { exact: false }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Set Paused', exact: true }).click();
+  const lifecycle = page.getByRole('list', { name: 'Agent lifecycle' });
+  const pause = lifecycle.getByRole('button', { name: 'Set Paused', exact: true });
+  await pause.focus();
+  await expect(pause).toBeFocused();
+  await page.keyboard.press('Enter');
   // Lifecycle form unmounts on success (Current replaces the button), so assert durable UI.
   await expect(page.locator('.agent-name-line .state-label')).toContainText('Paused');
   await expect(page.locator('#lifecycle .lifecycle-card.is-selected h3')).toHaveText('Paused');
@@ -101,6 +105,13 @@ test('administrators control independent spend caps, consent and proposal review
   expect(agent.budgets).toMatchObject({ dailySpendCents: null, monthlySpendCents: 450 });
 
   await openAccessSection(page, 'Consent');
+  const introductionConsent = page.getByRole('checkbox', { name: 'Introductions', exact: true });
+  await expect(introductionConsent).toBeChecked();
+  await introductionConsent.uncheck();
+  await page.getByRole('button', { name: 'Save consent requirements', exact: true }).click();
+  await expect(page.getByText('Consent requirements saved.')).toBeVisible();
+  const [consentPolicy] = await sql`SELECT consent_required_tools FROM agents WHERE id=${agent.id}`;
+  expect(consentPolicy.consent_required_tools).toEqual(['escalate']);
   await page
     .getByLabel('Recipient ID', { exact: false })
     .filter({ visible: true })
@@ -120,8 +131,17 @@ test('administrators control independent spend caps, consent and proposal review
   const replyApproval = page.getByRole('switch', { name: 'Reply', exact: true });
   await replyApproval.click();
   await expect(replyApproval).toHaveAttribute('aria-checked', 'true');
+  const introduceApproval = page.getByRole('switch', { name: 'Introduce', exact: true });
+  await expect(introduceApproval).toHaveAttribute('aria-checked', 'false');
+  await introduceApproval.click();
+  await expect(page.getByRole('switch', { name: 'Escalate', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  );
   await page.getByRole('button', { name: 'Save approval requirements', exact: true }).click();
   await expect(page.getByText('Approval requirements saved.')).toBeVisible();
+  const [approvalPolicy] = await sql`SELECT approval_tools FROM agents WHERE id=${agent.id}`;
+  expect(approvalPolicy.approval_tools).toEqual(['reply', 'introduce']);
   await sql`UPDATE controls SET paused=false`;
   await sql`
     INSERT INTO action_intents(agent_id, action_type, payload, idempotency_key, decision, review_status)

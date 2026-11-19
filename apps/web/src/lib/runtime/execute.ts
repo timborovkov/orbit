@@ -233,7 +233,11 @@ async function expireStaleRuns(tx: Tx, agent: Pick<typeof agents.$inferSelect, '
   // action_intents.review_expires_at / expireStaleApprovals, not run.expiresAt.
   const stale = await tx
     .update(runs)
-    .set({ status: 'interrupted', finishedAt: new Date() })
+    .set({
+      status: 'interrupted',
+      finishedAt: new Date(),
+      deferReason: budgetViolationMessage('run-deadline'),
+    })
     .where(
       and(
         eq(runs.agentId, agent.id),
@@ -479,12 +483,14 @@ async function processSimulationRun(
     }
     // Queued claims (first start and post-approval resumes) refresh the deadline below.
     // Only interrupt mid-flight running work whose wall clock already expired.
+    // awaiting_approval is skipped earlier and waits on reviewExpiresAt instead.
     if (run.status !== 'queued' && run.expiresAt < new Date()) {
+      const deferReason = budgetViolationMessage('run-deadline');
       await tx
         .update(runs)
-        .set({ status: 'interrupted', finishedAt: new Date() })
+        .set({ status: 'interrupted', finishedAt: new Date(), deferReason })
         .where(eq(runs.id, run.id));
-      return { skip: true as const, run: { ...run, status: 'interrupted' as const } };
+      return { skip: true as const, run: { ...run, status: 'interrupted' as const, deferReason } };
     }
 
     const budgets = parseBudgets(agent.budgets);

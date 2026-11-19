@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport, isToolUIPart, type ChatStatus, type UIMessage } from 'ai';
+import { DefaultChatTransport, isToolUIPart } from 'ai';
 import {
   ArrowUp,
   ChevronDown,
@@ -26,12 +26,10 @@ import { Loader } from '@/components/ai-elements/loader';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import {
   PromptInput,
-  PromptInputBody,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
-  type PromptInputMessage,
 } from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import {
@@ -57,7 +55,6 @@ import {
   PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
   playgroundAttachmentRejection,
   playgroundEffectiveConfigurationId,
-  shouldRefreshWorkspaceForQueuedRun,
   type PlaygroundVersionSelection,
 } from '@/lib/runtime/playground-ui';
 import { cn } from '@/lib/utils';
@@ -65,13 +62,26 @@ import { cn } from '@/lib/utils';
 interface AgentVersion {
   id: string;
   version: number;
-  config: { name: string };
+  name: string;
 }
 
 function lifecycleBlockMessage(lifecycle: string) {
   return lifecycle === 'paused'
     ? 'This agent is paused. Resume it under Access before queueing simulations.'
     : 'This agent is stopped. Change its lifecycle under Access before queueing simulations.';
+}
+
+function queuedRunId({ type, data }: { type: string; data: unknown }) {
+  if (
+    type === 'data-run' &&
+    typeof data === 'object' &&
+    data !== null &&
+    'id' in data &&
+    typeof data.id === 'string'
+  ) {
+    return data.id;
+  }
+  return null;
 }
 
 function isStatusText(text: string) {
@@ -89,6 +99,7 @@ export function PlaygroundChat({
   lifecycle,
   versions,
   currentConfigurationId,
+  latestRun,
   runStatuses,
 }: {
   agentId: string;
@@ -97,6 +108,7 @@ export function PlaygroundChat({
   lifecycle: string;
   versions: AgentVersion[];
   currentConfigurationId: string;
+  latestRun?: ReactNode;
   runStatuses: Record<string, string>;
 }) {
   const router = useRouter();
@@ -112,70 +124,38 @@ export function PlaygroundChat({
   const [otherRecipient, setOtherRecipient] = useState('');
   const [recipientsOpen, setRecipientsOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const bodyRef = useRef({ configurationId, recipient, otherRecipient });
-  useEffect(() => {
-    bodyRef.current = { configurationId, recipient, otherRecipient };
-  }, [configurationId, recipient, otherRecipient]);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [stoppedWatching, setStoppedWatching] = useState(false);
 
   const transport = useMemo(
     () =>
       new DefaultChatTransport<PlaygroundUIMessage>({
         api: `/api/agents/${agentId}/chat`,
         credentials: 'same-origin',
-        prepareSendMessagesRequest: ({ messages }) => {
-          const recipients = [bodyRef.current.recipient, bodyRef.current.otherRecipient]
-            .map((value) => value.trim())
-            .filter(Boolean);
-          return {
-            body: {
-              messages,
-              configurationId: bodyRef.current.configurationId,
-              recipients,
-            },
-          };
-        },
+        prepareSendMessagesRequest: ({ body }) => ({ body: body ?? {} }),
       }),
     [agentId],
   );
 
-  const { messages, sendMessage, status, stop, error, setMessages } = useChat<PlaygroundUIMessage>({
-    transport,
-    onFinish: () => {
-      router.refresh();
-    },
-  });
+  const { messages, sendMessage, status, stop, error, setMessages, clearError } =
+    useChat<PlaygroundUIMessage>({
+      transport,
+      onData: (part) => {
+        const id = queuedRunId(part);
+        if (!id) return;
+        setRunId(id);
+        router.refresh();
+      },
+      onFinish: () => {
+        router.refresh();
+      },
+    });
 
   const busy = status === 'submitted' || status === 'streaming';
-  const queuedRefreshDone = useRef(false);
 
-  // Soft-refresh once the stream acknowledges the queue so History / PendingRunRefresh
-  // pick up the new run without waiting for the full stream to finish.
-  useEffect(() => {
-    if (!busy) {
-      queuedRefreshDone.current = false;
-      return;
-    }
-    if (
-      !shouldRefreshWorkspaceForQueuedRun({
-        busy,
-        alreadyRefreshed: queuedRefreshDone.current,
-        messages,
-      })
-    ) {
-      return;
-    }
-    queuedRefreshDone.current = true;
-    router.refresh();
-  }, [busy, messages, router]);
-
-  async function onSubmit(message: PromptInputMessage) {
+  function onSubmit(input: string) {
     setFormError(null);
-    const attachmentError = playgroundAttachmentRejection(message.files);
-    if (attachmentError) {
-      setFormError(attachmentError);
-      return;
-    }
-    const text = message.text.trim();
+    const text = input.trim();
     if (!text) {
       setFormError('Paste a post or question with 1–16,000 characters.');
       return;
@@ -184,7 +164,10 @@ export function PlaygroundChat({
       setFormError(lifecycleBlockMessage(lifecycle));
       return;
     }
-    await sendMessage({ text });
+    const recipients = [recipient, otherRecipient].map((value) => value.trim()).filter(Boolean);
+    setRunId(null);
+    setStoppedWatching(false);
+    void sendMessage({ text }, { body: { input: text, configurationId, recipients } });
   }
 
   return (
@@ -201,6 +184,10 @@ export function PlaygroundChat({
             className="playground-clear"
             onClick={() => {
               setMessages([]);
+              clearError();
+              setFormError(null);
+              setRunId(null);
+              setStoppedWatching(false);
             }}
             disabled={busy}
           >
@@ -216,6 +203,8 @@ export function PlaygroundChat({
           <p>{lifecycleBlockMessage(lifecycle)}</p>
         </div>
       )}
+
+      {latestRun}
 
       <div className="playground-toolbar">
         <Field className="playground-version-field gap-2">
@@ -236,7 +225,7 @@ export function PlaygroundChat({
             <SelectContent>
               {versions.map((version) => (
                 <SelectItem key={version.id} value={version.id}>
-                  Version {version.version} · {version.config.name}
+                  Version {version.version} · {version.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -297,68 +286,110 @@ export function PlaygroundChat({
         <PlaygroundConversation
           agentId={agentId}
           messages={messages}
-          status={status}
+          busy={busy}
+          queued={Boolean(runId)}
+          hasLatestRun={Boolean(latestRun)}
           runStatuses={runStatuses}
         />
 
-        <div className="playground-composer">
-          <PromptInput
-            className={cn('playground-prompt', !canSimulate && 'is-disabled')}
-            // Text-only until the simulation runtime can consume attachments.
-            accept="application/x-orbit-unsupported"
-            maxFiles={0}
-            onError={() => {
-              setFormError(PLAYGROUND_ATTACHMENTS_UNSUPPORTED);
-            }}
-            onSubmit={onSubmit}
-          >
-            <PromptInputBody>
-              <PromptInputTextarea
-                aria-label="Post or question"
-                placeholder="Paste a post or question…"
-                disabled={!canSimulate || busy}
-                maxLength={16000}
-                className="resize-none border-0 bg-transparent shadow-none focus-visible:border-0 focus-visible:ring-0"
-              />
-            </PromptInputBody>
-            <PromptInputFooter>
-              <PromptInputTools>
-                <p className="simulation-note">
-                  <ShieldCheck size={15} aria-hidden="true" />
-                  <span>Nothing is posted or sent. Save your configuration before testing.</span>
-                </p>
-              </PromptInputTools>
-              {status === 'streaming' ? (
-                <PromptInputSubmit
-                  type="button"
-                  status={status}
-                  aria-label="Stop"
-                  size="icon-sm"
-                  className="playground-submit"
-                  onClick={() => {
-                    void stop();
-                  }}
-                />
-              ) : (
-                <PromptInputSubmit
-                  disabled={!canSimulate || busy}
-                  status={status}
-                  size="icon-sm"
-                  className="playground-submit"
-                >
-                  <ArrowUp className="size-4" aria-hidden="true" />
-                </PromptInputSubmit>
-              )}
-            </PromptInputFooter>
-          </PromptInput>
-
-          {(formError ?? error) && (
-            <p role="alert" className="form-error">
-              {formError ?? error?.message ?? 'Unable to run simulation.'}
-            </p>
-          )}
-        </div>
+        <PlaygroundComposer
+          canSimulate={canSimulate}
+          busy={busy}
+          runId={runId}
+          stoppedWatching={stoppedWatching}
+          streamError={error?.message}
+          formError={formError}
+          onSubmit={onSubmit}
+          onAttachment={() => {
+            setFormError(
+              playgroundAttachmentRejection([{ filename: 'attachment' }]) ??
+                PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
+            );
+          }}
+          onStopWatching={() => {
+            setStoppedWatching(true);
+            void stop();
+            router.refresh();
+          }}
+        />
       </div>
+    </div>
+  );
+}
+
+function PlaygroundComposer({
+  canSimulate,
+  busy,
+  runId,
+  stoppedWatching,
+  streamError,
+  formError,
+  onSubmit,
+  onAttachment,
+  onStopWatching,
+}: {
+  canSimulate: boolean;
+  busy: boolean;
+  runId: string | null;
+  stoppedWatching: boolean;
+  streamError?: string;
+  formError: string | null;
+  onSubmit: (input: string) => void;
+  onAttachment: () => void;
+  onStopWatching: () => void;
+}) {
+  const error = formError ?? streamError;
+
+  return (
+    <div className="playground-composer">
+      <PromptInput
+        className={cn('playground-prompt', !canSimulate && 'is-disabled')}
+        onAttachment={onAttachment}
+        onSubmit={onSubmit}
+      >
+        <PromptInputTextarea
+          aria-label="Post or question"
+          placeholder="Paste a post or question…"
+          disabled={!canSimulate || busy}
+          maxLength={16000}
+          className="resize-none border-0 bg-transparent shadow-none focus-visible:border-0 focus-visible:ring-0"
+        />
+        <PromptInputFooter>
+          <PromptInputTools>
+            <p className="simulation-note">
+              <ShieldCheck size={15} aria-hidden="true" />
+              <span>Nothing is posted or sent. Save your configuration before testing.</span>
+            </p>
+          </PromptInputTools>
+          {busy && runId ? (
+            <Button type="button" size="sm" variant="outline" onClick={onStopWatching}>
+              Stop watching
+            </Button>
+          ) : (
+            <PromptInputSubmit
+              disabled={!canSimulate || busy}
+              size="icon-sm"
+              className="playground-submit"
+            >
+              <ArrowUp className="size-4" aria-hidden="true" />
+            </PromptInputSubmit>
+          )}
+        </PromptInputFooter>
+      </PromptInput>
+
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      {runId && (stoppedWatching || streamError) && (
+        <div className="playground-watch-notice">
+          {stoppedWatching && <span role="status">Stopped watching. Inference may continue.</span>}
+          <Link href={`?run=${runId}`} scroll={false} prefetch={false}>
+            Open run in History
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
@@ -366,22 +397,26 @@ export function PlaygroundChat({
 function PlaygroundConversation({
   agentId,
   messages,
-  status,
+  busy,
+  queued,
+  hasLatestRun,
   runStatuses,
 }: {
   agentId: string;
   messages: PlaygroundUIMessage[];
-  status: ChatStatus;
+  busy: boolean;
+  queued: boolean;
+  hasLatestRun: boolean;
   runStatuses: Record<string, string>;
 }) {
   return (
     <Conversation className="playground-conversation">
       <ConversationContent>
-        {!messages.length && status === 'ready' && (
+        {!messages.length && !busy && (
           <ConversationEmptyState
             icon={<FlaskConical size={30} strokeWidth={1.25} aria-hidden="true" />}
-            title="A safe place to try things"
-            description="Paste an input and send. Evaluation, proposed actions and drafts stream here while the worker runs the simulation."
+            title={hasLatestRun ? 'Start a new simulation' : 'A safe place to try things'}
+            description="Paste a post or question to see the evaluation, proposed actions and drafts."
           />
         )}
         {messages.map((message) => (
@@ -392,12 +427,14 @@ function PlaygroundConversation({
             runStatuses={runStatuses}
           />
         ))}
-        {status === 'submitted' && (
+        {busy && (
           <Message from="assistant">
             <MessageContent>
               <div className="playground-status" role="status">
                 <Loader />
-                <span>Queueing simulation…</span>
+                <span>
+                  {queued ? 'Simulation queued. Watching for results…' : 'Queueing simulation…'}
+                </span>
               </div>
             </MessageContent>
           </Message>
@@ -436,7 +473,10 @@ function PlaygroundReasoningPart({ text, state }: { text: string; state?: 'strea
 function PlaygroundToolPart({
   part,
 }: {
-  part: Extract<UIMessage['parts'][number], { type: `tool-${string}` } | { type: 'dynamic-tool' }>;
+  part: Extract<
+    PlaygroundUIMessage['parts'][number],
+    { type: `tool-${string}` } | { type: 'dynamic-tool' }
+  >;
 }) {
   const title = part.type.replace(/^tool-/, '');
   const toolType: `tool-${string}` =

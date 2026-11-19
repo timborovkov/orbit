@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm';
 
 import { approvalReviewLimit } from '@/lib/approvals/rules';
 import { db } from '@/lib/db';
-import { missingRecipientConsent } from '@/lib/policy/consent';
+import { recipientConsentFailure } from '@/lib/policy/consent';
 import { evaluateCandidate, loadPolicyContext } from '@/lib/policy/gateway';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import {
@@ -16,7 +16,28 @@ import {
 import { recordApprovalDecision } from '@/lib/runtime/telemetry';
 import { actionIntents, agents, audit, policyDecisions, recipientConsents } from '@/lib/schema';
 
-/** Administrator consent grant/revoke — web mutation path only. */
+export async function persistConsentRequirements(
+  actor: string,
+  agentId: string,
+  consentRequiredTools: ConsentScope[],
+) {
+  return db().transaction(async (tx) => {
+    const agent = (
+      await tx
+        .update(agents)
+        .set({ consentRequiredTools })
+        .where(eq(agents.id, agentId))
+        .returning({ name: agents.name })
+    ).at(0);
+    if (!agent) return { error: 'Agent not found.' };
+    await tx
+      .insert(audit)
+      .values({ actor, action: `Changed recipient consent requirements for ${agent.name}` });
+    return { message: 'Consent requirements saved.' };
+  });
+}
+
+/** Record the recipient's decision and evidence. */
 export async function recordConsent(input: {
   actor: string;
   agentId: string;
@@ -92,11 +113,12 @@ export async function reviewProposedAction(
     if (approved) {
       const ctx = await loadPolicyContext(agentId, actor, intent.runId, tx);
       if (!ctx) return { error: 'Agent not found.' };
-      const consent = await missingRecipientConsent(
+      const consent = await recipientConsentFailure(
         tx,
         agentId,
         intent.actionType,
         intent.recipients,
+        ctx.consentRequiredTools,
       );
       const policy = evaluateCandidate(
         ctx,
