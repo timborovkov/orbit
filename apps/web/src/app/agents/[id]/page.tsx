@@ -10,6 +10,7 @@ import { AgentAvatar } from '@/app/agent-avatar';
 import { ConfigFields } from '@/app/config-fields';
 import { EmailInbox } from '@/app/email-inbox';
 import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
+import { LoadingStatus } from '@/app/loading-status';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { PlaygroundChat } from '@/app/playground-chat';
 import { ProposalReview } from '@/app/policy-settings';
@@ -295,7 +296,13 @@ export default async function AgentWorkspace({
           </div>
         </div>
         <PendingRunRefresh active={hasPendingRuns || hasPendingKnowledge || inbox.pending} />
-        <Suspense>
+        <Suspense
+          fallback={
+            <div className="workspace-tab-panel">
+              <LoadingStatus>Loading agent workspace…</LoadingStatus>
+            </div>
+          }
+        >
           <WorkspaceTabs
             key={id}
             items={[
