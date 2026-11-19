@@ -21,6 +21,7 @@ import {
   finalizeFailedFollowUpJob,
   FOLLOW_UP_JOB_TYPE,
   processFollowUpJob,
+  reconcileDeadFollowUpJobs,
 } from '@/lib/runtime/follow-ups/process';
 import {
   finalizeFailedKnowledgeJob,
@@ -136,6 +137,7 @@ const worker = startJobWorker({
     await Promise.all([
       reconcileOrphanedSimulationRuns(),
       reconcileDeadKnowledgeJobs(),
+      reconcileDeadFollowUpJobs(),
       expireStaleApprovals(),
       reconcileSuspendedApprovals(),
     ]);

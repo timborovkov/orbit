@@ -10,6 +10,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { formatUtcTimestamp } from '@/lib/format';
+import { localDatetimeToOffsetIso } from '@/lib/runtime/follow-ups/due';
 import { followUpStatusLabels, type FollowUpStatus } from '@/lib/runtime/follow-ups/types';
 
 export interface FollowUpRow {
@@ -73,6 +74,16 @@ function CancelFollowUpButton({ agentId, followUpId }: { agentId: string; follow
   );
 }
 
+async function scheduleFollowUpWithUtcDue(form: FormData) {
+  const local = form.get('dueLocal');
+  if (typeof local !== 'string') return { error: 'Choose a valid due time.' };
+  const iso = localDatetimeToOffsetIso(local);
+  if (!iso) return { error: 'Choose a valid due time.' };
+  form.set('dueAt', iso);
+  form.delete('dueLocal');
+  return scheduleAgentFollowUp(form);
+}
+
 export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items: FollowUpRow[] }) {
   const [dueDefault] = useState(defaultDueLocal);
 
@@ -86,7 +97,7 @@ export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items:
             on the activity timeline — no external actions.
           </p>
         </div>
-        <WorkspaceForm action={scheduleAgentFollowUp} label="Schedule follow-up">
+        <WorkspaceForm action={scheduleFollowUpWithUtcDue} label="Schedule follow-up">
           <input type="hidden" name="agentId" value={agentId} />
           <FieldGroup>
             <Field>
@@ -103,13 +114,14 @@ export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items:
               <FieldLabel htmlFor="follow-up-due">Due</FieldLabel>
               <Input
                 id="follow-up-due"
-                name="dueAt"
+                name="dueLocal"
                 type="datetime-local"
                 required
                 defaultValue={dueDefault}
               />
               <FieldDescription>
-                Due times are stored in UTC and claimed by the durable job queue.
+                Converted to an offset-bearing UTC instant before save; claimed by the durable job
+                queue.
               </FieldDescription>
             </Field>
             <Field>

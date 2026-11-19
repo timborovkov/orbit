@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { parseOffsetBearingDueAt } from '@/lib/runtime/follow-ups/due';
+
 /** Delayed job that executes an admin-scheduled follow-up when due. */
 export const FOLLOW_UP_JOB_TYPE = 'followup.execute';
 
@@ -26,11 +28,29 @@ export const FOLLOW_UP_ACTIVITY_KINDS = {
   failed: 'follow_up.failed',
 } as const;
 
+/** Due times must include Z or ±HH:MM so browser-local strings cannot shift on the server. */
+export const offsetBearingDueAtSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .transform((value, ctx) => {
+    const parsed = parseOffsetBearingDueAt(value);
+    if (!parsed) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Due time must include a timezone offset (Z or ±HH:MM).',
+      });
+      return z.NEVER;
+    }
+    return parsed;
+  });
+
 export const scheduleFollowUpInputSchema = z.object({
   agentId: z.uuid(),
   subject: z.string().trim().min(1).max(200),
   note: z.string().trim().max(2000).default(''),
-  dueAt: z.coerce.date(),
+  // Date for internal callers; offset-bearing ISO strings from the browser action.
+  dueAt: z.union([z.date(), offsetBearingDueAtSchema]),
 });
 
 export const followUpJobPayloadSchema = z.object({

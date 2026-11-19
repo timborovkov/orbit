@@ -9,6 +9,7 @@ import {
   finalizeFollowUpExecution,
   FOLLOW_UP_JOB_TYPE,
   processFollowUpJob,
+  reconcileDeadFollowUpJobs,
 } from '@/lib/runtime/follow-ups/process';
 import { FOLLOW_UP_LIFECYCLE_POLICY } from '@/lib/runtime/follow-ups/types';
 import { cancelFollowUp, scheduleFollowUp } from '@/lib/server/follow-up-mutations';
@@ -282,4 +283,65 @@ test('stopped agents skip-and-record; claimed handler respects lifecycle', async
   const [row] = await sql`SELECT status, outcome_kind FROM follow_ups WHERE id=${followUpId}`;
   expect(row!.status).toBe('skipped');
   expect(row!.outcome_kind).toBe('skipped_lifecycle');
+});
+
+test('concurrent execute and cancel complete under agent-first locking', async () => {
+  const agentId = await createAgent('Follow-up lock order');
+  const dueAt = new Date(Date.now() - 1_000);
+  const scheduled = await scheduleFollowUp(admin, {
+    agentId,
+    subject: 'Lock race',
+    dueAt,
+  });
+  if ('error' in scheduled) throw new Error(scheduled.error);
+
+  const raced = Promise.all([
+    finalizeFollowUpExecution(scheduled.followUpId, { attempts: 1, agentId }),
+    cancelFollowUp(admin, agentId, scheduled.followUpId),
+    finalizeFollowUpExecution(scheduled.followUpId, { attempts: 2, agentId }),
+    persistLifecycle(admin, agentId, 'paused'),
+  ]);
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('Deadlock suspected: lock race exceeded 5s')), 5_000);
+  });
+  await Promise.race([raced, timeout]);
+
+  const [row] = await sql`SELECT status FROM follow_ups WHERE id=${scheduled.followUpId}`;
+  expect(['completed', 'cancelled', 'skipped']).toContain(row!.status);
+});
+
+test('reconcileDeadFollowUpJobs finalizes scheduled rows whose jobs are already dead', async () => {
+  const agentId = await createAgent('Follow-up reconcile');
+  const dueAt = new Date(Date.now() - 1_000);
+  const followUpId = randomUUID();
+  const [job] = await sql`
+    INSERT INTO jobs(type,payload,status,available_at,idempotency_key,last_error,finished_at)
+    VALUES(
+      ${FOLLOW_UP_JOB_TYPE},
+      ${sql.json({ followUpId, agentId })},
+      'dead',
+      ${dueAt.toISOString()},
+      ${`followup:${followUpId}`},
+      ${'Lease expired after max attempts'},
+      ${dueAt.toISOString()}
+    )
+    RETURNING id`;
+  await sql`INSERT INTO follow_ups(id,agent_id,source,created_by,subject,note,due_at,status,job_id)
+    VALUES(${followUpId},${agentId},'admin',${admin},'Orphaned dead job','',${dueAt.toISOString()},'scheduled',${job!.id})`;
+
+  const recovered = await reconcileDeadFollowUpJobs();
+  expect(recovered).toBeGreaterThanOrEqual(1);
+
+  const [row] =
+    await sql`SELECT status, outcome_kind, outcome FROM follow_ups WHERE id=${followUpId}`;
+  expect(row!.status).toBe('failed');
+  expect(row!.outcome_kind).toBe('failed');
+  expect(String(row!.outcome)).toContain('Lease expired');
+
+  const events = await sql`SELECT kind FROM agent_activity_events WHERE follow_up_id=${followUpId}`;
+  expect(events).toHaveLength(1);
+  expect(events[0]!.kind).toBe('follow_up.failed');
+
+  // Idempotent: already failed rows are ignored.
+  expect(await reconcileDeadFollowUpJobs()).toBe(0);
 });

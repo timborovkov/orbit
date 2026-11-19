@@ -138,6 +138,10 @@ for (const viewport of [
       `;
       expect(pending?.id).toBeTruthy();
 
+      // e2e.yml does not export DATABASE_URL into the Playwright process; set it
+      // before starting the in-process worker (same pattern as approvals-screenshots).
+      const originalDatabaseUrl = process.env.DATABASE_URL;
+      process.env.DATABASE_URL = databaseUrl;
       const worker = startJobWorker({
         workerId: `follow-ups-shot-${viewport.name}`,
         handlers: {
@@ -149,12 +153,17 @@ for (const viewport of [
         recoveryMs: 5_000,
         leaseMs: 10_000,
       });
-      for (let i = 0; i < 40; i++) {
-        const [rowState] = await sql`SELECT status FROM follow_ups WHERE id=${pending!.id}`;
-        if (rowState?.status === 'completed') break;
-        await page.waitForTimeout(100);
+      try {
+        for (let i = 0; i < 40; i++) {
+          const [rowState] = await sql`SELECT status FROM follow_ups WHERE id=${pending!.id}`;
+          if (rowState?.status === 'completed') break;
+          await page.waitForTimeout(100);
+        }
+      } finally {
+        await worker.stop();
+        if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+        else process.env.DATABASE_URL = originalDatabaseUrl;
       }
-      await worker.stop();
 
       await openWorkspaceTab(page, 'History');
       await expect(

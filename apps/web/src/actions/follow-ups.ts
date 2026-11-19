@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
+import { offsetBearingDueAtSchema } from '@/lib/runtime/follow-ups/types';
 import { cancelFollowUp, scheduleFollowUp } from '@/lib/server/follow-up-mutations';
 
 async function agentParams(form: FormData) {
@@ -29,8 +30,11 @@ export async function scheduleAgentFollowUp(form: FormData) {
   if (!note.success) return { error: 'Keep the note under 2000 characters.' };
 
   const dueRaw = form.get('dueAt');
-  const dueAt = z.coerce.date().safeParse(typeof dueRaw === 'string' ? dueRaw : undefined);
-  if (!dueAt.success) return { error: 'Choose a valid due time.' };
+  if (typeof dueRaw !== 'string') return { error: 'Choose a valid due time.' };
+  const dueAt = offsetBearingDueAtSchema.safeParse(dueRaw);
+  if (!dueAt.success) {
+    return { error: 'Choose a valid due time with a timezone offset.' };
+  }
 
   const result = await scheduleFollowUp(parsed.actor, {
     agentId: parsed.agentId,
