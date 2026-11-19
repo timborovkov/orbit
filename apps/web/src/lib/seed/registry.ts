@@ -5,6 +5,7 @@ import { configurationsModule } from '@/lib/seed/modules/configurations';
 import { consentsModule } from '@/lib/seed/modules/consents';
 import { controlsModule } from '@/lib/seed/modules/controls';
 import { credentialsModule } from '@/lib/seed/modules/credentials';
+import { discoveryModule } from '@/lib/seed/modules/discovery';
 import { emailModule } from '@/lib/seed/modules/email';
 import { knowledgeModule } from '@/lib/seed/modules/knowledge';
 import { runsModule } from '@/lib/seed/modules/runs';
@@ -26,6 +27,7 @@ export const seedModules: SeedModule[] = [
   approvalsModule,
   knowledgeModule,
   emailModule,
+  discoveryModule,
   auditModule,
 ];
 

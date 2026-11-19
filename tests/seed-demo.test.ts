@@ -162,6 +162,7 @@ describe('demo seed idempotency and markers', () => {
     expect(names).toContain('usage');
     expect(names).toContain('credentials');
     expect(names).toContain('controls');
+    expect(names).toContain('discovery');
   });
 });
 

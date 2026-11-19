@@ -1294,7 +1294,13 @@ export async function processSimulationJob(
 ) {
   const runId = typeof payload.runId === 'string' ? payload.runId : null;
   if (!runId) throw new Error('simulation.run payload missing runId');
-  await processSimulationRun(runId, inference, signal, claim);
+  const origin =
+    (await db().select({ origin: runs.origin }).from(runs).where(eq(runs.id, runId))).at(0)
+      ?.origin ?? 'playground';
+  if (origin === 'email') {
+    throw new Error('email runs must use email.draft');
+  }
+  await processSimulationRun(runId, inference, signal, claim, origin);
 }
 
 export async function processEmailDraftJob(

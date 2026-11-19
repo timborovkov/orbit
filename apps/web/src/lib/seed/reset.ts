@@ -8,6 +8,7 @@ import {
   audit,
   configurations,
   credentials,
+  discoveryCursors,
   jobs,
   knowledgeChunks,
   knowledgeDocuments,
@@ -16,18 +17,21 @@ import {
   recipientConsents,
   runs,
   skills,
+  sourceEvents,
   usageCounters,
 } from '@/lib/schema';
 import {
   DEMO_ACTOR,
   DEMO_AGENT_IDS,
   DEMO_AUDIT,
+  DEMO_DISCOVERY_RUN_IDS,
   DEMO_INTENTS,
   DEMO_JOBS,
   DEMO_KNOWLEDGE_CHUNK_IDS,
   DEMO_KNOWLEDGE_DOC_IDS,
   DEMO_POLICY,
   DEMO_RUNS,
+  DEMO_SOURCE_EVENT_IDS,
 } from '@/lib/seed/ids';
 import type { SeedContext } from '@/lib/seed/types';
 
@@ -79,9 +83,16 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
   await tx.delete(actionIntents).where(inArray(actionIntents.id, demoIntentIds));
   await tx.delete(actionIntents).where(inArray(actionIntents.agentId, demoAgentIds));
 
+  await tx.delete(sourceEvents).where(inArray(sourceEvents.id, [...DEMO_SOURCE_EVENT_IDS]));
+  await tx.delete(sourceEvents).where(inArray(sourceEvents.agentId, demoAgentIds));
+  await tx.delete(discoveryCursors).where(inArray(discoveryCursors.agentId, demoAgentIds));
+
   // Clear run → job FK before deleting jobs.
+  const discoveryRunIds = [...DEMO_DISCOVERY_RUN_IDS];
   await tx.update(runs).set({ jobId: null }).where(inArray(runs.id, demoRunIds));
+  await tx.update(runs).set({ jobId: null }).where(inArray(runs.id, discoveryRunIds));
   await tx.delete(runs).where(inArray(runs.id, demoRunIds));
+  await tx.delete(runs).where(inArray(runs.id, discoveryRunIds));
   await tx.delete(runs).where(inArray(runs.agentId, demoAgentIds));
 
   // Fixed seed jobs, orbit-demo keys, and runtime jobs for demo runs/agents

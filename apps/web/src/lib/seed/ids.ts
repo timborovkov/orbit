@@ -83,6 +83,20 @@ export const DEMO_KNOWLEDGE_CHUNKS = {
 export const DEMO_KNOWLEDGE_DOC_IDS = Object.values(DEMO_KNOWLEDGE_DOCS);
 export const DEMO_KNOWLEDGE_CHUNK_IDS = Object.values(DEMO_KNOWLEDGE_CHUNKS);
 
+/** Fixed X discovery fixture rows for John (shadow). */
+export const DEMO_SOURCE_EVENTS = {
+  johnPost1001: '00000000-0000-4000-a900-000000000001',
+  johnPost1002: '00000000-0000-4000-a900-000000000002',
+} as const;
+
+export const DEMO_DISCOVERY_RUNS = {
+  johnPost1001: '00000000-0000-4000-a910-000000000001',
+  johnPost1002: '00000000-0000-4000-a910-000000000002',
+} as const;
+
+export const DEMO_SOURCE_EVENT_IDS = Object.values(DEMO_SOURCE_EVENTS);
+export const DEMO_DISCOVERY_RUN_IDS = Object.values(DEMO_DISCOVERY_RUNS);
+
 export function isDemoAgentId(id: string): boolean {
   return (DEMO_AGENT_IDS as readonly string[]).includes(id);
 }

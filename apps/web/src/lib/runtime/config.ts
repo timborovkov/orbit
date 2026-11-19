@@ -14,6 +14,8 @@ export const configSchema = z.object({
   mission: z.string().trim().max(2000),
   instructions: prose,
   engagementCriteria: prose,
+  /** Admin-authored X recent-search query. Empty disables discovery polling. */
+  xSearchQuery: z.string().trim().max(512).default(''),
   mainModel: model,
   evaluatorModel: model,
 });
@@ -25,6 +27,7 @@ export const configFields = [
   ['mission', 'Mission'],
   ['instructions', 'Operating instructions'],
   ['engagementCriteria', 'Engagement criteria'],
+  ['xSearchQuery', 'X search query'],
   ['mainModel', 'Main model'],
   ['evaluatorModel', 'Evaluator model'],
 ] as const;

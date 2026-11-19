@@ -1,5 +1,6 @@
 import { parseObservabilityEnv } from '@/lib/observability/env';
 import { optionalResendApiKey } from '@/lib/runtime/email/settings';
+import { optionalXBearerToken } from '@/lib/runtime/x/settings';
 
 /** Worker process env — shared module so web/worker both typecheck without Nest-style packages. */
 function optionalHexKey(value: string | undefined) {
@@ -36,6 +37,7 @@ export function parseWorkerEnv(input: Record<string, string | undefined>) {
     ORBIT_ENCRYPTION_KEY: optionalHexKey(input.ORBIT_ENCRYPTION_KEY),
     OPENROUTER_API_KEY: optionalOpenRouterKey(input.OPENROUTER_API_KEY),
     RESEND_API_KEY: optionalResendApiKey.parse(input.RESEND_API_KEY),
+    X_BEARER_TOKEN: optionalXBearerToken.parse(input.X_BEARER_TOKEN),
     ORBIT_WORKER_ID: workerId === '' ? undefined : workerId,
     observability: parseObservabilityEnv(input),
   };
