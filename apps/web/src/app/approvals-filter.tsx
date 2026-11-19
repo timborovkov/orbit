@@ -34,7 +34,7 @@ export function ApprovalsFilter({
             router.push(query ? `/approvals?${query}` : '/approvals');
           }}
         >
-          <SelectTrigger id="approvals-agent-filter" className="w-full min-w-[220px] max-w-[320px]">
+          <SelectTrigger id="approvals-agent-filter" className="w-full min-w-0">
             <SelectValue placeholder="All agents" />
           </SelectTrigger>
           <SelectContent>

@@ -23,6 +23,19 @@ import {
   usageCounters,
 } from '@/lib/schema';
 
+async function countPendingApprovals() {
+  const [pending] = await db()
+    .select({ count: sql<number>`count(*)::int` })
+    .from(actionIntents)
+    .where(eq(actionIntents.reviewStatus, 'pending'));
+  return pending.count;
+}
+
+export async function getPendingApprovalCount() {
+  await requireAdmin();
+  return countPendingApprovals();
+}
+
 export async function getOverview() {
   const email = await requireAdmin();
   const [team, events, state, presets, pendingApprovals] = await Promise.all([
@@ -30,10 +43,7 @@ export async function getOverview() {
     db().select().from(audit).orderBy(desc(audit.createdAt)).limit(12),
     db().select().from(controls),
     db().select().from(templates),
-    db()
-      .select({ count: sql<number>`count(*)::int` })
-      .from(actionIntents)
-      .where(eq(actionIntents.reviewStatus, 'pending')),
+    countPendingApprovals(),
   ]);
   return {
     email,
@@ -41,7 +51,7 @@ export async function getOverview() {
     events,
     state,
     presets,
-    pendingApprovalCount: pendingApprovals[0]?.count ?? 0,
+    pendingApprovalCount: pendingApprovals,
   };
 }
 
@@ -77,16 +87,13 @@ export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: st
       .select({ count: sql<number>`count(*)::int` })
       .from(actionIntents)
       .where(and(eq(actionIntents.reviewStatus, 'pending'), agentFilter, runFilter)),
-    db()
-      .select({ count: sql<number>`count(*)::int` })
-      .from(actionIntents)
-      .where(eq(actionIntents.reviewStatus, 'pending')),
+    countPendingApprovals(),
   ]);
   return {
     team,
     items,
     pendingCount: pending[0]?.count ?? 0,
-    totalPendingCount: pendingTotal[0]?.count ?? 0,
+    totalPendingCount: pendingTotal,
   };
 }
 
@@ -163,10 +170,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
       .orderBy(desc(recipientConsents.updatedAt))
       .limit(50),
     db().select().from(usageCounters).where(eq(usageCounters.agentId, id)),
-    db()
-      .select({ count: sql<number>`count(*)::int` })
-      .from(actionIntents)
-      .where(eq(actionIntents.reviewStatus, 'pending')),
+    countPendingApprovals(),
     db()
       .select({ count: sql<number>`count(*)::int` })
       .from(runs)
@@ -223,7 +227,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     keySource: openRouterKeySource(hasAgentCredential),
     history: viewedHistory,
     reviews,
-    pendingApprovalCount: pendingApprovals[0]?.count ?? 0,
+    pendingApprovalCount: pendingApprovals,
     consents,
     current,
     skillIds: skillRows.map((row) => row.skillId),

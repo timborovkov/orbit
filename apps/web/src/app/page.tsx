@@ -1,12 +1,10 @@
-import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowDownLeft, CirclePause, LockKeyhole, ShieldCheck, Users } from 'lucide-react';
+import { ArrowDownLeft, CirclePause, ShieldCheck, Users } from 'lucide-react';
 
-import { logout } from '@/actions/auth';
 import { setGlobalPause } from '@/actions/controls';
 import { AgentAvatar } from '@/app/agent-avatar';
 import { CreateAgent } from '@/app/create-agent';
-import { ThemeSwitch } from '@/app/theme';
+import { WorkspaceHeader } from '@/app/workspace-header';
 import {
   Empty,
   EmptyDescription,
@@ -26,52 +24,8 @@ export default async function Home() {
   const localAuth = env().AUTH_DISABLED;
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#main">
-        Skip to content
-      </a>
-      <header className="app-header">
-        <div className="header-inner">
-          <Link href="/" className="brand" aria-label="Orbit home">
-            <Image src="/icon.svg" alt="" width="34" height="34" />
-            <span>Orbit</span>
-          </Link>
-          <span className="header-slash" aria-hidden="true">
-            /
-          </span>
-          <span className="workspace-name">Private workspace</span>
-          <span className="workspace-badge">Admin</span>
-          <div className="header-actions">
-            <ThemeSwitch />
-            {!localAuth && (
-              <form action={logout}>
-                <SubmitButton variant="ghost" size="sm" pendingLabel="Signing out…">
-                  Sign out
-                </SubmitButton>
-              </form>
-            )}
-          </div>
-        </div>
-        <nav className="workspace-nav" aria-label="Workspace">
-          <div className="nav-inner">
-            <Link href="/" aria-current="page">
-              Overview
-            </Link>
-            <a href="#agents">Agents</a>
-            <Link href="/approvals">
-              Approvals
-              {pendingApprovalCount > 0 && (
-                <span className="tab-count">{pendingApprovalCount}</span>
-              )}
-            </Link>
-            <a href="#activity">Activity</a>
-            <Link href="/templates">Templates</Link>
-            <Link href="/skills">Skills</Link>
-            <Link href="/mcp">MCP</Link>
-            <a href="#controls">Controls</a>
-          </div>
-        </nav>
-      </header>
-      <main id="main" className="dashboard">
+      <WorkspaceHeader current="/" pendingApprovalCount={pendingApprovalCount} />
+      <main id="main" tabIndex={-1} className="workspace-main">
         {localAuth && (
           <p className="local-auth-notice" role="status">
             Authentication disabled · Local development · {email}
@@ -80,44 +34,31 @@ export default async function Home() {
         <div className="page-heading">
           <div>
             <h1>Overview</h1>
-            <p className="muted">Manage your agents and workspace activity.</p>
+            <p className="muted">
+              Manage your agents and workspace activity. External writes are suppressed in all
+              modes.
+            </p>
           </div>
-          <span className="runtime-status">
-            <span className="status-dot" />
-            Worker queue available
-          </span>
         </div>
         <dl className="metrics" aria-label="Agent summary">
           <div>
             <dt>Total agents</dt>
-            <dd>
-              {team.length}
-              <span>in this workspace</span>
-            </dd>
+            <dd>{team.length}</dd>
           </div>
           <div>
             <dt>Shadow</dt>
-            <dd>
-              {team.filter((a) => a.lifecycle === 'shadow').length}
-              <span>writes suppressed</span>
-            </dd>
+            <dd>{team.filter((a) => a.lifecycle === 'shadow').length}</dd>
           </div>
           <div>
             <dt>Live</dt>
-            <dd>
-              {team.filter((a) => a.lifecycle === 'live').length}
-              <span>adapters still gated</span>
-            </dd>
+            <dd>{team.filter((a) => a.lifecycle === 'live').length}</dd>
           </div>
         </dl>
         <div className="workspace-grid">
           <div className="primary-column">
             <section className="surface" id="agents" aria-labelledby="agents-title">
               <div className="section-heading">
-                <div className="section-label">
-                  <h2 id="agents-title">Agents</h2>
-                  <span className="count">{team.length}</span>
-                </div>
+                <h2 id="agents-title">Agents</h2>
                 <CreateAgent
                   templates={presets.map((t) => ({
                     id: t.id,
@@ -177,14 +118,6 @@ export default async function Home() {
                   </EmptyHeader>
                 </Empty>
               )}
-              <div className="section-footnote">
-                <LockKeyhole size={13} />
-                <span>
-                  Open an agent to configure lifecycle, budgets and simulations. An optional server
-                  OpenRouter key covers agents without their own credential. External actions remain
-                  suppressed until adapters ship.
-                </span>
-              </div>
             </section>
             <section
               id="controls"
@@ -217,7 +150,6 @@ export default async function Home() {
           <section className="activity-panel" id="activity" aria-labelledby="activity-title">
             <div className="section-heading">
               <h2 id="activity-title">Recent activity</h2>
-              <span className="muted text-small">Latest {events.length}</span>
             </div>
             <ol className="activity-list">
               {events.map((e) => (

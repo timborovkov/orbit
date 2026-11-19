@@ -2,15 +2,19 @@ import { WorkspaceHeader } from '@/app/workspace-header';
 import { SkillsLibrary } from '@/components/skills-library';
 import { env } from '@/lib/env';
 import { listSkills } from '@/lib/server/skills-queries';
+import { getPendingApprovalCount } from '@/lib/server/workspace-queries';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SkillsPage() {
-  const { email, items } = await listSkills();
+  const [{ email, items }, pendingApprovalCount] = await Promise.all([
+    listSkills(),
+    getPendingApprovalCount(),
+  ]);
   return (
     <div className="agent-shell">
-      <WorkspaceHeader name="Skills" />
-      <main className="agent-main">
+      <WorkspaceHeader current="/skills" pendingApprovalCount={pendingApprovalCount} />
+      <main className="workspace-main" id="main" tabIndex={-1}>
         {env().AUTH_DISABLED && (
           <p className="local-auth-notice" role="status">
             Authentication disabled · Local development · {email}

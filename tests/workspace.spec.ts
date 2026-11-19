@@ -62,7 +62,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
     'aria-selected',
     'true',
   );
-  await expect(page.getByText('A safe place to try things')).toBeVisible();
+  await expect(page.getByText('No messages yet')).toBeVisible();
   for (const mode of ['Light', 'Dark']) {
     await page.getByRole('radio', { name: mode, exact: true }).check();
     await capturePage(page, `test-results/agent-Playground-empty-${mode}.png`);
@@ -180,8 +180,10 @@ test('template copies, independent versions, encrypted keys and durable manual r
       }
     }
   }
-  await page.getByRole('button', { name: 'Workspace navigation' }).click();
-  await page.getByRole('menuitem', { name: 'Agents', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Agents', exact: true })
+    .click();
   await page.getByRole('link', { name: 'Sarah', exact: true }).click();
   await expect(page.getByLabel('Role', { exact: true })).toHaveValue('Customer support specialist');
   await expect(page.getByLabel('Personality', { exact: true })).toHaveValue(
@@ -205,9 +207,12 @@ test('template copies, independent versions, encrypted keys and durable manual r
       return rows.length === 2 && rows.every((r) => r.input === input && r.status === 'failed');
     })
     .toBe(true);
+  await page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Agents', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Workspace navigation' }).click();
-  await page.getByRole('menuitem', { name: 'Agents', exact: true }).click();
-  await page.getByRole('link', { name: 'Templates', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Templates', exact: true }).click();
   const support = page
     .locator('details')
     .filter({ has: page.locator('summary', { hasText: 'Customer Support' }) });

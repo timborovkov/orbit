@@ -122,7 +122,7 @@ export function McpConnectionForm({
                 >
                   <SelectValue placeholder="Select transport" />
                 </SelectTrigger>
-                <SelectContent className="library-select-content">
+                <SelectContent>
                   <SelectItem value="http">HTTP</SelectItem>
                   <SelectItem value="sse">SSE</SelectItem>
                 </SelectContent>

@@ -41,7 +41,7 @@ import {
 } from '@/components/ai-elements/tool';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -172,7 +172,7 @@ export function PlaygroundChat({
 
   return (
     <div className="playground-chat">
-      <div className="editor-section-heading playground-chat-heading">
+      <div className="playground-chat-heading">
         <div>
           <h2>Test a conversation</h2>
           <p className="muted">See how {agentName} would respond to a post or question.</p>
@@ -230,7 +230,6 @@ export function PlaygroundChat({
               ))}
             </SelectContent>
           </Select>
-          <FieldDescription>Paid model inference runs on the Bun worker.</FieldDescription>
         </Field>
 
         <Collapsible
@@ -238,9 +237,16 @@ export function PlaygroundChat({
           onOpenChange={setRecipientsOpen}
           className="playground-recipients"
         >
+          <FieldLabel htmlFor="playground-consent-recipients">Consent checks</FieldLabel>
           <CollapsibleTrigger asChild>
-            <Button type="button" variant="outline" className="playground-recipients-trigger">
-              Recipients for consent checks
+            <Button
+              type="button"
+              variant="outline"
+              id="playground-consent-recipients"
+              className="playground-recipients-trigger"
+              aria-label="Recipients for consent checks"
+            >
+              Recipients
               <ChevronDown
                 size={16}
                 aria-hidden="true"
@@ -358,7 +364,10 @@ function PlaygroundComposer({
           <PromptInputTools>
             <p className="simulation-note">
               <ShieldCheck size={15} aria-hidden="true" />
-              <span>Nothing is posted or sent. Save your configuration before testing.</span>
+              <span>
+                Nothing is posted or sent. Model usage can incur charges. Save your configuration
+                before testing.
+              </span>
             </p>
           </PromptInputTools>
           {busy && runId ? (
@@ -409,13 +418,15 @@ function PlaygroundConversation({
   hasLatestRun: boolean;
   runStatuses: Record<string, string>;
 }) {
+  const empty = messages.length === 0 && !busy;
+
   return (
-    <Conversation className="playground-conversation">
+    <Conversation className="playground-conversation" data-empty={empty || undefined}>
       <ConversationContent>
-        {!messages.length && !busy && (
+        {empty && (
           <ConversationEmptyState
             icon={<FlaskConical size={30} strokeWidth={1.25} aria-hidden="true" />}
-            title={hasLatestRun ? 'Start a new simulation' : 'A safe place to try things'}
+            title={hasLatestRun ? 'Start a new simulation' : 'No messages yet'}
             description="Paste a post or question to see the evaluation, proposed actions and drafts."
           />
         )}

@@ -1,10 +1,8 @@
-'use client';
-
 import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { ChevronRight, Menu } from 'lucide-react';
+import { LogOut, Menu } from 'lucide-react';
 
+import { logout } from '@/actions/auth';
 import { ThemeSwitch } from '@/app/theme';
 import { Button } from '@/components/ui/button';
 import {
@@ -13,8 +11,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { SubmitButton } from '@/components/ui/submit-button';
+import { env } from '@/lib/env';
 
 const navLinks = [
+  { href: '/', label: 'Overview' },
   { href: '/approvals', label: 'Approvals' },
   { href: '/templates', label: 'Templates' },
   { href: '/skills', label: 'Skills' },
@@ -22,90 +23,82 @@ const navLinks = [
 ] as const;
 
 export function WorkspaceHeader({
-  name,
-  pendingApprovalCount = 0,
+  current,
+  pendingApprovalCount,
 }: {
-  name: string;
-  pendingApprovalCount?: number;
+  current?: (typeof navLinks)[number]['href'];
+  pendingApprovalCount: number;
 }) {
-  const pathname = usePathname();
-  const underAgents = pathname.startsWith('/agents/');
+  const links = navLinks.map(({ href, label }) => (
+    <Link key={href} href={href} aria-current={href === current ? 'page' : undefined}>
+      {label}
+      {href === '/approvals' && pendingApprovalCount > 0 && (
+        <>
+          <span className="tab-count" aria-hidden="true">
+            {pendingApprovalCount}
+          </span>
+          <span className="sr-only"> ({pendingApprovalCount} pending)</span>
+        </>
+      )}
+    </Link>
+  ));
 
   return (
-    <header className="agent-header">
-      <div className="agent-header-inner">
-        <Link href="/" className="brand" aria-label="Orbit home">
-          <Image src="/icon.svg" width={28} height={28} alt="" />
-          <span>Orbit</span>
-        </Link>
-        <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-          {underAgents ? (
-            <>
-              <ChevronRight size={14} aria-hidden="true" />
-              <Link href="/" aria-label="All agents">
-                Agents
-              </Link>
-              <ChevronRight size={14} aria-hidden="true" className="breadcrumb-sep" />
-              <span aria-current="page">{name}</span>
-            </>
-          ) : (
-            <>
-              <ChevronRight size={14} aria-hidden="true" />
-              <span aria-current="page">{name}</span>
-            </>
-          )}
-        </nav>
-        <div className="header-actions">
-          <div className="header-nav-desktop">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="templates-link"
-                aria-current={
-                  pathname === link.href || pathname.startsWith(`${link.href}/`)
-                    ? 'page'
-                    : undefined
-                }
-              >
-                {link.label}
-                {link.href === '/approvals' && pendingApprovalCount > 0 && (
-                  <span className="tab-count">{pendingApprovalCount}</span>
-                )}
-              </Link>
-            ))}
+    <>
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
+      <header className="workspace-header">
+        <div className="workspace-header-inner">
+          <Link href="/" className="brand" aria-label="Orbit home">
+            <Image src="/icon.svg" alt="" width={28} height={28} />
+            <span>Orbit</span>
+          </Link>
+          <span className="workspace-name">Private workspace</span>
+          <div className="header-actions">
+            <ThemeSwitch />
+            {!env().AUTH_DISABLED && (
+              <form action={logout}>
+                <SubmitButton
+                  variant="ghost"
+                  size="sm"
+                  className="workspace-sign-out"
+                  pendingLabel="Signing out…"
+                  aria-label="Sign out"
+                  title="Sign out"
+                >
+                  <LogOut size={16} aria-hidden="true" />
+                  <span>Sign out</span>
+                </SubmitButton>
+              </form>
+            )}
+            <div className="workspace-nav-compact">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Workspace navigation"
+                  >
+                    <Menu size={20} aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="library-menu workspace-nav-menu">
+                  {links.map((link) => (
+                    <DropdownMenuItem key={link.key} asChild>
+                      {link}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="header-nav-mobile"
-                aria-label="Workspace navigation"
-              >
-                <Menu size={18} aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="library-menu">
-              <DropdownMenuItem asChild>
-                <Link href="/">Agents</Link>
-              </DropdownMenuItem>
-              {navLinks.map((link) => (
-                <DropdownMenuItem key={link.href} asChild>
-                  <Link href={link.href}>
-                    {link.label}
-                    {link.href === '/approvals' && pendingApprovalCount > 0
-                      ? ` (${pendingApprovalCount})`
-                      : ''}
-                  </Link>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <ThemeSwitch />
         </div>
-      </div>
-    </header>
+        <nav className="workspace-nav" aria-label="Workspace">
+          <div className="workspace-header-inner workspace-nav-inner">{links}</div>
+        </nav>
+      </header>
+    </>
   );
 }

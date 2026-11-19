@@ -73,7 +73,12 @@ test('private login, persisted workspace, keyboard dialog, themes and screenshot
   await accessible(page);
   const trigger = page.getByRole('button', { name: 'Create agent', exact: true });
   await trigger.click();
-  await expect(page.getByLabel(/^Name/)).toBeFocused();
+  const draftName = page.getByLabel(/^Name/);
+  await expect(draftName).toBeFocused();
+  await draftName.fill('Draft agent');
+  await page.mouse.click(4, 140);
+  await expect(draftName).toHaveValue('Draft agent');
+  await draftName.focus();
   await page.keyboard.press('Shift+Tab');
   await expect(page.getByLabel('Template', { exact: true })).toBeFocused();
   await page.keyboard.press('Shift+Tab');
@@ -84,6 +89,24 @@ test('private login, persisted workspace, keyboard dialog, themes and screenshot
   await expect(page.getByLabel(/^Name/)).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByLabel(/^Mission/)).toBeFocused();
+  const template = page.getByRole('combobox', { name: 'Template' });
+  await template.focus();
+  const fieldBounds = await template.boundingBox();
+  await page.keyboard.press('Space');
+  const templateOptions = page.getByRole('listbox');
+  await expect(templateOptions).toBeVisible();
+  const menuBounds = await templateOptions.boundingBox();
+  if (!fieldBounds || !menuBounds) throw new Error('Expected a visible template field and menu');
+  expect(Math.abs(menuBounds.width - fieldBounds.width)).toBeLessThan(2);
+  expect(Math.abs(menuBounds.x - fieldBounds.x)).toBeLessThan(2);
+  await page.keyboard.press('Escape');
+  await expect(templateOptions).toBeHidden();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(template).toBeFocused();
+  await template.click();
+  await page.getByRole('option', { name: 'Customer Support' }).click();
+  await expect(template).toHaveText('Customer Support');
+  await expect(page.getByLabel(/^Mission/)).not.toHaveValue('');
   await page.keyboard.press('Escape');
   await expect(trigger).toBeFocused();
   await create(
@@ -159,6 +182,15 @@ test('private login, persisted workspace, keyboard dialog, themes and screenshot
         });
     }
   }
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  expect((await page.getByRole('banner').boundingBox())?.y).toBe(0);
+  await page.getByRole('button', { name: 'Workspace navigation' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Overview' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await trigger.click();
   await accessible(page);
