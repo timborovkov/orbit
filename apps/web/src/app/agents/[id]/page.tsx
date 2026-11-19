@@ -8,6 +8,7 @@ import { saveConfiguration } from '@/actions/workspace';
 import { AccessWorkbench } from '@/app/access-workbench';
 import { AgentAvatar } from '@/app/agent-avatar';
 import { ConfigFields } from '@/app/config-fields';
+import { EmailInbox } from '@/app/email-inbox';
 import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { PlaygroundChat } from '@/app/playground-chat';
@@ -24,11 +25,31 @@ import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { latestPersistedRun } from '@/lib/runtime/playground-ui';
+import { getEmailInbox } from '@/lib/server/email-queries';
 import { listKnowledgeDocuments } from '@/lib/server/knowledge-queries';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
+
+interface WorkspaceSearch {
+  run?: string;
+  emailThread?: string;
+  emailPage?: string;
+  messagePage?: string;
+}
+
+function workspaceLocation(search: WorkspaceSearch) {
+  const focusRunId = z.uuid().safeParse(search.run).data;
+  const selectedThread = z.uuid().safeParse(search.emailThread).data;
+  const pageNumber = z.coerce.number().int().min(1).max(100_000);
+  return {
+    focusRunId,
+    selectedThread,
+    emailPage: pageNumber.safeParse(search.emailPage).data ?? 1,
+    messagePage: pageNumber.safeParse(search.messagePage).data ?? 1,
+  };
+}
 
 export const dynamic = 'force-dynamic';
 export default async function AgentWorkspace({
@@ -36,13 +57,14 @@ export default async function AgentWorkspace({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ run?: string }>;
+  searchParams: Promise<WorkspaceSearch>;
 }) {
   const email = await requireAdmin();
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
-  const focus = z.uuid().safeParse((await searchParams).run);
-  const focusRunId = focus.success ? focus.data : undefined;
+  const { focusRunId, selectedThread, emailPage, messagePage } = workspaceLocation(
+    await searchParams,
+  );
   const workspace = await getAgentWorkspace(id, focusRunId);
   if (!workspace) notFound();
   const {
@@ -59,11 +81,13 @@ export default async function AgentWorkspace({
     skillIds,
     mcpSelections,
   } = workspace;
-  const [knowledgeDocuments, { items: librarySkills }, { items: libraryMcp }] = await Promise.all([
-    listKnowledgeDocuments(id),
-    listSkillSummaries(),
-    listMcpConnections(),
-  ]);
+  const [knowledgeDocuments, { items: librarySkills }, { items: libraryMcp }, inbox] =
+    await Promise.all([
+      listKnowledgeDocuments(id),
+      listSkillSummaries(),
+      listMcpConnections(),
+      getEmailInbox(id, selectedThread, emailPage, messagePage),
+    ]);
   const lifecycle = agent.lifecycle;
   const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
@@ -270,7 +294,7 @@ export default async function AgentWorkspace({
             <span className="muted">{openRouterConnectionLabel(keySource)}</span>
           </div>
         </div>
-        <PendingRunRefresh active={hasPendingRuns || hasPendingKnowledge} />
+        <PendingRunRefresh active={hasPendingRuns || hasPendingKnowledge || inbox.pending} />
         <Suspense>
           <WorkspaceTabs
             key={id}
@@ -287,6 +311,18 @@ export default async function AgentWorkspace({
                     documents={knowledgeDocuments}
                     storageReady={storageConfigured()}
                     searchEnabled={agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)}
+                  />
+                ),
+              },
+              {
+                id: 'email',
+                label: 'Email',
+                content: (
+                  <EmailInbox
+                    agentId={id}
+                    inbox={inbox}
+                    page={emailPage}
+                    messagePage={messagePage}
                   />
                 ),
               },

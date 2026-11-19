@@ -23,7 +23,7 @@
     "test:e2e": "playwright test && playwright test --config playwright.playground.config.ts && playwright test --config playwright.openrouter-env.config.ts && playwright test --config playwright.local.config.ts && playwright test --config playwright.approvals.config.ts",
     "test:simulation": "bun test tests/simulation-persistence.test.ts",
     "test:queue": "bun test tests/queue.test.ts",
-    "test:integration": "bun test tests/queue.test.ts tests/worker-integration.test.ts tests/simulation-persistence.test.ts tests/approvals-integration.test.ts tests/knowledge-integration.test.ts",
+    "test:integration": "bun test tests/queue.test.ts tests/worker-integration.test.ts tests/simulation-persistence.test.ts tests/approvals-integration.test.ts tests/knowledge-integration.test.ts tests/inbound-email.test.ts",
     "storage:setup": "bun apps/web/scripts/setup-storage.ts",
     "test:knowledge": "bun test tests/knowledge-integration.test.ts"
   },

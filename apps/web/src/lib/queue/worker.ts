@@ -15,7 +15,10 @@ import {
 } from '@/lib/queue/types';
 import { isUnrecoverablePaidStepFinalizationError } from '@/lib/runtime/errors';
 
-type JobHandler = (job: JobRecord, signal: AbortSignal) => Promise<void>;
+type JobHandler = (
+  job: JobRecord,
+  signal: AbortSignal,
+) => Promise<void> | Promise<{ deferUntil: Date } | undefined>;
 
 export interface WorkerOptions {
   workerId: string;
@@ -186,12 +189,13 @@ export function startJobWorker(options: WorkerOptions) {
     };
 
     try {
-      await handler(job, jobCancel.signal);
+      const result = await handler(job, jobCancel.signal);
       try {
-        await complete(job.id, options.workerId);
+        if (result) await release(job.id, options.workerId, undefined, result.deferUntil);
+        else await complete(job.id, options.workerId);
       } catch (error: unknown) {
         options.onError?.(error);
-        await deadLetter('Failed to mark job completed');
+        await deadLetter(result ? 'Failed to reschedule job' : 'Failed to mark job completed');
       }
     } catch (error: unknown) {
       if (isUnrecoverablePaidStepFinalizationError(error)) {

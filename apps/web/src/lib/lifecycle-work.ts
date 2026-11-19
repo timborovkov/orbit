@@ -1,10 +1,11 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
 import { lockApprovalAgent, recordApprovalReviews } from '@/lib/runtime/approval-work';
-import { actionIntents, agents, runs } from '@/lib/schema';
+import { EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
+import { actionIntents, agents, emailMessages, runs } from '@/lib/schema';
 
 /**
  * Cancel jobs for a pause/stop transition and interrupt linked non-terminal runs.
@@ -22,10 +23,21 @@ export async function cancelWorkForLifecycle(
       return cancelWorkForLifecycle(agentId, next, tx);
     });
   }
+  // Capture and thread email even when its draft is cancelled.
+  await store
+    .update(emailMessages)
+    .set({ skipReason: `Agent is ${next}.`, waitingForCapacity: false })
+    .where(
+      and(
+        eq(emailMessages.agentId, agentId),
+        isNull(emailMessages.runId),
+        isNull(emailMessages.skipReason),
+      ),
+    );
   const includeClaimed = next === 'stopped';
   const cancelledIds = await cancelPendingJobsForAgent(agentId, store, {
     includeClaimed,
-    excludeTypes: [KNOWLEDGE_JOB_TYPE],
+    excludeTypes: [KNOWLEDGE_JOB_TYPE, EMAIL_RECEIVE_JOB],
   });
   if (next === 'stopped') {
     await store

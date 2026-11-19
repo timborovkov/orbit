@@ -233,7 +233,7 @@ the first invalid field. On success, close after the server action completes.
 
 Show agent identity, lifecycle, current configuration version and OpenRouter
 status above the task tabs. The tasks are Configuration, Playground,
-Knowledge, History, Approvals and Access. Use a horizontal tablist with
+Knowledge, Email, History, Approvals and Access. Use a horizontal tablist with
 Left, Right, Home and End support above 600px and a full-width Select at
 600px and narrower. Keep task panels mounted so drafts survive navigation.
 
@@ -292,6 +292,19 @@ errors in the Inspector panel. Results list rank, combined and component
 scores, with detailed match reasons in a disclosure. Label stub embeddings.
 Playground retrieval uses a Switch. Grounded answers use numbered citations
 with filename, page or section and the quoted passage.
+
+### Email
+
+The Email task tab uses the existing responsive workspace navigation. The mailbox
+card shows the assigned address and the enable or disable action. The thread list
+highlights the selected conversation. Messages show the processing state beside the
+subject and sender, with the saved reply draft and its knowledge citations beneath
+the message. Message content and replies render as plain text. Email work participates
+in the workspace’s pending-state refresh.
+
+Playwright verified admin mailbox controls, thread navigation, draft and citation
+rendering, and the mobile layout in both themes. The inbox had no axe violations
+at 390px in either theme.
 
 ### Access
 

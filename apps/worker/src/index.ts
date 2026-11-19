@@ -7,8 +7,12 @@ import { registerErrorCapture } from '@/lib/observability/errors';
 import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import { startJobWorker } from '@/lib/queue/worker';
 import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
+import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
+import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
+import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import {
   finalizeExhaustedSimulationJob,
+  processEmailDraftJob,
   processSimulationJob,
   reconcileOrphanedSimulationRuns,
   SIMULATION_JOB_TYPE,
@@ -62,6 +66,15 @@ function jobCorrelation(job: { id: string; payload: Record<string, unknown> }) {
 const worker = startJobWorker({
   workerId,
   handlers: {
+    [EMAIL_RECEIVE_JOB]: (job, signal) =>
+      processEmailReceiveJob(job, workerId, signal, (emailId, fetchSignal) =>
+        fetchReceivedEmail(emailId, config.RESEND_API_KEY, fetchSignal),
+      ),
+    [EMAIL_DRAFT_JOB]: (job, signal) =>
+      processEmailDraftJob(job.payload, undefined, signal, {
+        jobId: job.id,
+        workerId,
+      }),
     [SIMULATION_JOB_TYPE]: async (job, signal) => {
       try {
         await processSimulationJob(job.payload, undefined, signal, {
@@ -94,7 +107,7 @@ const worker = startJobWorker({
   },
   onDeadLetter: async (job, error) => {
     reportFailure('worker.dead_letter', jobCorrelation(job), error);
-    if (job.type === SIMULATION_JOB_TYPE) {
+    if (job.type === SIMULATION_JOB_TYPE || job.type === EMAIL_DRAFT_JOB) {
       await finalizeExhaustedSimulationJob(job.payload, error);
       return;
     }

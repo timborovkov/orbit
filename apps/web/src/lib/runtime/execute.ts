@@ -24,6 +24,8 @@ import {
   recordApprovalReviews,
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
+import { emailKnowledgeQuery } from '@/lib/runtime/email/input';
+import { EMAIL_DRAFT_JOB } from '@/lib/runtime/email/settings';
 import {
   isRetryableInfrastructureError,
   isUnrecoverablePaidStepFinalizationError,
@@ -306,100 +308,121 @@ export async function enqueueSimulation({
       };
     }
 
-    await expireStaleRuns(tx, agent);
-
-    const budgets = parseBudgets(agent.budgets);
-    const active = (
-      await tx
-        .select({ id: runs.id })
-        .from(runs)
-        .where(
-          and(
-            eq(runs.agentId, agentId),
-            inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
-          ),
-        )
-    ).length;
-    if (active >= budgets.maxConcurrentRuns) {
-      return {
-        error: budgetViolationMessage('concurrency'),
-      };
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const monthStart = `${today.slice(0, 7)}-01`;
-    const counters = await tx
-      .select()
-      .from(usageCounters)
-      .where(eq(usageCounters.agentId, agentId));
-    const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
-    const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
-    const snapshot: BudgetSnapshot = {
-      budgets,
-      day: {
-        spendMicros: day?.spendMicros ?? BigInt(0),
-        requests: day?.requests ?? 0,
-        outboundActions: day?.outboundActions ?? 0,
-      },
-      month: {
-        spendMicros: month?.spendMicros ?? BigInt(0),
-        requests: month?.requests ?? 0,
-        outboundActions: month?.outboundActions ?? 0,
-      },
-      activeRuns: active,
-    };
-    const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
-    if (violation && violation !== 'concurrency') {
-      return { error: budgetViolationMessage(violation) };
-    }
-
-    const config = (
-      await tx
-        .select()
-        .from(configurations)
-        .where(and(eq(configurations.id, configurationId), eq(configurations.agentId, agentId)))
-    ).at(0);
-    if (!config) {
-      return {
-        error: 'The configuration is unavailable. Refresh and try again.' as const,
-      };
-    }
-
-    const deadlineMs = budgets.runDeadlineSeconds * 1000;
-    const run = (
-      await tx
-        .insert(runs)
-        .values({
-          agentId,
-          configurationId,
-          input,
-          recipients,
-          actor,
-          status: 'queued',
-          result: { steps: [], actions: [], error: null },
-          expiresAt: new Date(Date.now() + deadlineMs),
-        })
-        .returning()
-    ).at(0);
-    if (!run) throw new Error('Run insert failed');
-
-    const job = await enqueueJob(tx, {
-      type: SIMULATION_JOB_TYPE,
-      payload: { runId: run.id, agentId, configurationId, actor },
-      idempotencyKey: `simulation:${run.id}`,
-      maxAttempts: 3,
-    });
-
-    await tx.update(runs).set({ jobId: job.id }).where(eq(runs.id, run.id));
-    return { runId: run.id, jobId: job.id };
+    return admitRun(tx, agent, { actor, configurationId, input, recipients, origin: 'playground' });
   });
 
-  if ('error' in result) return result;
+  if ('error' in result) return { error: result.error };
   return {
     message: 'Simulation queued. The worker will run it shortly.',
     runId: result.runId,
     jobId: result.jobId,
   };
+}
+
+/** Admit and enqueue a run while the caller holds the agent row lock. */
+export async function admitRun(
+  tx: Tx,
+  agent: typeof agents.$inferSelect,
+  {
+    actor,
+    configurationId,
+    input,
+    origin,
+    recipients = [],
+  }: {
+    actor: string;
+    configurationId: string;
+    input: string;
+    origin: typeof runs.$inferSelect.origin;
+    recipients?: string[];
+  },
+) {
+  const agentId = agent.id;
+  await expireStaleRuns(tx, agent);
+
+  const budgets = parseBudgets(agent.budgets);
+  const active = (
+    await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.agentId, agentId),
+          inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
+        ),
+      )
+  ).length;
+  if (active >= budgets.maxConcurrentRuns) {
+    return {
+      error: budgetViolationMessage('concurrency'),
+      waitForCapacity: true as const,
+    };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const counters = await tx.select().from(usageCounters).where(eq(usageCounters.agentId, agentId));
+  const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
+  const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
+  const snapshot: BudgetSnapshot = {
+    budgets,
+    day: {
+      spendMicros: day?.spendMicros ?? BigInt(0),
+      requests: day?.requests ?? 0,
+      outboundActions: day?.outboundActions ?? 0,
+    },
+    month: {
+      spendMicros: month?.spendMicros ?? BigInt(0),
+      requests: month?.requests ?? 0,
+      outboundActions: month?.outboundActions ?? 0,
+    },
+    activeRuns: active,
+  };
+  const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
+  if (violation && violation !== 'concurrency') {
+    return { error: budgetViolationMessage(violation) };
+  }
+
+  const config = (
+    await tx
+      .select()
+      .from(configurations)
+      .where(and(eq(configurations.id, configurationId), eq(configurations.agentId, agentId)))
+  ).at(0);
+  if (!config) {
+    return {
+      error: 'The configuration is unavailable. Refresh and try again.' as const,
+    };
+  }
+
+  const deadlineMs = budgets.runDeadlineSeconds * 1000;
+  const run = (
+    await tx
+      .insert(runs)
+      .values({
+        agentId,
+        configurationId,
+        input,
+        origin,
+        recipients,
+        actor,
+        status: 'queued',
+        result: { steps: [], actions: [], error: null },
+        expiresAt: new Date(Date.now() + deadlineMs),
+      })
+      .returning()
+  ).at(0);
+  if (!run) throw new Error('Run insert failed');
+
+  const job = await enqueueJob(tx, {
+    type: origin === 'email' ? EMAIL_DRAFT_JOB : SIMULATION_JOB_TYPE,
+    payload: { runId: run.id, agentId, configurationId, actor },
+    idempotencyKey: origin === 'email' ? `email.draft:${run.id}` : `simulation:${run.id}`,
+    maxAttempts: 3,
+  });
+
+  await tx.update(runs).set({ jobId: job.id }).where(eq(runs.id, run.id));
+  return { runId: run.id, jobId: job.id };
 }
 
 /** Queues then processes inline — used by persistence tests and local sync callers. */
@@ -432,12 +455,13 @@ async function processSimulationRun(
   inference: (key: string) => ModelCall = openRouterInference,
   externalSignal?: AbortSignal,
   claim?: SimulationJobClaim,
+  origin: typeof runs.$inferSelect.origin = 'playground',
 ) {
   const claimed = await db().transaction(async (tx) => {
     // Peek without locking so we can take the agent lock before the run lock
     // (same order as enqueueSimulation and persistLifecycle) and avoid deadlocks.
     const peek = (await tx.select().from(runs).where(eq(runs.id, runId))).at(0);
-    if (!peek) return null;
+    if (peek?.origin !== origin) return null;
     if (peek.status === 'completed' || peek.status === 'failed' || peek.status === 'interrupted') {
       return { skip: true as const, run: peek };
     }
@@ -461,6 +485,7 @@ async function processSimulationRun(
           .where(
             and(
               eq(jobs.id, claim.jobId),
+              eq(jobs.type, origin === 'email' ? EMAIL_DRAFT_JOB : SIMULATION_JOB_TYPE),
               eq(jobs.claimedBy, claim.workerId),
               eq(jobs.status, 'claimed'),
             ),
@@ -578,7 +603,8 @@ async function processSimulationRun(
     version: config.version,
     jobId: claim?.jobId,
     lifecycle: agent.lifecycle,
-    trigger: 'playground',
+    trigger: origin,
+    allowContentCapture: origin !== 'email',
   });
   const failureCorrelation = (extra: { stage?: 'evaluator' | 'main' } = {}) => ({
     runId: run.id,
@@ -742,6 +768,7 @@ async function processSimulationRun(
             if (!updated.length) throw new BudgetError('cancelled');
           },
           {
+            origin,
             maxToolSteps: budgets.maxToolStepsPerRun,
             signal,
             initial: checkpointed,
@@ -752,7 +779,10 @@ async function processSimulationRun(
             toolCalls: resources.toolCalls,
             retrieveKnowledge: agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
               ? async (requestSignal) => {
-                  const query = run.input.slice(0, 2000);
+                  const query = (
+                    origin === 'email' ? emailKnowledgeQuery(run.input) : run.input
+                  ).slice(0, 2000);
+                  if (!query) return { status: 'deny', reason: 'No text to search.', hits: [] };
                   const args = { query, limit: 4 };
                   const slot = consumeKnowledgeToolStep(
                     resources.toolSteps,
@@ -866,6 +896,7 @@ async function processSimulationRun(
               }
             },
             onActions: async (actions, partial, stage) => {
+              if (origin === 'email') return [];
               await assertOwned(run.id, executionToken);
               // Tool invocations are gated separately from paid inference stages
               // (evaluator/main). Do not add steps.length — that double-counts.
@@ -991,13 +1022,20 @@ async function processSimulationRun(
                 result: traceResult,
                 deferReason: isTrustedBudgetMessage(result.error) ? result.error : null,
               })
-            : finishSimulationWithApprovals(
-                run,
-                executionToken,
-                traceResult,
-                config.approvalSettings?.approvalOnReject,
-                claim,
-              ),
+            : origin === 'email'
+              ? updateIfOwned(run.id, executionToken, {
+                  status: 'completed',
+                  finishedAt: new Date(),
+                  result: traceResult,
+                  deferReason: null,
+                })
+              : finishSimulationWithApprovals(
+                  run,
+                  executionToken,
+                  traceResult,
+                  config.approvalSettings?.approvalOnReject,
+                  claim,
+                ),
         );
         if (!owned.length) return;
       } catch (error) {
@@ -1259,6 +1297,17 @@ export async function processSimulationJob(
   await processSimulationRun(runId, inference, signal, claim);
 }
 
+export async function processEmailDraftJob(
+  payload: Record<string, unknown>,
+  inference: (key: string) => ModelCall = openRouterInference,
+  signal?: AbortSignal,
+  claim?: SimulationJobClaim,
+) {
+  const runId = typeof payload.runId === 'string' ? payload.runId : null;
+  if (!runId) throw new Error('email.draft payload missing runId');
+  await processSimulationRun(runId, inference, signal, claim, 'email');
+}
+
 function exhaustedJobMessage(reason: string) {
   const detail = reason.trim().slice(0, 200);
   return detail
@@ -1308,7 +1357,7 @@ export async function finalizeOrphanedDeadSimulationRuns() {
     FROM jobs AS j
     WHERE r.job_id = j.id
       AND j.status = 'dead'
-      AND j.type = ${SIMULATION_JOB_TYPE}
+      AND j.type IN (${SIMULATION_JOB_TYPE}, ${EMAIL_DRAFT_JOB})
       AND r.status IN ('queued', 'running')
   `);
 }
@@ -1335,7 +1384,7 @@ export async function finalizeOrphanedCompletedSimulationRuns() {
     FROM jobs AS j
     WHERE r.job_id = j.id
       AND j.status = 'completed'
-      AND j.type = ${SIMULATION_JOB_TYPE}
+      AND j.type IN (${SIMULATION_JOB_TYPE}, ${EMAIL_DRAFT_JOB})
       AND r.status IN ('queued', 'running')
   `);
 }

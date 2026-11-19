@@ -190,9 +190,12 @@ export async function resetTestTelemetry() {
   }
 }
 
-async function aiSdkTelemetry(functionId: string): Promise<TelemetryOptions | undefined> {
+async function aiSdkTelemetry(
+  functionId: string,
+  allowContentCapture: boolean,
+): Promise<TelemetryOptions | undefined> {
   if (!isLangfuseEnabled()) return { isEnabled: false };
-  const captureContent = observability().langfuse?.captureContent === true;
+  const captureContent = allowContentCapture && observability().langfuse?.captureContent === true;
   try {
     const { LangfuseVercelAiSdkIntegration } = await import('@langfuse/vercel-ai-sdk');
     const tracer = await getTracer();
@@ -248,6 +251,7 @@ export interface RunTelemetryContext {
   jobId?: string;
   lifecycle?: string;
   trigger?: string;
+  allowContentCapture?: boolean;
 }
 
 export function createRunTelemetry(run: RunTelemetryContext) {
@@ -393,7 +397,7 @@ export function createRunTelemetry(run: RunTelemetryContext) {
         runContext(),
       );
       try {
-        const telemetry = await aiSdkTelemetry(`orbit.${stage}`);
+        const telemetry = await aiSdkTelemetry(`orbit.${stage}`, run.allowContentCapture !== false);
         const response = await context.with(
           span ? trace.setSpan(context.active(), span) : context.active(),
           () => call({ ...request, telemetry }),
