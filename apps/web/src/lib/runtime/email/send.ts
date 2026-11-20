@@ -118,31 +118,9 @@ export async function processEmailSendJob(
     return;
   }
 
-  const mailbox = (
-    await db().select().from(emailMailboxes).where(eq(emailMailboxes.agentId, outbound.agentId))
-  ).at(0);
-  if (!mailbox?.enabled) {
-    await db().transaction(async (tx) => {
-      await markOutboundStatus(tx, outbound.id, {
-        status: 'blocked',
-        reason: 'Agent mailbox is disabled.',
-        completedAt: new Date(),
-      });
-    });
-    return;
-  }
-
+  // Mailbox enablement and From address are revalidated under the lifecycle agent
+  // lock immediately before transport.send so a disable race cannot slip through.
   const domain = options.sendingDomain ?? sendingEmailDomain(process.env.RESEND_SENDING_DOMAIN);
-  if (!sendingDomainMatches(mailbox.address, domain)) {
-    await db().transaction(async (tx) => {
-      await markOutboundStatus(tx, outbound.id, {
-        status: 'blocked',
-        reason: 'Mailbox address is not on the configured sending domain.',
-        completedAt: new Date(),
-      });
-    });
-    return;
-  }
 
   const to = extractEmailAddress(message.sender);
   if (!to) {
@@ -207,20 +185,42 @@ export async function processEmailSendJob(
     if (!row) return null;
     if (row.status === 'sent') return null;
     if (row.status === 'blocked' || row.status === 'failed') return null;
-    if (row.status !== 'sending') {
+    // Lifecycle may have moved the row; do not invent a terminal state here.
+    if (row.status !== 'sending') return null;
+
+    const jobRow = (await tx.select().from(jobs).where(eq(jobs.id, job.id)).for('update')).at(0);
+    if (jobRow?.status === 'cancelled') {
       await markOutboundStatus(tx, outbound.id, {
         status: 'blocked',
-        reason: 'Outbound send was cancelled before dispatch.',
+        reason: 'Outbound send cancelled before dispatch.',
         completedAt: new Date(),
       });
       return null;
     }
-
-    const jobRow = (await tx.select().from(jobs).where(eq(jobs.id, job.id)).for('update')).at(0);
+    // Lost or stolen lease: leave outbound retryable for the next claim.
     if (jobRow?.status !== 'claimed' || !job.claimedBy || jobRow.claimedBy !== job.claimedBy) {
+      return null;
+    }
+
+    const liveMailbox = (
+      await tx
+        .select()
+        .from(emailMailboxes)
+        .where(eq(emailMailboxes.agentId, outbound.agentId))
+        .for('update')
+    ).at(0);
+    if (!liveMailbox?.enabled) {
       await markOutboundStatus(tx, outbound.id, {
         status: 'blocked',
-        reason: 'Outbound send cancelled before dispatch.',
+        reason: 'Agent mailbox is disabled.',
+        completedAt: new Date(),
+      });
+      return null;
+    }
+    if (!sendingDomainMatches(liveMailbox.address, domain)) {
+      await markOutboundStatus(tx, outbound.id, {
+        status: 'blocked',
+        reason: 'Mailbox address is not on the configured sending domain.',
         completedAt: new Date(),
       });
       return null;
@@ -277,7 +277,7 @@ export async function processEmailSendJob(
     signal.throwIfAborted();
     const outcome = await activeTransport.send(
       {
-        from: mailbox.address,
+        from: liveMailbox.address,
         to,
         subject: replySubject(message.subject),
         text: body,

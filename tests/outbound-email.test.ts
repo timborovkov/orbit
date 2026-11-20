@@ -573,6 +573,64 @@ test('cancelled job ownership is rechecked before provider send', async () => {
   expect(String(outbound?.reason)).toContain('cancelled');
 });
 
+test('lost job lease leaves outbound retryable instead of blocked', async () => {
+  await releasePause();
+  const agent = await createAgent('live');
+  const seeded = await seedDraft(agent.id, agent.version);
+  expect(await reviewProposedAction(admin, agent.id, seeded.intentId, 'approved')).toMatchObject({
+    message: expect.stringContaining('queued'),
+  });
+
+  const claimed = await claimJobs({ workerId, limit: 1, types: [EMAIL_SEND_JOB] });
+  expect(claimed).toHaveLength(1);
+  expect(claimed[0]!.payload.agentId).toBe(agent.id);
+  // Lease recovery returned the job to pending; a stale handler must not terminal-block outbound.
+  await sql`UPDATE jobs SET status='pending', claimed_by=null, claim_expires_at=null, claimed_at=null, available_at=now() WHERE id=${claimed[0]!.id}`;
+  await sql`UPDATE outbound_actions SET status='sending', reason=null, dispatched_at=now() WHERE intent_id=${seeded.intentId}`;
+
+  const transport = createStubEmailTransport();
+  await processEmailSendJob(claimed[0]!, signal, transport);
+  expect(transport.calls).toHaveLength(0);
+  const [outbound] =
+    await sql`SELECT status, reason FROM outbound_actions WHERE intent_id=${seeded.intentId}`;
+  expect(outbound?.status).toBe('sending');
+  expect(outbound?.reason).toBeNull();
+
+  // A fresh claim can still send while outbound remains non-terminal.
+  const retried = await claimJobs({ workerId, limit: 5, types: [EMAIL_SEND_JOB] });
+  const mine = retried.find((job) => job.id === claimed[0]!.id);
+  expect(mine).toBeTruthy();
+  await processEmailSendJob(mine!, signal, transport);
+  await completeJob(mine!.id, workerId);
+  expect(transport.calls).toHaveLength(1);
+  const [sent] = await sql`SELECT status FROM outbound_actions WHERE intent_id=${seeded.intentId}`;
+  expect(sent?.status).toBe('sent');
+});
+
+test('mailbox disabled under the dispatch lock blocks send', async () => {
+  await releasePause();
+  const agent = await createAgent('live');
+  const seeded = await seedDraft(agent.id, agent.version);
+  expect(await reviewProposedAction(admin, agent.id, seeded.intentId, 'approved')).toMatchObject({
+    message: expect.stringContaining('queued'),
+  });
+
+  const claimed = await claimJobs({ workerId, limit: 5, types: [EMAIL_SEND_JOB] });
+  const mine = claimed.find((job) => job.payload.agentId === agent.id);
+  expect(mine).toBeTruthy();
+  expect(await setEmailEnabled(admin, agent.id, false)).toMatchObject({
+    message: 'Inbound email disabled.',
+  });
+
+  const transport = createStubEmailTransport();
+  await processEmailSendJob(mine!, signal, transport);
+  expect(transport.calls).toHaveLength(0);
+  const [outbound] =
+    await sql`SELECT status, reason FROM outbound_actions WHERE intent_id=${seeded.intentId}`;
+  expect(outbound?.status).toBe('blocked');
+  expect(String(outbound?.reason)).toContain('mailbox');
+});
+
 test('reconcileCancelledOutboundJobs repairs stranded queued rows after cancelled jobs', async () => {
   await releasePause();
   const agent = await createAgent('live');
