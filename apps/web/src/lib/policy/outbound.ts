@@ -1,5 +1,5 @@
 import { externalWritesPermitted, type LifecycleState } from '@/lib/lifecycle';
-import { isReplayExecution, type ExecutionContext } from '@/lib/policy/execution-context';
+import { type ExecutionContext, isReplayExecution } from '@/lib/policy/execution-context';
 
 /**
  * Final structural gate for any external write adapter.

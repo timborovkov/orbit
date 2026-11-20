@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { expect, test, type Page } from '@playwright/test';
+
+import { expect, type Page, test } from '@playwright/test';
 import postgres from 'postgres';
 
 import { mcpFixtureAuthorization, startMcpFixture } from './fixtures/mcp-server';

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   cosineSimilarity,
   cosineSimilarityFromDistance,
-} from '../apps/web/src/lib/knowledge/similarity';
+} from '../../apps/web/src/lib/knowledge/similarity';
 
 describe('cosineSimilarityFromDistance', () => {
   test('converts pgvector cosine distance to similarity', () => {

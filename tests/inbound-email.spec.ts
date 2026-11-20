@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import postgres from 'postgres';

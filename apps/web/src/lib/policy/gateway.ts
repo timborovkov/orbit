@@ -4,20 +4,20 @@ import { notifyApprovalPending } from '@/lib/approvals/notify';
 import { actionNeedsApproval, mergeApprovalTools } from '@/lib/approvals/rules';
 import {
   BudgetError,
+  type BudgetSnapshot,
+  type BudgetViolation,
   budgetViolationMessage,
   checkOutboundBudgets,
   checkRequestBudgets,
   hasSpendCap,
   parseBudgets,
-  type BudgetSnapshot,
-  type BudgetViolation,
 } from '@/lib/budgets';
-import { db, type Db, type Tx } from '@/lib/db';
+import { type Db, db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canAcceptBackgroundWork, type LifecycleState } from '@/lib/lifecycle';
 import { mcpToolId, mcpToolIsReadOnly, normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
 import { recipientConsentFailure } from '@/lib/policy/consent';
-import { executionContextForOrigin, type ExecutionContext } from '@/lib/policy/execution-context';
+import { type ExecutionContext, executionContextForOrigin } from '@/lib/policy/execution-context';
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
@@ -29,10 +29,10 @@ import {
   configurations,
   controls,
   mcpConnections,
+  type McpTransport,
   policyDecisions,
   runs,
   usageCounters,
-  type McpTransport,
 } from '@/lib/schema';
 
 export type PolicyDecision = 'allow' | 'deny' | 'needs-approval' | 'suppressed';

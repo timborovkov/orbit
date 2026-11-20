@@ -7,12 +7,12 @@ import {
   PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
   playgroundAttachmentRejection,
   playgroundEffectiveConfigurationId,
-} from '../apps/web/src/lib/runtime/playground-ui';
+} from '../../apps/web/src/lib/runtime/playground-ui';
 import {
   isExpiredSimulationRun,
   isTerminalSimulationStatus,
   watchSimulationRunWithLookup,
-} from '../apps/web/src/lib/runtime/simulation-watch';
+} from '../../apps/web/src/lib/runtime/simulation-watch';
 
 describe('playground attachment gate', () => {
   test('allows text-only submissions', () => {

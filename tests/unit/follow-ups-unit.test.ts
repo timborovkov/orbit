@@ -12,10 +12,10 @@ import {
   FOLLOW_UP_JOB_TYPE,
   FOLLOW_UP_LIFECYCLE_POLICY,
   followUpJobPayloadSchema,
+  type FollowUpStatus,
   followUpStatusLabels,
   offsetBearingDueAtSchema,
   scheduleFollowUpInputSchema,
-  type FollowUpStatus,
 } from '@/lib/runtime/follow-ups/types';
 
 describe('follow-up schemas and constants', () => {

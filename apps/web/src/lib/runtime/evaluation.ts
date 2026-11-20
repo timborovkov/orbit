@@ -1,10 +1,10 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import {
+  type BudgetSnapshot,
   budgetViolationMessage,
   checkRequestBudgets,
   parseBudgets,
-  type BudgetSnapshot,
 } from '@/lib/budgets';
 import { db, type Tx } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
@@ -22,11 +22,11 @@ import {
   configurations,
   emailMessages,
   evaluationCases,
+  type EvaluationCaseSource,
   evaluationComparisons,
   jobs,
   runs,
   usageCounters,
-  type EvaluationCaseSource,
 } from '@/lib/schema';
 
 function behaviorForCaseSource(sourceKind: EvaluationCaseSource): SimulationBehavior {

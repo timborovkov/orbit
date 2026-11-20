@@ -1,6 +1,7 @@
 'use client';
 
-import { useDeferredValue, useRef, useState, type ComponentProps } from 'react';
+import { type ComponentProps, useDeferredValue, useRef, useState } from 'react';
+
 import { Bold, Code, Heading2, Italic, Link2, List, ListOrdered, Quote } from 'lucide-react';
 import { Streamdown } from 'streamdown';
 

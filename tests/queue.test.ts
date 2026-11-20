@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import { afterAll, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 
 import { closeDb, db, sqlClient } from '@/lib/db';
 import {

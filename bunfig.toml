@@ -1,2 +1,46 @@
 [test]
 preload = ["./tests/shim-server-only.ts"]
+
+[fmt.sortImports]
+groups = [
+  "builtin",
+  "react",
+  "next",
+  "external",
+  "internal",
+  ["parent", "sibling", "index"],
+]
+customGroups = [
+  { groupName = "react", elementNamePattern = ["react", "react-dom", "react-dom/**"] },
+  { groupName = "next", elementNamePattern = ["next", "next/**"] },
+]
+internalPattern = ["@/"]
+newlinesBetween = true
+
+[lint]
+typeAware = true
+ignorePatterns = ["**/.next/**", "**/node_modules/**", "**/next-env.d.ts"]
+
+[lint.rules]
+eqeqeq = ["error", "always"]
+"no-console" = ["warn", { allow = ["warn", "error"] }]
+"no-restricted-imports" = ["error", { patterns = [
+  { group = ["./*", "../*"], message = "Use @/* for application imports." },
+] }]
+"@typescript-eslint/consistent-type-imports" = ["error", { prefer = "type-imports" }]
+"@typescript-eslint/no-misused-promises" = ["error", { checksVoidReturn = { attributes = false } }]
+"@typescript-eslint/restrict-template-expressions" = [
+  "error",
+  { allowNumber = true, allowBoolean = true },
+]
+"@typescript-eslint/no-unused-vars" = ["error", {
+  vars = "all",
+  varsIgnorePattern = "^_",
+  args = "after-used",
+  argsIgnorePattern = "^_",
+  enableAutofixRemoval = { imports = true },
+}]
+
+[[lint.overrides]]
+files = ["apps/worker/**/*.{ts,tsx}"]
+rules = { "no-console" = "off" }

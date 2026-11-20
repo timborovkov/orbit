@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, type ComponentProps, type HTMLAttributes } from 'react';
+import { type ComponentProps, type HTMLAttributes, useRef } from 'react';
 
 import {
   InputGroup,

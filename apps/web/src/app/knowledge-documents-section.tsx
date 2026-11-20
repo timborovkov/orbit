@@ -1,6 +1,7 @@
 'use client';
 
 import { type RefObject } from 'react';
+
 import { LoaderCircle, Upload } from 'lucide-react';
 
 import { KnowledgeDocumentList, KnowledgeDropzone } from '@/app/knowledge-document-list';

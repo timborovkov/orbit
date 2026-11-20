@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import { afterAll, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+
 import postgres from 'postgres';
 
-import { budgetDefaults, type AgentBudgets } from '@/lib/budgets';
+import { type AgentBudgets, budgetDefaults } from '@/lib/budgets';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { createPlaygroundStreamProgress, playgroundChunksFromResult } from '@/lib/runtime/chat-ui';
 import { enqueueSimulation, processSimulationJob } from '@/lib/runtime/execute';

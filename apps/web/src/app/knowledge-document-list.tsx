@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
+
 import { BookOpen, FileText, LoaderCircle, MoreHorizontal, RefreshCw } from 'lucide-react';
 
 import {
@@ -8,10 +9,10 @@ import {
   formatKnowledgeBytes,
   KNOWLEDGE_ACCEPT,
   knowledgeChunkLabel,
+  type KnowledgeDoc,
   knowledgeKindLabels,
   knowledgeStatusBadgeVariant,
   knowledgeStatusLabels,
-  type KnowledgeDoc,
 } from '@/app/knowledge-shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

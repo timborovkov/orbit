@@ -1,4 +1,4 @@
-import { budgetDefaults, type AgentBudgets } from '@/lib/budgets';
+import { type AgentBudgets, budgetDefaults } from '@/lib/budgets';
 import { KNOWLEDGE_SEARCH_TOOL, type KnowledgeContentKind } from '@/lib/knowledge/types';
 import type { LifecycleState } from '@/lib/lifecycle';
 import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';

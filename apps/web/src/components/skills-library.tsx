@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
+
 import { MoreHorizontal, Pencil, Plus } from 'lucide-react';
 
 import { removeSkill } from '@/actions/skills';

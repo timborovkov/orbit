@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { normalizePicture } from '@/lib/storage/pictures';
 
 const png = new Uint8Array(
-  await Bun.file(new URL('./fixtures/profile.png', import.meta.url)).arrayBuffer(),
+  await Bun.file(new URL('../fixtures/profile.png', import.meta.url)).arrayBuffer(),
 );
 test('pictures are decoded, squared and re-encoded as WebP', async () => {
   const output = await normalizePicture(png);

@@ -1,11 +1,11 @@
 import { and, eq, sql } from 'drizzle-orm';
 
-import { db, sqlClient, type Db, type Tx } from '@/lib/db';
+import { type Db, db, sqlClient, type Tx } from '@/lib/db';
 import {
   backoffMs,
+  type ClaimOptions,
   DEFAULT_LEASE_MS,
   DEFAULT_MAX_ATTEMPTS,
-  type ClaimOptions,
   type EnqueueInput,
   type JobRecord,
 } from '@/lib/queue/types';

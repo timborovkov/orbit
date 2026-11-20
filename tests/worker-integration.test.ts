@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
 import { afterAll, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+
 import postgres from 'postgres';
 
 import { budgetDefaults, BudgetError, budgetViolationMessage } from '@/lib/budgets';

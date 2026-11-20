@@ -5,8 +5,8 @@ import { WorkspaceForm } from '@/app/workspace-form';
 import {
   lifecycleDescriptions,
   lifecycleLabels,
-  lifecycleStates,
   type LifecycleState,
+  lifecycleStates,
 } from '@/lib/lifecycle';
 import { cn } from '@/lib/utils';
 

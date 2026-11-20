@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, type HTMLAttributes } from 'react';
+import { type HTMLAttributes, useEffect, useState } from 'react';
+
 import type { BundledLanguage } from 'shiki';
 
 import { highlightCode } from '@/components/ai-elements/code-block-highlight';

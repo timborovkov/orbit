@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ComponentProps } from 'react';
+import { type ComponentProps, useState } from 'react';
 
 import { WorkspaceForm } from '@/app/workspace-form';
 import { Checkbox } from '@/components/ui/checkbox';

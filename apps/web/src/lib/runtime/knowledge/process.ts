@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { isBudgetError } from '@/lib/budgets';
@@ -7,11 +8,11 @@ import { chunkExtractedText } from '@/lib/knowledge/chunk';
 import { extractKnowledgeDocument } from '@/lib/knowledge/extract';
 import { KNOWLEDGE_CHUNK_INSERT_BATCH, KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import {
+  type EmbedManyFn,
   knowledgeEmbeddingDimensions,
   knowledgeEmbeddingModelId,
   knowledgeEmbeddingReuseKey,
   validateKnowledgeVector,
-  type EmbedManyFn,
 } from '@/lib/runtime/knowledge/embed';
 import { knowledgeChunks, knowledgeDocuments } from '@/lib/schema';
 import { getObject } from '@/lib/storage/objects';

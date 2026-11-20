@@ -7,18 +7,18 @@ import {
   connectMcpClient,
   decodeMcpHeaders,
   loadMcpToolsForAgent,
+  type McpConnectionConfig,
   mcpHeadersFromRows,
   mcpToolAlias,
   sameMcpEndpoint,
-  type McpConnectionConfig,
 } from '@/lib/runtime/mcp';
 import { encryptSecret } from '@/lib/runtime/secrets';
 import {
   createLoadSkillTool,
   formatSkillCatalog,
   LOAD_SKILL_TOOL,
-  skillVersionsAttached,
   type SkillSummary,
+  skillVersionsAttached,
 } from '@/lib/runtime/skills';
 import { createToolStepGate } from '@/lib/runtime/tool-steps';
 

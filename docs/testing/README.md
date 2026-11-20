@@ -31,7 +31,7 @@ repo-wide validation; do not routinely duplicate it locally.
   called out.
 - Fix failures caused by the change, then rerun the affected checks. Report
   unrelated failures separately with evidence.
-- GitHub's static gate runs `bun run validate` (Prettier, TypeScript, ESLint,
+- GitHub's static gate runs `bun run validate` (`bun fmt`, `bun check`, `bun lint`,
   Knip, React Doctor), `bun run build`, and `bun run test:unit`. React Doctor must
   show score 100 and no issues; an exit without a score is not proof of 100.
 

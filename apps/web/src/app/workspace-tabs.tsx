@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+
 import { useSearchParams } from 'next/navigation';
 
 import {
@@ -113,7 +114,7 @@ export function WorkspaceTabs({
                   selectTab(item.id);
                 }}
                 onKeyDown={(event) => {
-                  let next = index;
+                  let next: number;
                   if (event.key === 'ArrowRight') next = (index + 1) % items.length;
                   else if (event.key === 'ArrowLeft')
                     next = (index - 1 + items.length) % items.length;

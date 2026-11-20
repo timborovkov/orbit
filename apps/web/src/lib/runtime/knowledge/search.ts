@@ -3,10 +3,10 @@ import { mergeHybridRanks } from '@/lib/knowledge/rank';
 import { cosineSimilarityFromDistance } from '@/lib/knowledge/similarity';
 import type { KnowledgeSearchResult, RankedKnowledgeHit } from '@/lib/knowledge/types';
 import {
+  type EmbedOneFn,
   knowledgeEmbeddingDimensions,
   knowledgeEmbeddingModelId,
   validateKnowledgeVector,
-  type EmbedOneFn,
 } from '@/lib/runtime/knowledge/embed';
 
 function vectorLiteral(values: number[]) {

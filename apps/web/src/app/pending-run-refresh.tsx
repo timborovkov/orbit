@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+
 import { useRouter } from 'next/navigation';
 
 /** Browsers clamp setTimeout delays above ~24.8 days; re-schedule after that. */

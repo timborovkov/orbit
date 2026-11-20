@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
+
 import { Cpu, Fingerprint, Radar, SlidersHorizontal } from 'lucide-react';
 
 import { WorkspaceField } from '@/app/workspace-field';
-import { configFields, type AgentConfig } from '@/lib/runtime/config';
+import { type AgentConfig, configFields } from '@/lib/runtime/config';
 
 const shortFields = new Set(['name', 'role', 'mainModel', 'evaluatorModel', 'xSearchQuery']);
 const requiredFields = new Set(['name', 'mainModel', 'evaluatorModel']);

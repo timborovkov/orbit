@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
+
 import { LogOut, Menu } from 'lucide-react';
 
 import { logout } from '@/actions/auth';

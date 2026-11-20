@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
+
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 
 import {
   BudgetError,
+  type BudgetSnapshot,
   budgetViolationMessage,
   checkRequestBudgets,
   checkRunDeadline,
@@ -11,7 +13,6 @@ import {
   isBudgetError,
   isTrustedBudgetMessage,
   parseBudgets,
-  type BudgetSnapshot,
 } from '@/lib/budgets';
 import { db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
@@ -49,8 +50,8 @@ import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { prepareRunTools } from '@/lib/runtime/resources';
 import {
   hasSimulationProgress,
-  simulate,
   type ModelCall,
+  simulate,
   type SimulationResult,
 } from '@/lib/runtime/simulation';
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
@@ -58,12 +59,12 @@ import { nativeTools } from '@/lib/runtime/tools/native';
 import {
   actionIntents,
   agents,
+  type ApprovalOnReject,
   configurations,
   credentials,
   jobs,
   runs,
   usageCounters,
-  type ApprovalOnReject,
 } from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
