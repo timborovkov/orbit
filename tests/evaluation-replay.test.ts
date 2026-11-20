@@ -12,6 +12,7 @@ import {
   finalizeCancelledEvaluationComparisons,
   finalizeExhaustedEvaluationReplayJob,
   processEvaluationReplayJob,
+  reconcileDeadEvaluationReplayJobs,
   saveEvaluationCase,
   startEvaluationComparison,
 } from '@/lib/runtime/evaluation';
@@ -544,6 +545,79 @@ test('exhausted evaluation retries finalize linked non-terminal runs', async () 
   `;
   expect(run.status).toBe('failed');
   expect(run.defer_reason).toContain('retries exhausted');
+});
+
+test('reconcile finalizes open comparisons linked to dead evaluation jobs', async () => {
+  const { id, v1, v2 } = await seedAgent();
+  const saved = await saveEvaluationCase({
+    actor: admin,
+    agentId: id,
+    title: 'Dead-letter reconcile',
+    sourceKind: 'playground',
+    caseInput: 'Orphaned after finalize blip.',
+  });
+  expect('caseId' in saved).toBe(true);
+  if (!('caseId' in saved)) return;
+
+  const started = await startEvaluationComparison({
+    actor: admin,
+    agentId: id,
+    caseId: saved.caseId,
+    leftConfigurationId: v1.id,
+    rightConfigurationId: v2.id,
+  });
+  expect('comparisonId' in started).toBe(true);
+  if (!('comparisonId' in started)) return;
+
+  const [leftRun] = await sql`
+    INSERT INTO simulation_runs(
+      agent_id, configuration_id, origin, input, status, result, actor, expires_at
+    )
+    VALUES (
+      ${id},
+      ${v1.id},
+      'replay',
+      'Orphaned after finalize blip.',
+      'running',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      ${admin},
+      now() + interval '10 minutes'
+    )
+    RETURNING id
+  `;
+  await sql`
+    UPDATE evaluation_comparisons
+    SET status='running', left_run_id=${leftRun.id}
+    WHERE id=${started.comparisonId}
+  `;
+  // Simulate worker exit after dead-lettering the job but before onDeadLetter finalize.
+  await sql`
+    UPDATE jobs
+    SET status='dead', finished_at=now(), last_error='lease expired after max attempts',
+        claimed_by=null, claimed_at=null, claim_expires_at=null
+    WHERE id=${started.jobId}
+  `;
+
+  await reconcileDeadEvaluationReplayJobs();
+
+  const [comparison] = await sql`
+    SELECT status, error FROM evaluation_comparisons WHERE id=${started.comparisonId}
+  `;
+  expect(comparison.status).toBe('failed');
+  expect(String(comparison.error)).toContain('retries exhausted');
+
+  const [run] = await sql`
+    SELECT status, defer_reason FROM simulation_runs WHERE id=${leftRun.id}
+  `;
+  expect(run.status).toBe('failed');
+  expect(String(run.defer_reason)).toContain('retries exhausted');
+
+  // Idempotent on a second tick.
+  await reconcileDeadEvaluationReplayJobs();
+  const [again] = await sql`
+    SELECT status FROM evaluation_comparisons WHERE id=${started.comparisonId}
+  `;
+  expect(again.status).toBe('failed');
 });
 
 test('stop during claimed replay admission cancels without deadlock', async () => {

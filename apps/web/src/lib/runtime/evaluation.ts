@@ -668,3 +668,32 @@ export async function finalizeExhaustedEvaluationReplayJob(
     }
   });
 }
+
+/**
+ * Durable reconcile for dead evaluation.replay jobs whose onDeadLetter callback failed
+ * (or never ran). Replay side runs have no jobId, so simulation orphan reconcile cannot
+ * free their concurrency — finalize open comparisons (and linked side runs) here.
+ */
+export async function reconcileDeadEvaluationReplayJobs() {
+  const orphaned = await db()
+    .select({
+      comparisonId: evaluationComparisons.id,
+      lastError: jobs.lastError,
+    })
+    .from(evaluationComparisons)
+    .innerJoin(jobs, eq(evaluationComparisons.jobId, jobs.id))
+    .where(
+      and(
+        eq(jobs.type, EVALUATION_REPLAY_JOB),
+        eq(jobs.status, 'dead'),
+        inArray(evaluationComparisons.status, ['queued', 'running']),
+      ),
+    );
+
+  for (const row of orphaned) {
+    await finalizeExhaustedEvaluationReplayJob(
+      { comparisonId: row.comparisonId },
+      row.lastError?.trim() ?? 'reconciled after dead-letter callback failure',
+    );
+  }
+}

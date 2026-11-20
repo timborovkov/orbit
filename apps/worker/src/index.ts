@@ -14,6 +14,7 @@ import {
   EVALUATION_REPLAY_JOB,
   finalizeExhaustedEvaluationReplayJob,
   processEvaluationReplayJob,
+  reconcileDeadEvaluationReplayJobs,
 } from '@/lib/runtime/evaluation';
 import {
   finalizeExhaustedSimulationJob,
@@ -139,6 +140,7 @@ const worker = startJobWorker({
   reconcileDeadLetters: async () => {
     await Promise.all([
       reconcileOrphanedSimulationRuns(),
+      reconcileDeadEvaluationReplayJobs(),
       reconcileDeadKnowledgeJobs(),
       expireStaleApprovals(),
       reconcileSuspendedApprovals(),
