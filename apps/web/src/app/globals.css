@@ -1893,6 +1893,7 @@ fieldset[aria-disabled='true'] textarea {
   padding-inline-end: 4px;
 }
 .knowledge-inspector-query [data-slot='button'] {
+  margin-inline-end: 0;
   min-height: 2rem;
   padding-block: 0;
 }

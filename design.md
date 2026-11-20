@@ -365,7 +365,9 @@ Support filtering by agent or run, and cap bulk selection at 50.
 Review the console as an operational tool. Use the task-appropriate
 Impeccable, Emil Design Engineering, Better Interface or focused design
 workflow. Prefer familiar controls, clear labels, short task paths and
-behavior that the running application can demonstrate.
+behavior that the running application can demonstrate. Check formatting,
+undo, preview, saving from Preview and focus return with the Skills browser
+regression when changing the editor.
 
 Use seeded local data for screenshots and a disposable test database for
 browser integration. Check Light and Dark at desktop, tablet and phone

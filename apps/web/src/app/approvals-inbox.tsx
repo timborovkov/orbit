@@ -151,16 +151,18 @@ function PendingCard({
             <AgeWithTooltip value={item.createdAt} renderedAt={renderedAt} />
           </div>
           <div className="approvals-card-actions">
-            <Button
-              type="button"
-              size="sm"
-              disabled={pendingUi}
-              onClick={() => {
-                onReview('approved', editing ? draft : undefined);
-              }}
-            >
-              Approve
-            </Button>
+            {!editing && (
+              <Button
+                type="button"
+                size="sm"
+                disabled={pendingUi}
+                onClick={() => {
+                  onReview('approved');
+                }}
+              >
+                Approve
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
