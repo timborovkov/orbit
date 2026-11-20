@@ -247,10 +247,11 @@ Left, Right, Home and End support above 600px and a full-width Select at
 
 ### Configuration and identity
 
-Use one editor and one save bar. Identity, Behaviour and Models each expose
-one field group. The section navigator is 192px wide and reduces to 156px
-at 900px and narrower. At 600px and narrower it becomes a horizontal row
-and identity fields stack.
+Use one editor and one save bar. Identity, Behaviour, Discovery and Models
+each expose one field group. Discovery holds the admin-only X search query
+(one per agent); blank disables polling. The section navigator is 192px wide
+and reduces to 156px at 900px and narrower. At 600px and narrower it becomes
+a horizontal row and identity fields stack.
 
 Each configuration save creates an immutable version. Keep unsaved values
 on conflicts. After saving, Playground defaults to the newest version.
@@ -273,6 +274,11 @@ screens, and stack them on phones. Keep the empty state compact so the
 text composer is easy to reach. Explain that model usage can incur charges
 and that the simulation does not post or send anything. Use the same
 recipient IDs as the consent records.
+
+The History tab is the agent activity timeline: playground simulations and
+X discovery evaluations. Label each entry by origin. Discovery rows show
+evaluator reasoning and proposed actions; shadow mode keeps proposals
+recorded and never sent.
 
 Show queued, running, awaiting approval, completed, failed and interrupted
 states from persisted records. Stop watching explains that inference can
