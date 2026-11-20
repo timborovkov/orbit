@@ -4,6 +4,7 @@ import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
 import { closeDb, db } from '@/lib/db';
+import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
 import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import {
@@ -259,11 +260,11 @@ test('retry reuses each side run instead of admitting duplicates', async () => {
   expect(first.left_run_id).toBeTruthy();
   expect(first.right_run_id).toBeTruthy();
 
-  // Simulate a retryable failure after the left side finished: mark the comparison and
-  // right run failed, then re-enter the worker handler.
+  // Simulate a retryable failure after the left side finished: keep the comparison
+  // running (terminal failed is cancel/exhaust only), fail the right run, then re-enter.
   await sql`
     UPDATE evaluation_comparisons
-    SET status='failed', error='infrastructure blip', finished_at=now()
+    SET status='running', error='infrastructure blip', finished_at=null
     WHERE id=${started.comparisonId}
   `;
   await sql`
@@ -543,4 +544,80 @@ test('exhausted evaluation retries finalize linked non-terminal runs', async () 
   `;
   expect(run.status).toBe('failed');
   expect(run.defer_reason).toContain('retries exhausted');
+});
+
+test('stop during claimed replay admission cancels without deadlock', async () => {
+  const { id, v1, v2 } = await seedAgent();
+  const saved = await saveEvaluationCase({
+    actor: admin,
+    agentId: id,
+    title: 'Stop during admit',
+    sourceKind: 'playground',
+    caseInput: 'Race stop against admission.',
+  });
+  expect('caseId' in saved).toBe(true);
+  if (!('caseId' in saved)) return;
+
+  const started = await startEvaluationComparison({
+    actor: admin,
+    agentId: id,
+    caseId: saved.caseId,
+    leftConfigurationId: v1.id,
+    rightConfigurationId: v2.id,
+  });
+  expect('comparisonId' in started).toBe(true);
+  if (!('comparisonId' in started)) return;
+
+  const workerId = `eval-lock-${randomUUID()}`;
+  // Claim this comparison's job directly so leftover pending evaluation.replay rows cannot steal it.
+  const [claimed] = await sql`
+    UPDATE jobs
+    SET
+      status='claimed',
+      claimed_by=${workerId},
+      claimed_at=now(),
+      claim_expires_at=now() + interval '2 minutes',
+      attempts=greatest(attempts, 1),
+      updated_at=now()
+    WHERE id=${started.jobId} AND status='pending'
+    RETURNING id
+  `;
+  expect(claimed?.id).toBe(started.jobId);
+
+  const claim = {
+    jobId: started.jobId,
+    workerId,
+    jobType: EVALUATION_REPLAY_JOB,
+  };
+
+  // Flip lifecycle first so admission cannot succeed; then race cancel against the claimed worker.
+  // Both paths take agent → job → comparison locks — a timeout here means inversion/deadlock.
+  await sql`UPDATE agents SET lifecycle='stopped' WHERE id=${id}`;
+  const raced = Promise.all([
+    cancelWorkForLifecycle(id, 'stopped'),
+    processEvaluationReplayJob(
+      { comparisonId: started.comparisonId, agentId: id, actor: admin },
+      fixtureInference(),
+      undefined,
+      claim,
+    ).catch((error: unknown) => error),
+  ]);
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(
+      () => reject(new Error('Deadlock suspected: stop vs replay admission timed out')),
+      8_000,
+    );
+  });
+  const [cancelledIds] = await Promise.race([raced, timeout]);
+
+  expect(cancelledIds).toContain(started.jobId);
+
+  const [comparison] = await sql`
+    SELECT status, error FROM evaluation_comparisons WHERE id=${started.comparisonId}
+  `;
+  expect(comparison.status).toBe('failed');
+  expect(String(comparison.error ?? '')).toContain('stopped');
+
+  const [job] = await sql`SELECT status FROM jobs WHERE id=${started.jobId}`;
+  expect(job.status).toBe('cancelled');
 });

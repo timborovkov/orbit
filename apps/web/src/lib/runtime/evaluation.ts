@@ -328,6 +328,26 @@ async function runReplaySide(
 ): Promise<{ runId: string } | { error: string } | { skipped: true }> {
   const ownedClaim = evaluationClaim(claim);
   const admitted = await db().transaction(async (tx) => {
+    // Lock order matches lifecycle cancellation: agent → job → comparison (→ run).
+    const peek = (
+      await tx
+        .select()
+        .from(evaluationComparisons)
+        .where(eq(evaluationComparisons.id, comparisonId))
+    ).at(0);
+    if (!peek) return { error: 'Comparison not found.' as const };
+
+    const agent = (
+      await tx.select().from(agents).where(eq(agents.id, peek.agentId)).for('update')
+    ).at(0);
+    if (!agent) return { error: 'Agent not found.' as const };
+    if (!canEnqueueSimulation(agent.lifecycle)) {
+      return { error: `Agent lifecycle ${agent.lifecycle} cannot run replay.` as const };
+    }
+    if (!(await assertEvaluationJobClaim(tx, ownedClaim, peek.jobId))) {
+      return { skipped: true as const };
+    }
+
     const comparison = (
       await tx
         .select()
@@ -336,7 +356,11 @@ async function runReplaySide(
         .for('update')
     ).at(0);
     if (!comparison) return { error: 'Comparison not found.' as const };
-    if (!(await assertEvaluationJobClaim(tx, ownedClaim, comparison.jobId))) {
+    // Job row already locked above — only re-check linkage under the comparison lock.
+    if (ownedClaim && comparison.jobId && comparison.jobId !== ownedClaim.jobId) {
+      return { skipped: true as const };
+    }
+    if (comparison.status === 'completed' || comparison.status === 'failed') {
       return { skipped: true as const };
     }
 
@@ -344,14 +368,6 @@ async function runReplaySide(
       await tx.select().from(evaluationCases).where(eq(evaluationCases.id, comparison.caseId))
     ).at(0);
     if (!evaluationCase) return { error: 'Evaluation case not found.' as const };
-
-    const agent = (
-      await tx.select().from(agents).where(eq(agents.id, comparison.agentId)).for('update')
-    ).at(0);
-    if (!agent) return { error: 'Agent not found.' as const };
-    if (!canEnqueueSimulation(agent.lifecycle)) {
-      return { error: `Agent lifecycle ${agent.lifecycle} cannot run replay.` as const };
-    }
 
     const behavior = behaviorForCaseSource(evaluationCase.sourceKind);
     const existingRunId = side === 'left' ? comparison.leftRunId : comparison.rightRunId;
@@ -428,6 +444,26 @@ export async function processEvaluationReplayJob(
   const ownedClaim = evaluationClaim(claim);
 
   const comparison = await db().transaction(async (tx) => {
+    // Lock order matches lifecycle cancellation: agent → job → comparison.
+    const peek = (
+      await tx
+        .select()
+        .from(evaluationComparisons)
+        .where(eq(evaluationComparisons.id, comparisonId))
+    ).at(0);
+    if (!peek) return null;
+    if (peek.status === 'completed' || peek.status === 'failed') {
+      return { ...peek, skip: true as const };
+    }
+
+    const agent = (
+      await tx.select().from(agents).where(eq(agents.id, peek.agentId)).for('update')
+    ).at(0);
+    if (!agent) return null;
+    if (!(await assertEvaluationJobClaim(tx, ownedClaim, peek.jobId))) {
+      return { ...peek, skip: true as const };
+    }
+
     const row = (
       await tx
         .select()
@@ -436,8 +472,7 @@ export async function processEvaluationReplayJob(
         .for('update')
     ).at(0);
     if (!row) return null;
-    if (row.status === 'completed') return { ...row, skip: true as const };
-    if (!(await assertEvaluationJobClaim(tx, ownedClaim, row.jobId))) {
+    if (row.status === 'completed' || row.status === 'failed') {
       return { ...row, skip: true as const };
     }
     await tx
@@ -472,7 +507,13 @@ export async function processEvaluationReplayJob(
     if ('error' in right) throw new Error(right.error);
 
     const completed = await db().transaction(async (tx) => {
+      await tx.select().from(agents).where(eq(agents.id, comparison.agentId)).for('update');
       if (!(await assertEvaluationJobClaim(tx, ownedClaim, comparison.jobId))) return false;
+      await tx
+        .select()
+        .from(evaluationComparisons)
+        .where(eq(evaluationComparisons.id, comparisonId))
+        .for('update');
       await tx
         .update(evaluationComparisons)
         .set({
@@ -489,12 +530,18 @@ export async function processEvaluationReplayJob(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Comparison failed.';
     await db().transaction(async (tx) => {
+      await tx.select().from(agents).where(eq(agents.id, comparison.agentId)).for('update');
       if (!(await assertEvaluationJobClaim(tx, ownedClaim, comparison.jobId))) return;
+      await tx
+        .select()
+        .from(evaluationComparisons)
+        .where(eq(evaluationComparisons.id, comparisonId))
+        .for('update');
+      // Keep status running so a still-owned job retry can re-enter; terminal failed is
+      // reserved for lifecycle cancel and exhausted finalize (skipped above).
       await tx
         .update(evaluationComparisons)
         .set({
-          status: 'failed',
-          finishedAt: new Date(),
           error: message.slice(0, 500),
         })
         .where(eq(evaluationComparisons.id, comparisonId));
@@ -570,6 +617,21 @@ export async function finalizeExhaustedEvaluationReplayJob(
     : 'Job retries exhausted after infrastructure failures.';
 
   await db().transaction(async (tx) => {
+    // Lock order matches lifecycle cancellation: agent → job → comparison.
+    const peek = (
+      await tx
+        .select()
+        .from(evaluationComparisons)
+        .where(eq(evaluationComparisons.id, comparisonId))
+    ).at(0);
+    if (!peek) return;
+    if (peek.status !== 'queued' && peek.status !== 'running') return;
+
+    await tx.select().from(agents).where(eq(agents.id, peek.agentId)).for('update');
+    if (peek.jobId) {
+      await tx.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, peek.jobId)).for('update');
+    }
+
     const comparison = (
       await tx
         .select()
