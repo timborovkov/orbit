@@ -2,6 +2,7 @@
 
 import { useState, useSyncExternalStore } from 'react';
 
+import { MarkdownEditor } from '@/components/markdown-editor';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
@@ -11,23 +12,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 
 const subscribe = () => () => undefined;
 const clientReady = () => true;
 const serverReady = () => false;
-
-const controlClassName = 'm-0';
 
 export function WorkspaceField({
   id,
   name,
   label,
   initialValue = '',
-  multiline = false,
   required = false,
   maxLength = 12000,
-  rows = 3,
+  markdown = false,
   description,
   error,
 }: {
@@ -35,10 +32,9 @@ export function WorkspaceField({
   name: string;
   label: string;
   initialValue?: string;
-  multiline?: boolean;
   required?: boolean;
   maxLength?: number;
-  rows?: number;
+  markdown?: boolean;
   description?: string;
   error?: string;
 }) {
@@ -56,7 +52,6 @@ export function WorkspaceField({
     readOnly: !hydrated,
     'aria-invalid': Boolean(error) || undefined,
     'aria-describedby': describedBy,
-    className: controlClassName,
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setValue(event.target.value);
     },
@@ -66,13 +61,27 @@ export function WorkspaceField({
       <FieldLabel htmlFor={id}>
         {label}
         {required && (
-          <span className="field-required-mark" aria-label="required">
+          <span className="field-required-mark" aria-hidden="true">
             {' '}
             *
           </span>
         )}
       </FieldLabel>
-      {multiline ? <Textarea {...props} rows={rows} /> : <Input {...props} />}
+      {markdown ? (
+        <MarkdownEditor
+          id={id}
+          name={name}
+          value={value}
+          onValueChange={setValue}
+          readOnly={!hydrated}
+          required={required}
+          maxLength={maxLength}
+          aria-invalid={props['aria-invalid']}
+          aria-describedby={describedBy}
+        />
+      ) : (
+        <Input {...props} />
+      )}
       {description ? <FieldDescription id={descriptionId}>{description}</FieldDescription> : null}
       {error ? <FieldError id={errorId}>{error}</FieldError> : null}
     </Field>

@@ -40,7 +40,7 @@ export function McpConnectionForm({
   return (
     <form
       id={formId}
-      className="library-form"
+      className="form-dialog-form"
       action={(data) => {
         startTransition(async () => {
           setEditor((previous) => ({ ...previous, error: undefined }));
@@ -60,7 +60,7 @@ export function McpConnectionForm({
         });
       }}
     >
-      <div className="library-dialog-body">
+      <div className="form-dialog-body">
         {editor.connectionId && (
           <input type="hidden" name="connectionId" value={editor.connectionId} />
         )}
@@ -77,21 +77,20 @@ export function McpConnectionForm({
         />
         {editor.clearHeaders && <input type="hidden" name="clearHeaders" value="true" />}
 
-        <FieldGroup className="gap-5">
-          <div className="library-form-grid">
+        <FieldGroup className="form-fields">
+          <div className="form-grid">
             <Field>
               <FieldLabel htmlFor={`${formId}-name`}>Slug</FieldLabel>
-              <FieldDescription>Stable id used in tool names.</FieldDescription>
               <Input
                 ref={slugRef}
                 id={`${formId}-name`}
+                aria-describedby={`${formId}-name-hint`}
                 name="name"
                 required
                 maxLength={80}
-                pattern="^[a-z0-9][a-z0-9_-]{0,79}$"
+                pattern="[a-z0-9][a-z0-9_\-]{0,79}"
                 disabled={pending}
                 value={editor.name}
-                className="library-field-control"
                 onFocus={(event) => {
                   const input = event.currentTarget;
                   const end = input.value.length;
@@ -101,10 +100,12 @@ export function McpConnectionForm({
                   setEditor((previous) => ({ ...previous, name: event.target.value }));
                 }}
               />
+              <FieldDescription id={`${formId}-name-hint`}>
+                Stable id used in tool names.
+              </FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor={`${formId}-transport`}>Transport</FieldLabel>
-              <FieldDescription>HTTP streamable or classic SSE.</FieldDescription>
               <Select
                 value={editor.transport}
                 onValueChange={(value) => {
@@ -117,7 +118,8 @@ export function McpConnectionForm({
               >
                 <SelectTrigger
                   id={`${formId}-transport`}
-                  className="library-select-trigger"
+                  aria-describedby={`${formId}-transport-hint`}
+                  className="w-full"
                   size="default"
                 >
                   <SelectValue placeholder="Select transport" />
@@ -127,39 +129,43 @@ export function McpConnectionForm({
                   <SelectItem value="sse">SSE</SelectItem>
                 </SelectContent>
               </Select>
+              <FieldDescription id={`${formId}-transport-hint`}>
+                HTTP streamable or classic SSE.
+              </FieldDescription>
             </Field>
           </div>
 
           <Field>
             <FieldLabel htmlFor={`${formId}-url`}>URL</FieldLabel>
-            <FieldDescription>Remote MCP endpoint the worker will call.</FieldDescription>
             <Input
               id={`${formId}-url`}
+              aria-describedby={`${formId}-url-hint`}
               name="url"
               type="url"
               required
               maxLength={2000}
               disabled={pending}
               value={editor.url}
-              className="library-field-control"
               onChange={(event) => {
                 setEditor((previous) => ({ ...previous, url: event.target.value }));
               }}
             />
+            <FieldDescription id={`${formId}-url-hint`}>
+              Remote MCP endpoint the worker will call.
+            </FieldDescription>
           </Field>
 
           <McpToolAllowlist editor={editor} setEditor={setEditor} pending={pending} />
           <McpHeaderRows editor={editor} setEditor={setEditor} pending={pending} />
         </FieldGroup>
+      </div>
 
+      <div className="form-dialog-footer">
         {editor.error && (
           <p role="alert" className="form-error">
             {editor.error}
           </p>
         )}
-      </div>
-
-      <div className="library-footer">
         <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>
           Cancel
         </Button>
