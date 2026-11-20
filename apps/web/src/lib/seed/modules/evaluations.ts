@@ -12,6 +12,16 @@ import type { SeedModule } from '@/lib/seed/types';
 
 const emailMessageId = '00000000-0000-4000-a800-000000000002';
 
+/** Matches `buildEmailDraftInput` so Sarah's knowledge.search replay path can JSON.parse. */
+export const DEMO_SARAH_EMAIL_CASE_INPUT = JSON.stringify({
+  currentMessage: {
+    subject: 'Invoice history',
+    body: 'Where can I find my invoices?',
+    sender: 'customer@example.test',
+  },
+  previousMessages: [],
+});
+
 export const evaluationsModule: SeedModule = {
   name: 'evaluations',
   async apply({ tx, now }) {
@@ -36,7 +46,7 @@ export const evaluationsModule: SeedModule = {
           title: 'Demo: invoice email',
           sourceKind: 'email',
           sourceEmailMessageId: emailMessageId,
-          input: 'Where can I find my invoices?',
+          input: DEMO_SARAH_EMAIL_CASE_INPUT,
           recipients: [],
           actor: DEMO_ACTOR,
           createdAt: now,

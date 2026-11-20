@@ -7,6 +7,7 @@ import { closeDb, db } from '@/lib/db';
 import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
 import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
+import { emailKnowledgeQuery } from '@/lib/runtime/email/input';
 import {
   EVALUATION_REPLAY_JOB,
   finalizeCancelledEvaluationComparisons,
@@ -18,6 +19,7 @@ import {
 } from '@/lib/runtime/evaluation';
 import { encryptCredential } from '@/lib/runtime/secrets';
 import { draftAnswerFromResult, type ModelCall } from '@/lib/runtime/simulation';
+import { DEMO_SARAH_EMAIL_CASE_INPUT } from '@/lib/seed/modules/evaluations';
 
 const databaseUrl =
   process.env.TEST_DATABASE_URL ??
@@ -290,6 +292,11 @@ test('retry reuses each side run instead of admitting duplicates', async () => {
     SELECT count(*)::int AS n FROM simulation_runs WHERE agent_id=${id} AND origin='replay'
   `;
   expect(n).toBe(2);
+});
+
+test('demo Sarah email case seed is a structured drafting snapshot', () => {
+  // knowledge.search replay parses case input as JSON; plain text would throw before inference.
+  expect(emailKnowledgeQuery(DEMO_SARAH_EMAIL_CASE_INPUT)).toContain('invoices');
 });
 
 test('email case saves structured drafting snapshot and uses email semantics', async () => {
