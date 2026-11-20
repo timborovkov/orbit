@@ -32,7 +32,7 @@
     "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
     "@playwright/test": "^1.65.1",
     "@types/bun": "1.4.4",
-    "eslint": "10.14.0",
+    "eslint": "10.15.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-unused-imports": "4.4.1",
     "knip": "6.45.1",
@@ -41,6 +41,6 @@
     "react-doctor": "0.9.23",
     "@typescript/native": "npm:typescript@7.0.2",
     "typescript": "npm:@typescript/typescript6@6.0.2",
-    "typescript-eslint": "8.72.2"
+    "typescript-eslint": "8.73.0"
   }
 }
