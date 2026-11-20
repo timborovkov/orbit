@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useId, useState, useTransition } from 'react';
 import { CalendarClock, ChevronDown } from 'lucide-react';
 
 import { cancelAgentFollowUp, scheduleAgentFollowUp } from '@/actions/follow-ups';
+import { WorkspaceField } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { Button } from '@/components/ui/button';
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { formatUtcTimestamp } from '@/lib/format';
@@ -43,20 +44,22 @@ function defaultDueLocal() {
 }
 
 function CancelFollowUpButton({ agentId, followUpId }: { agentId: string; followUpId: string }) {
+  const errorId = useId();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="follow-up-cancel">
-      {error && (
-        <p role="alert" className="form-error">
+      {error ? (
+        <FieldError className="form-error" id={errorId}>
           {error}
-        </p>
-      )}
+        </FieldError>
+      ) : null}
       <Button
         type="button"
         variant="destructive"
         disabled={pending}
+        aria-describedby={error ? errorId : undefined}
         onClick={() => {
           startTransition(async () => {
             setError(null);
@@ -85,6 +88,7 @@ async function scheduleFollowUpWithUtcDue(form: FormData) {
 }
 
 export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items: FollowUpRow[] }) {
+  const formId = useId();
   const [dueDefault] = useState(defaultDueLocal);
 
   return (
@@ -99,40 +103,49 @@ export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items:
         </div>
         <WorkspaceForm action={scheduleFollowUpWithUtcDue} label="Schedule follow-up">
           <input type="hidden" name="agentId" value={agentId} />
-          <FieldGroup>
+          <FieldGroup className="form-fields">
+            <WorkspaceField
+              id={`${formId}-subject`}
+              name="subject"
+              label="Subject"
+              required
+              maxLength={200}
+              description="Short commitment the durable queue will record when due."
+            />
             <Field>
-              <FieldLabel htmlFor="follow-up-subject">Subject</FieldLabel>
+              <FieldLabel htmlFor={`${formId}-due`}>
+                Due
+                <span className="field-required-mark" aria-hidden="true">
+                  {' '}
+                  *
+                </span>
+              </FieldLabel>
               <Input
-                id="follow-up-subject"
-                name="subject"
-                required
-                maxLength={200}
-                placeholder="Check whether the demo was booked"
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="follow-up-due">Due</FieldLabel>
-              <Input
-                id="follow-up-due"
+                id={`${formId}-due`}
                 name="dueLocal"
                 type="datetime-local"
                 required
                 defaultValue={dueDefault}
+                aria-describedby={`${formId}-due-hint`}
               />
-              <FieldDescription>
+              <FieldDescription id={`${formId}-due-hint`}>
                 Converted to an offset-bearing UTC instant before save; claimed by the durable job
                 queue.
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="follow-up-note">Note</FieldLabel>
+              <FieldLabel htmlFor={`${formId}-note`}>Note</FieldLabel>
               <Textarea
-                id="follow-up-note"
+                id={`${formId}-note`}
                 name="note"
                 maxLength={2000}
                 rows={3}
                 placeholder="Optional context for the internal outcome"
+                aria-describedby={`${formId}-note-hint`}
               />
+              <FieldDescription id={`${formId}-note-hint`}>
+                Plain-text context stored with the commitment. External sends stay suppressed.
+              </FieldDescription>
             </Field>
           </FieldGroup>
         </WorkspaceForm>
