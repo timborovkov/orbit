@@ -6,7 +6,14 @@ import type { JobRecord } from '@/lib/queue/types';
 import type { fetchReceivedEmail } from '@/lib/runtime/email/provider';
 import { EMAIL_ACTOR, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import { admitRun } from '@/lib/runtime/execute';
-import { agents, emailMailboxes, emailMessages, emailThreads, jobs } from '@/lib/schema';
+import {
+  agents,
+  emailMailboxes,
+  emailMessages,
+  emailThreads,
+  jobs,
+  outboundActions,
+} from '@/lib/schema';
 
 type Message = typeof emailMessages.$inferSelect;
 type Received = Awaited<ReturnType<typeof fetchReceivedEmail>>;
@@ -72,6 +79,13 @@ async function storeMessage(tx: Tx, message: Message, received: Received) {
       .update(emailMessages)
       .set({ threadId })
       .where(and(eq(emailMessages.agentId, agentId), inArray(emailMessages.threadId, mergedIds)));
+    // Retarget outbound rows before deleting provisional threads so agent ownership stays intact.
+    await tx
+      .update(outboundActions)
+      .set({ threadId, updatedAt: new Date() })
+      .where(
+        and(eq(outboundActions.agentId, agentId), inArray(outboundActions.threadId, mergedIds)),
+      );
     await tx
       .delete(emailThreads)
       .where(and(eq(emailThreads.agentId, agentId), inArray(emailThreads.id, mergedIds)));

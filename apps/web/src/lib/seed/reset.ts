@@ -9,10 +9,14 @@ import {
   configurations,
   credentials,
   discoveryCursors,
+  emailMailboxes,
+  emailMessages,
+  emailThreads,
   jobs,
   knowledgeChunks,
   knowledgeDocuments,
   mcpConnections,
+  outboundActions,
   policyDecisions,
   recipientConsents,
   runs,
@@ -25,6 +29,7 @@ import {
   DEMO_AGENT_IDS,
   DEMO_AUDIT,
   DEMO_DISCOVERY_RUN_IDS,
+  DEMO_EMAIL,
   DEMO_INTENTS,
   DEMO_JOBS,
   DEMO_KNOWLEDGE_CHUNK_IDS,
@@ -77,22 +82,36 @@ function sqlTextInList(column: ReturnType<typeof sql>, values: readonly string[]
 export async function resetDemoData(ctx: SeedContext): Promise<void> {
   const { tx } = ctx;
 
+  await tx.delete(outboundActions).where(inArray(outboundActions.agentId, demoAgentIds));
+  await tx.delete(outboundActions).where(inArray(outboundActions.id, [DEMO_EMAIL.outboundId]));
+
   await tx.delete(policyDecisions).where(inArray(policyDecisions.id, demoPolicyIds));
+  await tx.delete(policyDecisions).where(inArray(policyDecisions.id, [DEMO_EMAIL.policyId]));
   await tx.delete(policyDecisions).where(inArray(policyDecisions.agentId, demoAgentIds));
 
   await tx.delete(actionIntents).where(inArray(actionIntents.id, demoIntentIds));
+  await tx.delete(actionIntents).where(inArray(actionIntents.id, [DEMO_EMAIL.intentId]));
   await tx.delete(actionIntents).where(inArray(actionIntents.agentId, demoAgentIds));
 
   await tx.delete(sourceEvents).where(inArray(sourceEvents.id, [...DEMO_SOURCE_EVENT_IDS]));
   await tx.delete(sourceEvents).where(inArray(sourceEvents.agentId, demoAgentIds));
   await tx.delete(discoveryCursors).where(inArray(discoveryCursors.agentId, demoAgentIds));
 
+  await tx.delete(emailMessages).where(inArray(emailMessages.agentId, demoAgentIds));
+  await tx.delete(emailThreads).where(inArray(emailThreads.agentId, demoAgentIds));
+  await tx.delete(emailMailboxes).where(inArray(emailMailboxes.agentId, demoAgentIds));
+
   // Clear run → job FK before deleting jobs.
   const discoveryRunIds = [...DEMO_DISCOVERY_RUN_IDS];
   await tx.update(runs).set({ jobId: null }).where(inArray(runs.id, demoRunIds));
   await tx.update(runs).set({ jobId: null }).where(inArray(runs.id, discoveryRunIds));
+  await tx
+    .update(runs)
+    .set({ jobId: null })
+    .where(inArray(runs.id, [DEMO_EMAIL.runId]));
   await tx.delete(runs).where(inArray(runs.id, demoRunIds));
   await tx.delete(runs).where(inArray(runs.id, discoveryRunIds));
+  await tx.delete(runs).where(inArray(runs.id, [DEMO_EMAIL.runId]));
   await tx.delete(runs).where(inArray(runs.agentId, demoAgentIds));
 
   // Fixed seed jobs, orbit-demo keys, and runtime jobs for demo runs/agents

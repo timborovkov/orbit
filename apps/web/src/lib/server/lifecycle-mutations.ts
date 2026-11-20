@@ -66,7 +66,7 @@ export async function persistLifecycle(actor: string, agentId: string, next: Lif
     return {
       message:
         parsed.data === 'live'
-          ? 'Live lifecycle saved. No external action adapters exist yet, so proposals stay suppressed.'
+          ? 'Live lifecycle saved. Administrator-approved email replies may dispatch; other proposals stay suppressed until their adapters land.'
           : `Lifecycle set to ${lifecycleLabels[parsed.data].toLowerCase()}.`,
     };
   });

@@ -164,7 +164,8 @@ starts with a keyboard-visible skip link to its main content.
 ### Overview
 
 Show database-derived counts, the agent table, recent audit activity and global
-outbound controls. Explain that external writes are suppressed in all modes.
+outbound controls. Explain that external writes stay suppressed except for
+registered Live adapters after administrator approval (email replies today).
 Put the full mission beneath each agent name in muted,
 wrapping text. Preserve line breaks and let long words wrap. Align table
 headers to the logical start. Activity stacks below the primary column on
@@ -311,13 +312,14 @@ with filename, page or section and the quoted passage.
 The Email task tab uses the existing responsive workspace navigation. The mailbox
 card shows the assigned address and the enable or disable action. The thread list
 highlights the selected conversation. Messages show the processing state beside the
-subject and sender, with the saved reply draft and its knowledge citations beneath
-the message. Message content and replies render as plain text. Email work participates
-in the workspace’s pending-state refresh.
+subject and sender. Pending reply drafts use an editable textarea with Approve &
+queue and Reject. Knowledge citations stay beneath the draft. After review, the
+thread shows the send outcome (queued, sending, sent, failed, blocked) and reason.
+Message content and replies render as plain text. Destination and threading headers
+are never editable. Email work participates in the workspace’s pending-state refresh.
 
-Playwright verified admin mailbox controls, thread navigation, draft and citation
-rendering, and the mobile layout in both themes. The inbox had no axe violations
-at 390px in either theme.
+Playwright verified admin mailbox controls, thread navigation, draft review,
+send-outcome rendering, and the mobile layout in both themes at 1440px and 390px.
 
 ### Access
 

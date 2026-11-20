@@ -9,7 +9,12 @@ import { startJobWorker } from '@/lib/queue/worker';
 import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
 import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
 import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
-import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
+import {
+  finalizeExhaustedOutboundJob,
+  processEmailSendJob,
+  reconcileDeadOutboundJobs,
+} from '@/lib/runtime/email/send';
+import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB, EMAIL_SEND_JOB } from '@/lib/runtime/email/settings';
 import {
   finalizeExhaustedSimulationJob,
   processEmailDraftJob,
@@ -86,6 +91,11 @@ const worker = startJobWorker({
         jobId: job.id,
         workerId,
       }),
+    [EMAIL_SEND_JOB]: (job, signal) =>
+      processEmailSendJob(job, signal, undefined, {
+        apiKey: config.RESEND_API_KEY,
+        sendingDomain: config.RESEND_SENDING_DOMAIN,
+      }),
     [SIMULATION_JOB_TYPE]: async (job, signal) => {
       try {
         await processSimulationJob(job.payload, undefined, signal, {
@@ -134,6 +144,10 @@ const worker = startJobWorker({
       await finalizeExhaustedSimulationJob(job.payload, error);
       return;
     }
+    if (job.type === EMAIL_SEND_JOB) {
+      await finalizeExhaustedOutboundJob(job.payload, error);
+      return;
+    }
     if (job.type === KNOWLEDGE_JOB_TYPE) {
       await finalizeFailedKnowledgeJob(job.payload, error);
     }
@@ -142,6 +156,7 @@ const worker = startJobWorker({
     await Promise.all([
       reconcileOrphanedSimulationRuns(),
       reconcileDeadKnowledgeJobs(),
+      reconcileDeadOutboundJobs(),
       expireStaleApprovals(),
       reconcileSuspendedApprovals(),
     ]);

@@ -232,6 +232,34 @@ export const actionIntents = pgTable('action_intents', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const outboundActions = pgTable('outbound_actions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  agentId: uuid('agent_id')
+    .notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  intentId: uuid('intent_id')
+    .notNull()
+    .unique()
+    .references(() => actionIntents.id, { onDelete: 'cascade' }),
+  actionType: text('action_type').notNull(),
+  status: text('status').$type<'queued' | 'sending' | 'sent' | 'failed' | 'blocked'>().notNull(),
+  reason: text('reason'),
+  idempotencyKey: text('idempotency_key').notNull().unique(),
+  body: text('body').notNull(),
+  emailMessageId: uuid('email_message_id').references(() => emailMessages.id, {
+    onDelete: 'set null',
+  }),
+  threadId: uuid('thread_id'),
+  provider: text('provider'),
+  providerMessageId: text('provider_message_id'),
+  providerResult: jsonb('provider_result').$type<Record<string, unknown>>(),
+  jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+});
+
 export const policyDecisions = pgTable('policy_decisions', {
   id: uuid('id').defaultRandom().primaryKey(),
   agentId: uuid('agent_id')
