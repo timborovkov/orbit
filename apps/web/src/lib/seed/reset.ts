@@ -2,6 +2,7 @@ import { inArray, or, sql } from 'drizzle-orm';
 
 import {
   actionIntents,
+  agentActivityEvents,
   agentMcpConnections,
   agents,
   agentSkills,
@@ -12,6 +13,7 @@ import {
   emailMailboxes,
   emailMessages,
   emailThreads,
+  followUps,
   jobs,
   knowledgeChunks,
   knowledgeDocuments,
@@ -25,11 +27,14 @@ import {
   usageCounters,
 } from '@/lib/schema';
 import {
+  DEMO_ACTIVITY_IDS,
   DEMO_ACTOR,
   DEMO_AGENT_IDS,
   DEMO_AUDIT,
   DEMO_DISCOVERY_RUN_IDS,
   DEMO_EMAIL,
+  DEMO_FOLLOW_UP_IDS,
+  DEMO_FOLLOW_UP_JOB_IDS,
   DEMO_INTENTS,
   DEMO_JOBS,
   DEMO_KNOWLEDGE_CHUNK_IDS,
@@ -40,13 +45,14 @@ import {
 } from '@/lib/seed/ids';
 import type { SeedContext } from '@/lib/seed/types';
 
-const demoJobIds = Object.values(DEMO_JOBS);
+const demoJobIds = [...Object.values(DEMO_JOBS), ...DEMO_FOLLOW_UP_JOB_IDS];
 const demoRunIds = Object.values(DEMO_RUNS);
 const demoIntentIds = Object.values(DEMO_INTENTS);
 const demoPolicyIds = Object.values(DEMO_POLICY);
 const demoAuditIds = Object.values(DEMO_AUDIT);
 const demoAgentIds = [...DEMO_AGENT_IDS];
 const demoKnowledgeDocIds = [...DEMO_KNOWLEDGE_DOC_IDS];
+const demoFollowUpIds = [...DEMO_FOLLOW_UP_IDS];
 
 /**
  * Whether a job row belongs to the demo seed. Matches fixed demo job IDs,
@@ -63,9 +69,11 @@ export function isDemoOwnedJob(job: {
   const runId = typeof job.payload.runId === 'string' ? job.payload.runId : null;
   const agentId = typeof job.payload.agentId === 'string' ? job.payload.agentId : null;
   const documentId = typeof job.payload.documentId === 'string' ? job.payload.documentId : null;
+  const followUpId = typeof job.payload.followUpId === 'string' ? job.payload.followUpId : null;
   if (runId && (demoRunIds as readonly string[]).includes(runId)) return true;
   if (agentId && (demoAgentIds as readonly string[]).includes(agentId)) return true;
   if (documentId && (demoKnowledgeDocIds as readonly string[]).includes(documentId)) return true;
+  if (followUpId && (demoFollowUpIds as readonly string[]).includes(followUpId)) return true;
   return false;
 }
 
@@ -92,6 +100,14 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
   await tx.delete(actionIntents).where(inArray(actionIntents.id, demoIntentIds));
   await tx.delete(actionIntents).where(inArray(actionIntents.id, [DEMO_EMAIL.intentId]));
   await tx.delete(actionIntents).where(inArray(actionIntents.agentId, demoAgentIds));
+
+  await tx
+    .delete(agentActivityEvents)
+    .where(inArray(agentActivityEvents.id, [...DEMO_ACTIVITY_IDS]));
+  await tx.delete(agentActivityEvents).where(inArray(agentActivityEvents.agentId, demoAgentIds));
+  await tx.update(followUps).set({ jobId: null }).where(inArray(followUps.id, demoFollowUpIds));
+  await tx.delete(followUps).where(inArray(followUps.id, demoFollowUpIds));
+  await tx.delete(followUps).where(inArray(followUps.agentId, demoAgentIds));
 
   await tx.delete(sourceEvents).where(inArray(sourceEvents.id, [...DEMO_SOURCE_EVENT_IDS]));
   await tx.delete(sourceEvents).where(inArray(sourceEvents.agentId, demoAgentIds));
@@ -125,6 +141,7 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
         sqlTextInList(sql`${jobs.payload}->>'runId'`, demoRunIds),
         sqlTextInList(sql`${jobs.payload}->>'agentId'`, demoAgentIds),
         sqlTextInList(sql`${jobs.payload}->>'documentId'`, demoKnowledgeDocIds),
+        sqlTextInList(sql`${jobs.payload}->>'followUpId'`, demoFollowUpIds),
       ),
     );
   await tx

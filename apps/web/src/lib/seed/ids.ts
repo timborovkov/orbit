@@ -107,6 +107,25 @@ export const DEMO_DISCOVERY_RUNS = {
 export const DEMO_SOURCE_EVENT_IDS = Object.values(DEMO_SOURCE_EVENTS);
 export const DEMO_DISCOVERY_RUN_IDS = Object.values(DEMO_DISCOVERY_RUNS);
 
+/** Durable follow-ups and their delayed jobs owned by the demo seed. */
+export const DEMO_FOLLOW_UPS = {
+  johnScheduled: '00000000-0000-4000-a920-000000000001',
+  sarahCompleted: '00000000-0000-4000-a920-000000000011',
+} as const;
+
+export const DEMO_FOLLOW_UP_JOBS = {
+  johnScheduled: '00000000-0000-4000-a930-000000000001',
+  sarahCompleted: '00000000-0000-4000-a930-000000000011',
+} as const;
+
+export const DEMO_ACTIVITY = {
+  sarahFollowUpCompleted: '00000000-0000-4000-a940-000000000011',
+} as const;
+
+export const DEMO_FOLLOW_UP_IDS = Object.values(DEMO_FOLLOW_UPS);
+export const DEMO_FOLLOW_UP_JOB_IDS = Object.values(DEMO_FOLLOW_UP_JOBS);
+export const DEMO_ACTIVITY_IDS = Object.values(DEMO_ACTIVITY);
+
 export function isDemoAgentId(id: string): boolean {
   return (DEMO_AGENT_IDS as readonly string[]).includes(id);
 }

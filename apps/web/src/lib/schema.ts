@@ -20,6 +20,11 @@ import type { LifecycleState } from '@/lib/lifecycle';
 import type { McpToolAllowlistJson } from '@/lib/mcp-allowlist';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import type { AgentConfig } from '@/lib/runtime/config';
+import type {
+  FollowUpOutcomeKind,
+  FollowUpSource,
+  FollowUpStatus,
+} from '@/lib/runtime/follow-ups/types';
 import type { SimulationResult } from '@/lib/runtime/simulation';
 
 const KNOWLEDGE_EMBEDDING_DIMENSIONS = 1536;
@@ -447,3 +452,41 @@ export const discoveryCursors = pgTable(
   },
   (table) => [primaryKey({ columns: [table.agentId, table.provider] })],
 );
+
+export const followUps = pgTable('follow_ups', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  agentId: uuid('agent_id')
+    .notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  source: text('source').$type<FollowUpSource>().notNull().default('admin'),
+  createdBy: text('created_by').notNull(),
+  subject: text('subject').notNull(),
+  note: text('note').notNull().default(''),
+  dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+  status: text('status').$type<FollowUpStatus>().notNull().default('scheduled'),
+  attempts: integer('attempts').notNull().default(0),
+  jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  cancelledBy: text('cancelled_by'),
+  cancelReason: text('cancel_reason'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  outcome: text('outcome'),
+  outcomeKind: text('outcome_kind').$type<FollowUpOutcomeKind>(),
+  waitForEvent: text('wait_for_event'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const agentActivityEvents = pgTable('agent_activity_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  agentId: uuid('agent_id')
+    .notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  summary: text('summary').notNull(),
+  detail: text('detail'),
+  followUpId: uuid('follow_up_id').references(() => followUps.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});

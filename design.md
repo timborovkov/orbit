@@ -251,9 +251,10 @@ the first invalid field. On success, close after the server action completes.
 
 Show agent identity, lifecycle, current configuration version and OpenRouter
 status above the task tabs. The tasks are Configuration, Playground,
-Knowledge, Email, History, Approvals and Access. Use a horizontal tablist with
-Left, Right, Home and End support above 600px and a full-width Select at
-600px and narrower. Keep task panels mounted so drafts survive navigation.
+Knowledge, Email, Follow-ups, History, Approvals and Access. Use a horizontal
+tablist with Left, Right, Home and End support above 600px and a full-width
+Select at 600px and narrower. Keep task panels mounted so drafts survive
+navigation.
 
 ### Configuration and identity
 
@@ -293,13 +294,24 @@ recorded and never sent.
 Show queued, running, awaiting approval, completed, failed and interrupted
 states from persisted records. Stop watching explains that inference can
 continue and links to the matching History entry. An awaiting-approval run
-links to its review. Refresh while runs or knowledge jobs are in flight so
-saved results appear without a manual reload.
+links to its review. Refresh while runs, knowledge jobs or scheduled
+follow-ups are in flight so saved results appear without a manual reload.
 
-History shows run details, exact configuration snapshots, linked job
-status and the provider's recorded cost. Label missing cost explicitly.
-Use a flexible run list and a 280px version column, stacked at 900px and
-narrower. Preserve source citations with saved runs.
+History leads with the per-agent activity timeline (follow-up outcomes and
+related internal events), then run details, exact configuration snapshots,
+linked job status and the provider's recorded cost. Label missing cost
+explicitly. Use a flexible primary column and a 280px version column,
+stacked at 900px and narrower. Preserve source citations with saved runs.
+
+### Follow-ups
+
+Administrators schedule durable follow-ups for an agent from the Follow-ups
+tab: subject, optional note and due time. Rows use the same disclosure
+pattern as History. Expand a row to inspect source, actor, attempts, job
+status, cancellation and the recorded outcome. Cancel is available only
+while status is scheduled. Due execution writes an internal activity
+outcome only — no external side effects. Paused and stopped agents
+skip-and-record due follow-ups (see [docs/follow-ups.md](docs/follow-ups.md)).
 
 ### Knowledge
 
