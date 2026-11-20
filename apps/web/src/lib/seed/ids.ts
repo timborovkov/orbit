@@ -83,19 +83,43 @@ export const DEMO_KNOWLEDGE_CHUNKS = {
 export const DEMO_KNOWLEDGE_DOC_IDS = Object.values(DEMO_KNOWLEDGE_DOCS);
 export const DEMO_KNOWLEDGE_CHUNK_IDS = Object.values(DEMO_KNOWLEDGE_CHUNKS);
 
+/** Inbound email + approved-reply demo rows (email seed module). */
+export const DEMO_EMAIL = {
+  threadId: '00000000-0000-4000-a800-000000000001',
+  messageId: '00000000-0000-4000-a800-000000000002',
+  runId: '00000000-0000-4000-a800-000000000003',
+  intentId: '00000000-0000-4000-a800-000000000004',
+  policyId: '00000000-0000-4000-a800-000000000005',
+  outboundId: '00000000-0000-4000-a800-000000000006',
+} as const;
+
+/** Fixed X discovery fixture rows for John (shadow). */
+export const DEMO_SOURCE_EVENTS = {
+  johnPost1001: '00000000-0000-4000-a900-000000000001',
+  johnPost1002: '00000000-0000-4000-a900-000000000002',
+} as const;
+
+export const DEMO_DISCOVERY_RUNS = {
+  johnPost1001: '00000000-0000-4000-a910-000000000001',
+  johnPost1002: '00000000-0000-4000-a910-000000000002',
+} as const;
+
+export const DEMO_SOURCE_EVENT_IDS = Object.values(DEMO_SOURCE_EVENTS);
+export const DEMO_DISCOVERY_RUN_IDS = Object.values(DEMO_DISCOVERY_RUNS);
+
 /** Durable follow-ups and their delayed jobs owned by the demo seed. */
 export const DEMO_FOLLOW_UPS = {
-  johnScheduled: '00000000-0000-4000-a800-000000000001',
-  sarahCompleted: '00000000-0000-4000-a800-000000000011',
+  johnScheduled: '00000000-0000-4000-a920-000000000001',
+  sarahCompleted: '00000000-0000-4000-a920-000000000011',
 } as const;
 
 export const DEMO_FOLLOW_UP_JOBS = {
-  johnScheduled: '00000000-0000-4000-a810-000000000001',
-  sarahCompleted: '00000000-0000-4000-a810-000000000011',
+  johnScheduled: '00000000-0000-4000-a930-000000000001',
+  sarahCompleted: '00000000-0000-4000-a930-000000000011',
 } as const;
 
 export const DEMO_ACTIVITY = {
-  sarahFollowUpCompleted: '00000000-0000-4000-a820-000000000011',
+  sarahFollowUpCompleted: '00000000-0000-4000-a940-000000000011',
 } as const;
 
 export const DEMO_FOLLOW_UP_IDS = Object.values(DEMO_FOLLOW_UPS);

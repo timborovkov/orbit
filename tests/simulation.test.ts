@@ -21,6 +21,7 @@ const config: AgentConfig = {
   personality: 'Warm',
   instructions: 'Ask useful questions',
   engagementCriteria: 'Buying intent',
+  xSearchQuery: '',
   mainModel: 'test/main',
   evaluatorModel: 'test/evaluator',
 };

@@ -27,16 +27,16 @@ export function HistoryWorkbench({
         <ActivityTimeline events={activityEvents} />
         <section id="history">
           <div className="editor-section-heading">
-            <h2>Run history</h2>
+            <h2>Activity timeline</h2>
             <p className="muted">
-              Your latest 50 simulations, with queue status, policy outcomes and the configuration
-              each one used.
+              Playground simulations and X discovery evaluations, with evaluator reasoning, proposed
+              actions and the configuration each one used.
             </p>
           </div>
           {!history.length && (
             <div className="history-empty">
               <History size={24} aria-hidden="true" />
-              <p>No runs yet. Start in the Playground to test your agent.</p>
+              <p>No runs yet. Start in the Playground or configure X discovery.</p>
             </div>
           )}
           {history.map((run) => (
@@ -45,12 +45,15 @@ export function HistoryWorkbench({
               id={`run-${run.id}`}
               className="run-detail"
               open={run.id === focusRunId ? true : undefined}
+              data-origin={run.origin}
             >
               <summary>
                 <div>
                   <span className="run-title">{run.input}</span>
                   <time dateTime={run.createdAt.toISOString()}>
-                    {formatUtcTimestamp(run.createdAt)} · Version {versionFor(run.configurationId)}
+                    {formatUtcTimestamp(run.createdAt)} ·{' '}
+                    {run.origin === 'discovery' ? 'Discovery' : 'Playground'} · Version{' '}
+                    {versionFor(run.configurationId)}
                     {run.job && run.job.status !== 'completed' ? ` · job ${run.job.status}` : ''}
                     {run.displayStatus !== 'deferred' && run.deferReason
                       ? ` · ${run.deferReason}`

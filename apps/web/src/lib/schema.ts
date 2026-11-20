@@ -141,7 +141,10 @@ export const runs = pgTable('simulation_runs', {
   configurationId: uuid('configuration_id')
     .notNull()
     .references(() => configurations.id),
-  origin: text('origin').$type<'playground' | 'email'>().notNull().default('playground'),
+  origin: text('origin')
+    .$type<'playground' | 'email' | 'discovery'>()
+    .notNull()
+    .default('playground'),
   input: text('input').notNull(),
   recipients: jsonb('recipients').$type<string[]>().notNull().default([]),
   status: text('status').$type<RunStatus>().notNull().default('queued'),
@@ -232,6 +235,34 @@ export const actionIntents = pgTable('action_intents', {
   decision: text('decision').notNull(),
   reasons: jsonb('reasons').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const outboundActions = pgTable('outbound_actions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  agentId: uuid('agent_id')
+    .notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  intentId: uuid('intent_id')
+    .notNull()
+    .unique()
+    .references(() => actionIntents.id, { onDelete: 'cascade' }),
+  actionType: text('action_type').notNull(),
+  status: text('status').$type<'queued' | 'sending' | 'sent' | 'failed' | 'blocked'>().notNull(),
+  reason: text('reason'),
+  idempotencyKey: text('idempotency_key').notNull().unique(),
+  body: text('body').notNull(),
+  emailMessageId: uuid('email_message_id').references(() => emailMessages.id, {
+    onDelete: 'set null',
+  }),
+  threadId: uuid('thread_id'),
+  provider: text('provider'),
+  providerMessageId: text('provider_message_id'),
+  providerResult: jsonb('provider_result').$type<Record<string, unknown>>(),
+  jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
 });
 
 export const policyDecisions = pgTable('policy_decisions', {
@@ -380,6 +411,46 @@ export const agentMcpConnections = pgTable(
     toolNames: text('tool_names').array().notNull().default([]),
   },
   (table) => [primaryKey({ columns: [table.agentId, table.connectionId] })],
+);
+
+export type SourceEventProvider = 'x';
+
+export const sourceEvents = pgTable(
+  'source_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    provider: text('provider').$type<SourceEventProvider>().notNull(),
+    providerEventId: text('provider_event_id').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    text: text('text').notNull(),
+    authorId: text('author_id'),
+    authorUsername: text('author_username'),
+    providerCreatedAt: timestamp('provider_created_at', { withTimezone: true }),
+    ingestedAt: timestamp('ingested_at', { withTimezone: true }).defaultNow().notNull(),
+    runId: uuid('run_id')
+      .unique()
+      .references(() => runs.id, { onDelete: 'set null' }),
+  },
+  (table) => [unique().on(table.agentId, table.provider, table.providerEventId)],
+);
+
+export const discoveryCursors = pgTable(
+  'discovery_cursors',
+  {
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    provider: text('provider').$type<SourceEventProvider>().notNull(),
+    sinceId: text('since_id'),
+    lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
+    lastStatus: text('last_status').notNull().default('idle'),
+    lastError: text('last_error'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.agentId, table.provider] })],
 );
 
 export const followUps = pgTable('follow_ups', {
