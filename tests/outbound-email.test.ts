@@ -238,6 +238,28 @@ test('global pause after approval blocks dispatch without sending', async () => 
   expect(String(outbound?.reason)).toContain('Global outbound pause');
 });
 
+test('global pause after claim is observed under the controls lock', async () => {
+  await releasePause();
+  const agent = await createAgent('live');
+  const seeded = await seedDraft(agent.id, agent.version);
+  expect(await reviewProposedAction(admin, agent.id, seeded.intentId, 'approved')).toMatchObject({
+    message: expect.stringContaining('queued'),
+  });
+
+  const claimed = await claimJobs({ workerId, limit: 5, types: [EMAIL_SEND_JOB] });
+  const mine = claimed.find((job) => job.payload.agentId === agent.id);
+  expect(mine).toBeTruthy();
+  await enablePause();
+
+  const transport = createStubEmailTransport();
+  await processEmailSendJob(mine!, signal, transport);
+  expect(transport.calls).toHaveLength(0);
+  const [outbound] =
+    await sql`SELECT status, reason FROM outbound_actions WHERE intent_id=${seeded.intentId}`;
+  expect(outbound?.status).toBe('blocked');
+  expect(String(outbound?.reason)).toContain('Global outbound pause');
+});
+
 test('agent pause after approval blocks dispatch', async () => {
   await releasePause();
   const agent = await createAgent('live');

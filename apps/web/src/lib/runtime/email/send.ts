@@ -22,6 +22,7 @@ import {
 } from '@/lib/runtime/outbound/dispatch';
 import { EMAIL_SEND_ACTION, EMAIL_SEND_JOB } from '@/lib/runtime/outbound/types';
 import {
+  controls,
   emailMailboxes,
   emailMessages,
   jobs,
@@ -174,6 +175,8 @@ export async function processEmailSendJob(
   // after a stale allow decision and before the provider request starts.
   const dispatch = await db().transaction(async (tx) => {
     await lockApprovalAgent(tx, outbound.agentId);
+    // Serialize with persistGlobalPause: hold controls until after provider initiation.
+    await tx.select().from(controls).where(eq(controls.id, 1)).for('update');
 
     const row = (
       await tx
