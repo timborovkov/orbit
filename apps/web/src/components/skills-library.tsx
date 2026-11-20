@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
+
 import { MoreHorizontal, Pencil, Plus } from 'lucide-react';
 
 import { removeSkill } from '@/actions/skills';
@@ -51,19 +52,7 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
   const [deletePending, startDelete] = useTransition();
   const titleRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const timer = window.setTimeout(() => {
-      const input = titleRef.current;
-      if (!input) return;
-      input.focus({ preventScroll: true });
-      const end = input.value.length;
-      input.setSelectionRange(end, end);
-    }, 0);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [open, editor.skillId]);
+  const dialogTrigger = useRef<HTMLElement | null>(null);
 
   function openCreate() {
     setEditor(emptySkillEditor());
@@ -93,7 +82,13 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
           </>
         }
         action={
-          <Button type="button" onClick={openCreate}>
+          <Button
+            type="button"
+            onClick={(event) => {
+              dialogTrigger.current = event.currentTarget;
+              openCreate();
+            }}
+          >
             <Plus size={16} aria-hidden="true" />
             New skill
           </Button>
@@ -108,12 +103,6 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
               Create a reusable skill once, then attach it to any agent from Access. Bodies stay
               progressive until <code>load_skill</code> runs.
             </>
-          }
-          action={
-            <Button type="button" onClick={openCreate}>
-              <Plus size={16} aria-hidden="true" />
-              New skill
-            </Button>
           }
         />
       ) : (
@@ -144,7 +133,8 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
                       variant="ghost"
                       size="icon"
                       aria-label={`Edit ${skill.title}`}
-                      onClick={() => {
+                      onClick={(event) => {
+                        dialogTrigger.current = event.currentTarget;
                         openEdit(skill);
                       }}
                     >
@@ -183,6 +173,7 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
                       type="button"
                       variant="ghost"
                       size="icon"
+                      id={`skill-actions-${skill.id}`}
                       aria-label={`Actions for ${skill.title}`}
                     >
                       <MoreHorizontal size={16} aria-hidden="true" />
@@ -191,6 +182,9 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
                   <DropdownMenuContent align="end" className="library-menu">
                     <DropdownMenuItem
                       onSelect={() => {
+                        dialogTrigger.current = document.getElementById(
+                          `skill-actions-${skill.id}`,
+                        );
                         openEdit(skill);
                       }}
                     >
@@ -220,14 +214,21 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
         }}
       >
         <DialogContent
-          className="library-dialog flex max-h-[calc(100dvh-2rem)] w-[min(560px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[560px]"
+          className="form-dialog form-dialog-wide"
           showCloseButton={!pending}
+          onPointerDownOutside={(event) => {
+            event.preventDefault();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            dialogTrigger.current?.focus();
+          }}
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             titleRef.current?.focus({ preventScroll: true });
           }}
         >
-          <DialogHeader className="library-dialog-header">
+          <DialogHeader className="form-dialog-header">
             <DialogTitle>{editor.skillId ? 'Edit skill' : 'New skill'}</DialogTitle>
             <DialogDescription>
               {editor.skillId

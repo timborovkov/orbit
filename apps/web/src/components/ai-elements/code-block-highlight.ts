@@ -1,4 +1,4 @@
-import { codeToHtml, type BundledLanguage, type ShikiTransformer } from 'shiki';
+import { type BundledLanguage, codeToHtml, type ShikiTransformer } from 'shiki';
 
 const lineNumberTransformer: ShikiTransformer = {
   name: 'line-numbers',

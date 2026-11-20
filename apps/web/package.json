@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "bun scripts/dev.ts",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "bun scripts/start-standalone.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun check --no-script"
   },
   "dependencies": {
     "@ai-sdk/mcp": "^2.0.101",
@@ -30,11 +30,10 @@
     "ai": "^7.0.173",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "cmdk": "^1.1.1",
     "drizzle-orm": "^0.45.4",
+    "html-to-text": "^10.0.1",
     "lucide-react": "^1.73.0",
     "motion": "^14.14.0",
-    "nanoid": "^6.0.2",
     "next": "^16.4.6",
     "postgres": "^4.1.1",
     "radix-ui": "^1.8.1",
@@ -44,6 +43,7 @@
     "sharp": "^0.35.5",
     "shiki": "^4.6.0",
     "streamdown": "^2.8.0",
+    "svix": "^2.10.0",
     "tailwind-merge": "^3.7.0",
     "tailwindcss": "^4.3.5",
     "unpdf": "^2.2.1",
@@ -51,10 +51,10 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/html-to-text": "^9.0.4",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@typescript/native": "npm:typescript@7.0.2",
-    "typescript": "npm:@typescript/typescript6@6.0.2"
+    "typescript": "7.0.2"
   }
 }

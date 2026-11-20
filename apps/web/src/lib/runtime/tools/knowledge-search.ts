@@ -5,8 +5,8 @@ import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import {
   authorizeAction,
   loadPolicyContext,
-  recordBlockedDispatch,
   type PolicyResult,
+  recordBlockedDispatch,
 } from '@/lib/policy/gateway';
 import { resolveKnowledgeEmbedders } from '@/lib/runtime/knowledge/provider';
 import { searchKnowledge } from '@/lib/runtime/knowledge/search';

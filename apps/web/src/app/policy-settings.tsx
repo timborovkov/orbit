@@ -1,6 +1,7 @@
 import { Inbox } from 'lucide-react';
 
-import { reviewProposal, saveConsent } from '@/actions/policy';
+import { reviewProposal, saveConsent, saveConsentRequirements } from '@/actions/policy';
+import { ActionRequirementsForm } from '@/app/action-requirements-form';
 import { ApprovalToolsForm } from '@/app/approval-tools-form';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
@@ -11,7 +12,9 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
-import { FieldGroup } from '@/components/ui/field';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/textarea';
+import type { ConsentScope } from '@/lib/policy/scopes';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
 type Workspace = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>;
@@ -25,6 +28,11 @@ const actionLabels = {
   introduce: 'Introduce',
   escalate: 'Escalate',
 } as Record<string, string>;
+
+const consentOptions = [
+  { value: 'introduce', label: 'Introductions' },
+  { value: 'escalate', label: 'Escalations' },
+];
 
 export function ReviewSettings({
   agentId,
@@ -47,7 +55,8 @@ export function ReviewSettings({
         <h2>Approval requirements</h2>
         <p className="muted">
           Off by default. Enable actions that must pause for an administrator before continuing.
-          Introductions and escalations always require consent and approval.
+          Introductions and escalations are optional here; recipient consent is configured
+          separately.
         </p>
       </div>
       <ApprovalToolsForm
@@ -65,9 +74,11 @@ export function ReviewSettings({
 export function ConsentSettings({
   agentId,
   consents,
+  consentRequiredTools,
 }: {
   agentId: string;
   consents: Workspace['consents'];
+  consentRequiredTools: ConsentScope[];
 }) {
   return (
     <section className="access-workbench">
@@ -77,6 +88,16 @@ export function ConsentSettings({
           Record a recipient’s choice and the source of their consent for this agent.
         </p>
       </div>
+      <ActionRequirementsForm
+        agentId={agentId}
+        idPrefix="consent-tool"
+        options={consentOptions}
+        selected={consentRequiredTools}
+        action={saveConsentRequirements}
+        label="Save consent requirements"
+        legend="Require recipient consent"
+        description="Choose which actions require recorded permission from everyone involved. Recorded refusals and revocations always block the action."
+      />
       <div className="consent-records-block">
         <h3 className="consent-records-title">Existing consents</h3>
         {consents.length > 0 ? (
@@ -95,7 +116,7 @@ export function ConsentSettings({
       </div>
       <WorkspaceForm action={saveConsent} label="Save consent">
         <input type="hidden" name="agentId" value={agentId} />
-        <FieldGroup className="gap-5">
+        <FieldGroup className="form-fields">
           <WorkspaceField
             id="consent-recipient"
             name="recipient"
@@ -104,26 +125,25 @@ export function ConsentSettings({
             required
             description="Use the same recipient ID the playground consent checks will receive."
           />
-          <WorkspaceSelect
-            id="consent-scope"
-            name="scope"
-            label="Consent scope"
-            initialValue="introduce"
-            options={[
-              { value: 'introduce', label: 'Introductions' },
-              { value: 'escalate', label: 'Escalations' },
-            ]}
-          />
-          <WorkspaceSelect
-            id="consent-outcome"
-            name="outcome"
-            label="Recipient decision"
-            initialValue="grant"
-            options={[
-              { value: 'grant', label: 'Grant' },
-              { value: 'revoke', label: 'Revoke' },
-            ]}
-          />
+          <div className="form-grid">
+            <WorkspaceSelect
+              id="consent-scope"
+              name="scope"
+              label="Consent scope"
+              initialValue="introduce"
+              options={consentOptions}
+            />
+            <WorkspaceSelect
+              id="consent-outcome"
+              name="outcome"
+              label="Recipient decision"
+              initialValue="grant"
+              options={[
+                { value: 'grant', label: 'Grant' },
+                { value: 'revoke', label: 'Revoke' },
+              ]}
+            />
+          </div>
           <WorkspaceField
             id="consent-evidence"
             name="evidence"
@@ -186,16 +206,18 @@ export function ProposalReview({
                     <input type="hidden" name="agentId" value={agentId} />
                     <input type="hidden" name="intentId" value={proposal.id} />
                     <input type="hidden" name="decision" value="approved" />
-                    <div className="approvals-draft">
-                      <label htmlFor={`draft-${proposal.id}`}>Draft (edit before approve)</label>
-                      <textarea
+                    <Field>
+                      <FieldLabel htmlFor={`draft-${proposal.id}`}>
+                        Draft (edit before approve)
+                      </FieldLabel>
+                      <Textarea
                         id={`draft-${proposal.id}`}
                         name="draft"
                         rows={3}
                         defaultValue={proposal.draft ?? ''}
                         maxLength={8000}
                       />
-                    </div>
+                    </Field>
                   </WorkspaceForm>
                   <WorkspaceForm action={reviewProposal} label="Reject">
                     <input type="hidden" name="agentId" value={agentId} />

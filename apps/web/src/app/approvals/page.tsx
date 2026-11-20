@@ -1,10 +1,10 @@
-import Image from 'next/image';
 import Link from 'next/link';
+
 import { z } from 'zod';
 
 import { ApprovalsFilter } from '@/app/approvals-filter';
 import { ApprovalsInbox } from '@/app/approvals-inbox';
-import { ThemeSwitch } from '@/app/theme';
+import { WorkspaceHeader } from '@/app/workspace-header';
 import { requireAdmin } from '@/lib/auth';
 import { getApprovalsInbox } from '@/lib/server/workspace-queries';
 
@@ -31,37 +31,8 @@ export default async function ApprovalsPage({
 
   return (
     <div className="app-shell" data-testid="approvals-page">
-      <a className="skip-link" href="#main">
-        Skip to content
-      </a>
-      <header className="app-header">
-        <div className="header-inner">
-          <Link href="/" className="brand" aria-label="Orbit home">
-            <Image src="/icon.svg" alt="" width="34" height="34" />
-            <span>Orbit</span>
-          </Link>
-          <span className="header-slash" aria-hidden="true">
-            /
-          </span>
-          <span className="workspace-name">Private workspace</span>
-          <span className="workspace-badge">Admin</span>
-          <div className="header-actions">
-            <ThemeSwitch />
-          </div>
-        </div>
-        <nav className="workspace-nav" aria-label="Workspace">
-          <div className="nav-inner">
-            <Link href="/">Overview</Link>
-            <Link href="/#agents">Agents</Link>
-            <Link href="/approvals" aria-current="page">
-              Approvals
-              {totalPendingCount > 0 && <span className="tab-count">{totalPendingCount}</span>}
-            </Link>
-            <Link href="/templates">Templates</Link>
-          </div>
-        </nav>
-      </header>
-      <main id="main" className="dashboard approvals-dashboard">
+      <WorkspaceHeader current="/approvals" pendingApprovalCount={totalPendingCount} />
+      <main id="main" tabIndex={-1} className="workspace-main approvals-dashboard">
         <div className="page-heading">
           <div>
             <h1>Approvals</h1>

@@ -31,11 +31,16 @@ export async function recordApprovalReviews(
     now: Date;
     payload?: Record<string, unknown>;
     note?: string | null;
+    /**
+     * Policy outcome after an approval re-check. Defaults to `suppressed` for
+     * approved proposals without a write adapter (historical behaviour).
+     */
+    decision?: 'allow' | 'deny' | 'suppressed';
   },
 ) {
   if (intents.length === 0) return;
   const approved = review.status === 'approved';
-  const decision = approved ? 'suppressed' : 'deny';
+  const decision = approved ? (review.decision ?? 'suppressed') : 'deny';
   await tx
     .update(actionIntents)
     .set({

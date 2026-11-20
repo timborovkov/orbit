@@ -1,20 +1,10 @@
 'use client';
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentProps,
-  type HTMLAttributes,
-} from 'react';
-import { CheckIcon, CopyIcon } from 'lucide-react';
+import { type HTMLAttributes, useEffect, useState } from 'react';
+
 import type { BundledLanguage } from 'shiki';
 
 import { highlightCode } from '@/components/ai-elements/code-block-highlight';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
@@ -23,112 +13,50 @@ type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   showLineNumbers?: boolean;
 };
 
-interface CodeBlockContextType {
-  code: string;
-}
-
-const CodeBlockContext = createContext<CodeBlockContextType>({
-  code: '',
-});
-
 export const CodeBlock = ({
   code,
   language,
   showLineNumbers = false,
   className,
-  children,
   ...props
 }: CodeBlockProps) => {
   const [html, setHtml] = useState<string>('');
   const [darkHtml, setDarkHtml] = useState<string>('');
-  const mounted = useRef(false);
 
   useEffect(() => {
+    let current = true;
     void highlightCode(code, language, showLineNumbers).then(([light, dark]) => {
-      if (!mounted.current) {
+      if (current) {
         setHtml(light);
         setDarkHtml(dark);
-        mounted.current = true;
       }
     });
 
     return () => {
-      mounted.current = false;
+      current = false;
     };
   }, [code, language, showLineNumbers]);
 
-  const contextValue = useMemo(() => ({ code }), [code]);
-
   return (
-    <CodeBlockContext.Provider value={contextValue}>
-      <div
-        className={cn(
-          'group relative w-full overflow-hidden rounded-md border bg-background text-foreground',
-          className,
-        )}
-        {...props}
-      >
-        <div className="relative">
-          <div
-            className="overflow-auto dark:hidden [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&_code]:font-mono [&_code]:text-sm"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
-          <div
-            className="hidden overflow-auto dark:block [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&_code]:font-mono [&_code]:text-sm"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
-            dangerouslySetInnerHTML={{ __html: darkHtml }}
-          />
-          {children && (
-            <div className="absolute top-2 right-2 flex items-center gap-2">{children}</div>
-          )}
-        </div>
-      </div>
-    </CodeBlockContext.Provider>
-  );
-};
-
-export type CodeBlockCopyButtonProps = ComponentProps<typeof Button> & {
-  onCopy?: () => void;
-  onError?: (error: Error) => void;
-  timeout?: number;
-};
-
-export const CodeBlockCopyButton = ({
-  onCopy,
-  onError,
-  timeout = 2000,
-  children,
-  className,
-  ...props
-}: CodeBlockCopyButtonProps) => {
-  const [isCopied, setIsCopied] = useState(false);
-  const { code } = useContext(CodeBlockContext);
-
-  const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setIsCopied(true);
-      onCopy?.();
-      setTimeout(() => {
-        setIsCopied(false);
-      }, timeout);
-    } catch (error) {
-      onError?.(error as Error);
-    }
-  };
-
-  const Icon = isCopied ? CheckIcon : CopyIcon;
-
-  return (
-    <Button
-      className={cn('shrink-0', className)}
-      onClick={copyToClipboard}
-      size="icon"
-      variant="ghost"
+    <div
+      className={cn(
+        'group relative w-full overflow-hidden rounded-md border bg-background text-foreground',
+        className,
+      )}
       {...props}
     >
-      {children ?? <Icon size={14} />}
-    </Button>
+      <div className="relative">
+        <div
+          className="overflow-auto dark:hidden [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&_code]:font-mono [&_code]:text-sm"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+        <div
+          className="hidden overflow-auto dark:block [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&_code]:font-mono [&_code]:text-sm"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
+          dangerouslySetInnerHTML={{ __html: darkHtml }}
+        />
+      </div>
+    </div>
   );
 };

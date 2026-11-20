@@ -2,16 +2,19 @@ import 'server-only';
 
 import { and, desc, eq, isNull } from 'drizzle-orm';
 
-import { budgetDefaults, budgetsSchema, type AgentBudgets } from '@/lib/budgets';
+import { type AgentBudgets, budgetDefaults, budgetsSchema } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import {
+  canAcceptBackgroundWork,
   lifecycleLabels,
   lifecycleSchema,
-  shouldCancelPendingJobs,
   type LifecycleState,
+  shouldCancelPendingJobs,
 } from '@/lib/lifecycle';
 import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
-import { agents, audit, configurations, type ApprovalSettings } from '@/lib/schema';
+import { configSchema } from '@/lib/runtime/config';
+import { ensureDiscoveryPollJob } from '@/lib/runtime/x/poll';
+import { agents, type ApprovalSettings, audit, configurations } from '@/lib/schema';
 
 export async function persistLifecycle(actor: string, agentId: string, next: LifecycleState) {
   const parsed = lifecycleSchema.safeParse(next);
@@ -47,10 +50,23 @@ export async function persistLifecycle(actor: string, agentId: string, next: Lif
       });
     }
 
+    if (canAcceptBackgroundWork(parsed.data)) {
+      const version = (
+        await tx
+          .select()
+          .from(configurations)
+          .where(eq(configurations.agentId, agentId))
+          .orderBy(desc(configurations.version))
+          .limit(1)
+      ).at(0);
+      const query = version ? configSchema.parse(version.config).xSearchQuery.trim() : '';
+      if (query) await ensureDiscoveryPollJob(agentId, tx);
+    }
+
     return {
       message:
         parsed.data === 'live'
-          ? 'Live lifecycle saved. No external action adapters exist yet, so proposals stay suppressed.'
+          ? 'Live lifecycle saved. Administrator-approved email replies may dispatch; other proposals stay suppressed until their adapters land.'
           : `Lifecycle set to ${lifecycleLabels[parsed.data].toLowerCase()}.`,
     };
   });

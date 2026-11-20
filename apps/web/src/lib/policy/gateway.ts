@@ -4,24 +4,24 @@ import { notifyApprovalPending } from '@/lib/approvals/notify';
 import { actionNeedsApproval, mergeApprovalTools } from '@/lib/approvals/rules';
 import {
   BudgetError,
+  type BudgetSnapshot,
+  type BudgetViolation,
   budgetViolationMessage,
   checkOutboundBudgets,
   checkRequestBudgets,
   hasSpendCap,
   parseBudgets,
-  type BudgetSnapshot,
-  type BudgetViolation,
 } from '@/lib/budgets';
-import { db, type Db, type Tx } from '@/lib/db';
+import { type Db, db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
-import {
-  canAcceptBackgroundWork,
-  externalWritesPermitted,
-  type LifecycleState,
-} from '@/lib/lifecycle';
+import { canAcceptBackgroundWork, type LifecycleState } from '@/lib/lifecycle';
 import { mcpToolId, mcpToolIsReadOnly, normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
-import { missingRecipientConsent } from '@/lib/policy/consent';
+import { recipientConsentFailure } from '@/lib/policy/consent';
+import { type ExecutionContext, executionContextForOrigin } from '@/lib/policy/execution-context';
+import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
+import type { ConsentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
+import { hasWriteAdapter } from '@/lib/runtime/outbound/types';
 import {
   actionIntents,
   agentMcpConnections,
@@ -29,10 +29,10 @@ import {
   configurations,
   controls,
   mcpConnections,
+  type McpTransport,
   policyDecisions,
   runs,
   usageCounters,
-  type McpTransport,
 } from '@/lib/schema';
 
 export type PolicyDecision = 'allow' | 'deny' | 'needs-approval' | 'suppressed';
@@ -53,11 +53,14 @@ export interface PolicyContext {
   actor: string;
   agentId: string;
   runId?: string | null;
+  /** Derived from the run origin; replay always suppresses external writes. */
+  executionContext: ExecutionContext;
   lifecycle: LifecycleState;
   enabledTools: string[];
   approvalTools: string[];
   approvalSpendCents: number | null;
   approvalExpiresAfterHours: number | null;
+  consentRequiredTools: ConsentScope[];
   budgets: ReturnType<typeof parseBudgets>;
   globalPaused: boolean;
   usage: BudgetSnapshot['day'] & { month: BudgetSnapshot['month']; activeRuns: number };
@@ -89,16 +92,20 @@ export async function loadPolicyContext(
 ): Promise<PolicyContext | null> {
   const agent = (await store.select().from(agents).where(eq(agents.id, agentId))).at(0);
   if (!agent) return null;
-  const snapshot = runId
+  const runRow = runId
     ? (
         await store
-          .select({ settings: configurations.approvalSettings })
+          .select({
+            settings: configurations.approvalSettings,
+            origin: runs.origin,
+          })
           .from(runs)
           .innerJoin(configurations, eq(configurations.id, runs.configurationId))
           .where(and(eq(runs.id, runId), eq(runs.agentId, agentId)))
-      ).at(0)?.settings
+      ).at(0)
     : undefined;
-  const approval = snapshot ?? agent;
+  const approval = runRow?.settings ?? agent;
+  const executionContext = executionContextForOrigin(runRow?.origin);
   const global = (await store.select().from(controls).where(eq(controls.id, 1))).at(0);
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -130,11 +137,13 @@ export async function loadPolicyContext(
     actor,
     agentId,
     runId: runId ?? null,
+    executionContext,
     lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
     approvalTools: mergeApprovalTools(approval.approvalTools, global?.approvalTools),
     approvalSpendCents: approval.approvalSpendCents,
     approvalExpiresAfterHours: approval.approvalExpiresAfterHours,
+    consentRequiredTools: agent.consentRequiredTools,
     budgets: parseBudgets(agent.budgets),
     globalPaused: global?.paused ?? true,
     usage: {
@@ -162,17 +171,13 @@ export function evaluateCandidate(
   action: CandidateAction,
   consentFailure: string | null = null,
   mcpGranted = false,
+  options: { skipApproval?: boolean } = {},
 ): {
   decision: PolicyDecision;
   reasons: string[];
   violation?: BudgetViolation;
 } {
   const reasons: string[] = [];
-
-  if (ctx.globalPaused && !action.readOnly) {
-    reasons.push('Global outbound pause is enabled.');
-    return { decision: 'deny', reasons };
-  }
 
   if (ctx.lifecycle === 'stopped') {
     reasons.push('Agent is stopped; external writes are blocked.');
@@ -224,7 +229,17 @@ export function evaluateCandidate(
     }
 
     if (consentFailure) return { decision: 'deny', reasons: [consentFailure] };
+
+    // Replay suppresses before approval so comparisons never suspend for review.
+    if (ctx.executionContext === 'replay') {
+      reasons.push('Replay execution suppresses all external writes.');
+      return { decision: 'suppressed', reasons };
+    }
+
+    // Record approval proposals even while the global pause is on; pause still
+    // blocks approve-time rechecks and dispatch (skipApproval path below).
     if (
+      !options.skipApproval &&
       actionNeedsApproval({
         actionType: action.type,
         preliminary: action.preliminary,
@@ -239,16 +254,27 @@ export function evaluateCandidate(
       };
     }
 
-    // No external write adapters exist yet. Persist the intent and suppress dispatch.
-    // Live remains a first-class state so activation can unlock adapters later.
-    if (!externalWritesPermitted(ctx.lifecycle)) {
-      reasons.push('Shadow mode suppresses external writes. Proposal logged only.');
+    if (ctx.globalPaused) {
+      reasons.push('Global outbound pause is enabled.');
+      return { decision: 'deny', reasons };
+    }
+
+    // Structural outbound gate — replay refuses; live needs a write adapter.
+    const dispatch = authorizeOutboundDispatch({
+      executionContext: ctx.executionContext,
+      lifecycle: ctx.lifecycle,
+      adapterAvailable: hasWriteAdapter(action.type),
+    });
+    if (!dispatch.allowed) {
+      reasons.push(
+        ctx.lifecycle === 'live'
+          ? 'Live mode is active, but no external action adapter is configured for this action. Proposal suppressed.'
+          : 'Shadow mode suppresses external writes. Proposal logged only.',
+      );
       return { decision: 'suppressed', reasons };
     }
-    reasons.push(
-      'Live mode is active, but no external action adapters are configured yet. Proposal suppressed.',
-    );
-    return { decision: 'suppressed', reasons };
+    reasons.push('Authorized for outbound dispatch.');
+    return { decision: 'allow', reasons };
   }
 
   // load_skill and authorized MCP tools add neither inference requests nor spend —
@@ -306,7 +332,13 @@ export async function authorizeAction(
     const recipients = action.recipients ?? [];
     const consentFailure = action.readOnly
       ? null
-      : await missingRecipientConsent(tx, ctx.agentId, action.type, recipients);
+      : await recipientConsentFailure(
+          tx,
+          current.agentId,
+          action.type,
+          recipients,
+          current.consentRequiredTools,
+        );
     const mcp = action.type.startsWith('mcp:') && action.readOnly ? action.mcp : undefined;
     const grant =
       mcp &&
@@ -722,22 +754,29 @@ export function evaluateActionForTest(
     | 'approvalTools'
     | 'approvalSpendCents'
     | 'approvalExpiresAfterHours'
+    | 'consentRequiredTools'
+    | 'executionContext'
   > & {
     usage?: PolicyContext['usage'];
     approvalTools?: string[];
     approvalSpendCents?: number | null;
     approvalExpiresAfterHours?: number | null;
+    consentRequiredTools?: ConsentScope[];
+    executionContext?: ExecutionContext;
   },
   action: CandidateAction,
+  options?: { skipApproval?: boolean },
 ) {
   return evaluateCandidate(
     {
       actor: 'test',
       agentId: '00000000-0000-0000-0000-000000000000',
       runId: null,
+      executionContext: ctx.executionContext ?? 'standard',
       approvalTools: ctx.approvalTools ?? [],
       approvalSpendCents: ctx.approvalSpendCents ?? null,
       approvalExpiresAfterHours: ctx.approvalExpiresAfterHours ?? null,
+      consentRequiredTools: ctx.consentRequiredTools ?? [],
       usage: ctx.usage ?? {
         ...emptyUsage(),
         month: emptyUsage(),
@@ -746,5 +785,8 @@ export function evaluateActionForTest(
       ...ctx,
     },
     action,
+    null,
+    false,
+    options,
   );
 }

@@ -2,7 +2,7 @@
 
 import { Plus, X } from 'lucide-react';
 
-import { newHeaderRow, type McpEditorState } from '@/components/mcp-editor-state';
+import { type McpEditorState, newHeaderRow } from '@/components/mcp-editor-state';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,7 @@ export function McpHeaderRows({
   pending: boolean;
 }) {
   return (
-    <Field>
+    <Field className="form-section">
       <FieldLabel>Auth headers</FieldLabel>
       <FieldDescription>
         {editor.hasHeaders && !editor.clearHeaders
@@ -55,7 +55,6 @@ export function McpHeaderRows({
                 placeholder="Authorization"
                 disabled={pending}
                 value={row.key}
-                className="library-field-control"
                 onChange={(event) => {
                   const key = event.target.value;
                   setEditor((previous) => ({
@@ -73,7 +72,6 @@ export function McpHeaderRows({
                 autoComplete="off"
                 disabled={pending}
                 value={row.value}
-                className="library-field-control"
                 onChange={(event) => {
                   const value = event.target.value;
                   setEditor((previous) => ({

@@ -1,4 +1,5 @@
 import { hostname } from 'node:os';
+
 import * as Sentry from '@sentry/bun';
 
 import { closeDb } from '@/lib/db';
@@ -7,12 +8,33 @@ import { registerErrorCapture } from '@/lib/observability/errors';
 import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import { startJobWorker } from '@/lib/queue/worker';
 import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
+import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
+import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
+import {
+  finalizeExhaustedOutboundJob,
+  processEmailSendJob,
+  reconcileDeadOutboundJobs,
+} from '@/lib/runtime/email/send';
+import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB, EMAIL_SEND_JOB } from '@/lib/runtime/email/settings';
+import {
+  EVALUATION_REPLAY_JOB,
+  finalizeExhaustedEvaluationReplayJob,
+  processEvaluationReplayJob,
+  reconcileDeadEvaluationReplayJobs,
+} from '@/lib/runtime/evaluation';
 import {
   finalizeExhaustedSimulationJob,
+  processEmailDraftJob,
   processSimulationJob,
   reconcileOrphanedSimulationRuns,
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
+import {
+  finalizeFailedFollowUpJob,
+  FOLLOW_UP_JOB_TYPE,
+  processFollowUpJob,
+  reconcileDeadFollowUpJobs,
+} from '@/lib/runtime/follow-ups/process';
 import {
   finalizeFailedKnowledgeJob,
   processKnowledgeDocument,
@@ -20,6 +42,10 @@ import {
 } from '@/lib/runtime/knowledge/process';
 import { resolveKnowledgeEmbedders } from '@/lib/runtime/knowledge/provider';
 import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
+import { createXSearchAdapter } from '@/lib/runtime/x/adapter';
+import { processDiscoveryPoll } from '@/lib/runtime/x/poll';
+import { resolveXBearerToken } from '@/lib/runtime/x/settings';
+import { X_DISCOVERY_POLL_JOB } from '@/lib/runtime/x/types';
 import { workerEnvConfig } from '@/lib/worker-env';
 
 const config = workerEnvConfig();
@@ -31,6 +57,11 @@ if (config.OPENROUTER_API_KEY) {
   process.env.OPENROUTER_API_KEY = config.OPENROUTER_API_KEY;
 } else {
   delete process.env.OPENROUTER_API_KEY;
+}
+if (config.X_BEARER_TOKEN) {
+  process.env.X_BEARER_TOKEN = config.X_BEARER_TOKEN;
+} else {
+  delete process.env.X_BEARER_TOKEN;
 }
 
 const sentry = sentryInitOptions();
@@ -59,15 +90,55 @@ function jobCorrelation(job: { id: string; payload: Record<string, unknown> }) {
   };
 }
 
+const xAdapter = createXSearchAdapter(resolveXBearerToken(config.X_BEARER_TOKEN));
+
 const worker = startJobWorker({
   workerId,
   handlers: {
+    [EMAIL_RECEIVE_JOB]: (job, signal) =>
+      processEmailReceiveJob(job, workerId, signal, (emailId, fetchSignal) =>
+        fetchReceivedEmail(emailId, config.RESEND_API_KEY, fetchSignal),
+      ),
+    [EMAIL_DRAFT_JOB]: (job, signal) =>
+      processEmailDraftJob(job.payload, undefined, signal, {
+        jobId: job.id,
+        workerId,
+      }),
+    [EMAIL_SEND_JOB]: (job, signal) =>
+      processEmailSendJob(job, signal, undefined, {
+        apiKey: config.RESEND_API_KEY,
+        sendingDomain: config.RESEND_SENDING_DOMAIN,
+      }),
     [SIMULATION_JOB_TYPE]: async (job, signal) => {
       try {
         await processSimulationJob(job.payload, undefined, signal, {
           jobId: job.id,
           workerId,
         });
+      } catch (error) {
+        reportFailure('worker.queue', jobCorrelation(job), error);
+        throw error;
+      }
+    },
+    [EVALUATION_REPLAY_JOB]: async (job, signal) => {
+      try {
+        await processEvaluationReplayJob(job.payload, undefined, signal, {
+          jobId: job.id,
+          workerId,
+          jobType: EVALUATION_REPLAY_JOB,
+        });
+      } catch (error) {
+        reportFailure('worker.queue', jobCorrelation(job), error);
+        throw error;
+      }
+    },
+    [X_DISCOVERY_POLL_JOB]: async (job, signal) => {
+      try {
+        const result = await processDiscoveryPoll(job, signal, {
+          adapter: xAdapter,
+          jobId: job.id,
+        });
+        if (result.deferUntil) return { deferUntil: result.deferUntil };
       } catch (error) {
         reportFailure('worker.queue', jobCorrelation(job), error);
         throw error;
@@ -91,21 +162,44 @@ const worker = startJobWorker({
         throw error;
       }
     },
+    [FOLLOW_UP_JOB_TYPE]: async (job) => {
+      try {
+        await processFollowUpJob(job.payload, job.attempts);
+      } catch (error) {
+        reportFailure('worker.runtime', jobCorrelation(job), error);
+        throw error;
+      }
+    },
   },
   onDeadLetter: async (job, error) => {
     reportFailure('worker.dead_letter', jobCorrelation(job), error);
-    if (job.type === SIMULATION_JOB_TYPE) {
+    if (job.type === SIMULATION_JOB_TYPE || job.type === EMAIL_DRAFT_JOB) {
       await finalizeExhaustedSimulationJob(job.payload, error);
+      return;
+    }
+    if (job.type === EVALUATION_REPLAY_JOB) {
+      await finalizeExhaustedEvaluationReplayJob(job.payload, error);
+      return;
+    }
+    if (job.type === EMAIL_SEND_JOB) {
+      await finalizeExhaustedOutboundJob(job.payload, error);
       return;
     }
     if (job.type === KNOWLEDGE_JOB_TYPE) {
       await finalizeFailedKnowledgeJob(job.payload, error);
+      return;
+    }
+    if (job.type === FOLLOW_UP_JOB_TYPE) {
+      await finalizeFailedFollowUpJob(job.payload, error);
     }
   },
   reconcileDeadLetters: async () => {
     await Promise.all([
       reconcileOrphanedSimulationRuns(),
+      reconcileDeadEvaluationReplayJobs(),
       reconcileDeadKnowledgeJobs(),
+      reconcileDeadFollowUpJobs(),
+      reconcileDeadOutboundJobs(),
       expireStaleApprovals(),
       reconcileSuspendedApprovals(),
     ]);

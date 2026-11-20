@@ -1,10 +1,19 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
+
 import { Plus, X } from 'lucide-react';
 
 import { createAgent } from '@/actions/agents';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
@@ -28,56 +37,62 @@ export function CreateAgent({
 }: {
   templates: { id: string; title: string; mission: string }[];
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const missionInput = useRef<HTMLTextAreaElement>(null);
   const [form, setForm] = useState(empty);
   const [pending, startTransition] = useTransition();
   function close() {
-    dialog.current?.close();
+    setOpen(false);
   }
   const nameInvalid = Boolean(form.errors.name?.length);
   const missionInvalid = Boolean(form.errors.mission?.length);
   return (
-    <>
-      <Button
-        onClick={() => {
-          setForm(empty);
-          dialog.current?.showModal();
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (pending) return;
+        if (nextOpen) setForm(empty);
+        setOpen(nextOpen);
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button>
+          <Plus size={16} aria-hidden="true" />
+          Create agent
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        className="form-dialog"
+        showCloseButton={false}
+        onPointerDownOutside={(event) => {
+          event.preventDefault();
+        }}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
           nameInput.current?.focus();
         }}
       >
-        <Plus size={16} aria-hidden="true" />
-        Create agent
-      </Button>
-      <dialog
-        ref={dialog}
-        aria-labelledby="create-title"
-        aria-describedby="create-description"
-        className="create-dialog"
-        onCancel={(e) => {
-          if (pending) e.preventDefault();
-        }}
-      >
-        <div className="dialog-heading">
-          <h2 id="create-title">Create agent</h2>
+        <DialogHeader className="form-dialog-header">
+          <DialogTitle>Create agent</DialogTitle>
           <Button
             type="button"
             variant="ghost"
             size="icon"
             aria-label="Close dialog"
+            className="form-dialog-close"
             disabled={pending}
             onClick={close}
           >
             <X size={18} aria-hidden="true" />
           </Button>
-        </div>
-        <p id="create-description" className="muted">
-          Define an identity and a mission. New agents start in shadow mode with external writes
-          suppressed, and can use the server OpenRouter key until you add an agent-specific override
-          under Access.
-        </p>
+          <DialogDescription>
+            Your agent starts in shadow mode, with external writes suppressed. You can set its
+            OpenRouter key under Access.
+          </DialogDescription>
+        </DialogHeader>
         <form
+          className="form-dialog-form"
           action={(data) => {
             startTransition(async () => {
               setForm((previous) => ({ ...previous, error: '', errors: {} }));
@@ -101,8 +116,8 @@ export function CreateAgent({
             });
           }}
         >
-          <fieldset aria-disabled={pending}>
-            <FieldGroup className="gap-5">
+          <fieldset aria-disabled={pending} className="form-dialog-body">
+            <FieldGroup className="form-fields">
               <Field>
                 <FieldLabel htmlFor="agent-template">Template</FieldLabel>
                 <input type="hidden" name="templateId" value={form.templateId} />
@@ -118,10 +133,15 @@ export function CreateAgent({
                     }));
                   }}
                 >
-                  <SelectTrigger id="agent-template" className="w-full" aria-label="Template">
+                  <SelectTrigger
+                    id="agent-template"
+                    className="w-full"
+                    aria-label="Template"
+                    aria-describedby="agent-template-hint"
+                  >
                     <SelectValue placeholder="Choose a template" />
                   </SelectTrigger>
-                  <SelectContent portalled={false} position="popper" className="z-[100]">
+                  <SelectContent>
                     {templates.map((template) => (
                       <SelectItem key={template.id} value={template.id}>
                         {template.title}
@@ -129,8 +149,8 @@ export function CreateAgent({
                     ))}
                   </SelectContent>
                 </Select>
-                <FieldDescription>
-                  Choosing a template fills the mission. Existing agents are never changed.
+                <FieldDescription id="agent-template-hint">
+                  Choosing a template fills in the mission.
                 </FieldDescription>
               </Field>
               <Field data-invalid={nameInvalid || undefined}>
@@ -189,12 +209,12 @@ export function CreateAgent({
               </Field>
             </FieldGroup>
           </fieldset>
-          {form.error ? (
-            <p role="alert" className="form-error">
-              {form.error}
-            </p>
-          ) : null}
-          <div className="dialog-actions">
+          <div className="form-dialog-footer">
+            {form.error ? (
+              <p role="alert" className="form-error">
+                {form.error}
+              </p>
+            ) : null}
             <Button type="button" variant="outline" disabled={pending} onClick={close}>
               Cancel
             </Button>
@@ -203,7 +223,7 @@ export function CreateAgent({
             </Button>
           </div>
         </form>
-      </dialog>
-    </>
+      </DialogContent>
+    </Dialog>
   );
 }

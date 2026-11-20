@@ -10,7 +10,7 @@ import {
 
 import { KnowledgeCitations } from '@/app/knowledge-citations';
 import { formatUtcTimestamp } from '@/lib/format';
-import { groundedAnswerFromResult } from '@/lib/runtime/simulation';
+import { draftAnswerFromResult, groundedAnswerFromResult } from '@/lib/runtime/simulation';
 import type { runs } from '@/lib/schema';
 
 function PolicyLabel({ policy }: { policy: string | undefined }) {
@@ -45,11 +45,18 @@ function PolicyLabel({ policy }: { policy: string | undefined }) {
 export function RunContent({
   run,
   interrupted = false,
+  /** Email drafting (and email evaluation replay) show uncited drafts, matching the inbox. */
+  preferDraftAnswer = false,
 }: {
   run: typeof runs.$inferSelect;
   interrupted?: boolean;
+  preferDraftAnswer?: boolean;
 }) {
+  const pending =
+    !interrupted &&
+    (run.status === 'queued' || run.status === 'running' || run.status === 'awaiting_approval');
   const grounded = groundedAnswerFromResult(run.result);
+  const draft = preferDraftAnswer && !grounded ? draftAnswerFromResult(run.result) : null;
   return (
     <div className="run-content">
       <section className="run-input">
@@ -59,10 +66,7 @@ export function RunContent({
       {interrupted && (
         <div className="run-notice">
           <CircleAlert size={18} aria-hidden="true" />
-          <p>
-            This run was interrupted. Its partial results are saved. Start a new simulation to
-            retry.
-          </p>
+          <p>{run.deferReason ?? 'This run was interrupted.'} Any partial results are saved.</p>
         </div>
       )}
       {run.result.error && (
@@ -76,6 +80,12 @@ export function RunContent({
           <h3>Answer from knowledge</h3>
           <p className="preserve-text">{grounded.answer}</p>
           <KnowledgeCitations sources={grounded.sources} />
+        </section>
+      )}
+      {draft && (
+        <section>
+          <h3>Draft reply</h3>
+          <p className="preserve-text">{draft.answer}</p>
         </section>
       )}
       {run.result.steps.map((step) => (
@@ -109,7 +119,11 @@ export function RunContent({
           <h3>Proposed actions</h3>
           <span className="muted">{run.result.actions.length} · Simulation only</span>
         </div>
-        {!run.result.actions.length && <p className="muted">No actions proposed.</p>}
+        {!run.result.actions.length && (
+          <p className="muted">
+            {pending ? 'Waiting for proposed actions.' : 'No actions proposed.'}
+          </p>
+        )}
         {run.result.actions.map((action) => (
           <article key={action.type} className="action-proposal">
             <div className="result-section-heading">
@@ -125,50 +139,7 @@ export function RunContent({
           </article>
         ))}
       </section>
-      {((run.result.toolCalls?.length ?? 0) > 0 ||
-        (run.result.skillVersions?.length ?? 0) > 0 ||
-        (run.result.mcpConnections?.length ?? 0) > 0) && (
-        <section className="proposals" aria-label="Skills and tools">
-          <div className="result-section-heading">
-            <h3>Skills and tools</h3>
-          </div>
-          {!!run.result.skillVersions?.length && (
-            <ul className="resource-meta-list">
-              {run.result.skillVersions.map((skill) => (
-                <li key={skill.skillId}>
-                  {skill.name} · v{skill.version}
-                  {skill.loaded ? ' · loaded' : ' · catalogue only'}
-                </li>
-              ))}
-            </ul>
-          )}
-          {!!run.result.mcpConnections?.length && (
-            <ul className="resource-meta-list">
-              {run.result.mcpConnections.map((connection) => (
-                <li key={connection.connectionId}>
-                  {connection.name}: {connection.status}
-                  {connection.error ? ` · ${connection.error}` : ''}
-                  {connection.tools.length
-                    ? ` · ${connection.tools.length} tool${connection.tools.length === 1 ? '' : 's'}`
-                    : ''}
-                </li>
-              ))}
-            </ul>
-          )}
-          {!!run.result.toolCalls?.length && (
-            <ul className="resource-meta-list">
-              {run.result.toolCalls.map((call) => (
-                <li
-                  key={`${call.tool}:${JSON.stringify(call.args)}:${call.policy}:${call.error ?? ''}`}
-                >
-                  {call.tool} · {call.policy}
-                  {call.error ? ` · ${call.error}` : ''}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
+      <RunResources result={run.result} />
       <details className="run-metadata">
         <summary>Run metadata</summary>
         <p>Run {run.id}</p>
@@ -176,5 +147,56 @@ export function RunContent({
         <p>{formatUtcTimestamp(run.createdAt)}</p>
       </details>
     </div>
+  );
+}
+
+function RunResources({
+  result: { toolCalls, skillVersions, mcpConnections },
+}: {
+  result: (typeof runs.$inferSelect)['result'];
+}) {
+  if (!toolCalls?.length && !skillVersions?.length && !mcpConnections?.length) return null;
+
+  return (
+    <section className="proposals" aria-label="Skills and tools">
+      <div className="result-section-heading">
+        <h3>Skills and tools</h3>
+      </div>
+      {!!skillVersions?.length && (
+        <ul className="resource-meta-list">
+          {skillVersions.map((skill) => (
+            <li key={skill.skillId}>
+              {skill.name} · v{skill.version}
+              {skill.loaded ? ' · loaded' : ' · catalogue only'}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!!mcpConnections?.length && (
+        <ul className="resource-meta-list">
+          {mcpConnections.map((connection) => (
+            <li key={connection.connectionId}>
+              {connection.name}: {connection.status}
+              {connection.error ? ` · ${connection.error}` : ''}
+              {connection.tools.length
+                ? ` · ${connection.tools.length} tool${connection.tools.length === 1 ? '' : 's'}`
+                : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!!toolCalls?.length && (
+        <ul className="resource-meta-list">
+          {toolCalls.map((call) => (
+            <li
+              key={`${call.tool}:${JSON.stringify(call.args)}:${call.policy}:${call.error ?? ''}`}
+            >
+              {call.tool} · {call.policy}
+              {call.error ? ` · ${call.error}` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

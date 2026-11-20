@@ -30,7 +30,9 @@ docker build -f docker/worker.Dockerfile -t orbit-worker .
 
 The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker claims simulation and knowledge-processing jobs, heartbeats leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
 
-If your package registry uses a private CA, pass its PEM file with `--secret id=npm_ca,src=/path/to/ca.pem` when building. The CA is mounted only for dependency installation and is not copied into the image. TLS verification remains enabled.
+The Dockerfiles use the base image's trust store for dependency installation. Railway's Docker builder does not support BuildKit secret mounts.
+
+Production web builds use webpack. The web image installs locked production dependencies in its runtime stage so server instrumentation is available when the standalone server starts.
 
 ## RustFS object storage
 
@@ -83,3 +85,33 @@ agent. Browser capture needs `NEXT_PUBLIC_SENTRY_DSN` at web image build, as
 above. Source map upload needs `SENTRY_AUTH_TOKEN` and is skipped without it.
 See [architecture.md](../architecture.md) §12 and the Phase 2 observability
 decision for tracing behaviour, redaction and evaluations.
+
+## Email (inbound and approved outbound replies)
+
+Apply `apps/web/drizzle/0014_inbound_email.sql` and
+`apps/web/drizzle/0015_outbound_email.sql` with `bun run db:migrate` before deploying
+either service. Deploy the worker with `RESEND_API_KEY` for the Resend Receiving API
+and outbound sends, then deploy the web service with `RESEND_INBOUND_DOMAIN` and
+`RESEND_WEBHOOK_SECRET`. Optional `RESEND_SENDING_DOMAIN` on the worker constrains
+From addresses to that verified domain. All of these variables are optional for
+deployments without email. The API key belongs on the worker only.
+
+In Resend, enable receiving for a dedicated subdomain and verify the MX record shown
+for that domain. Verify the same domain (or a dedicated sending domain) for outbound
+mail. Create a webhook for `email.received` at
+`https://<app-host>/api/webhooks/resend` and use that webhook’s signing secret.
+Turn on delivery after the migration, worker, and web service are ready. Store
+credentials as runtime secrets. Old mailbox addresses keep their original domain
+if the environment value changes, so keep receiving configured for those addresses.
+
+Enable email for Sarah in Orbit and send a message and a reply to the displayed
+address. Check the Email tab for a single thread, local drafts, citations when
+knowledge supports the response, and terminal run statuses. Outbound replies require
+Live lifecycle, released global pause, administrator approval, and an enabled mailbox;
+Shadow stays draft-only. Enable other agents after the smoke test passes. Fixture
+tests stub Resend retrieval, inference, and sending. Staged smoke tests can verify
+real delivery when keys are present.
+
+For rollback, disable webhook delivery first. Drain pending email drafts and
+`email.send` jobs or pause the email-enabled agents. Keep the additive migrations
+and the stored mail. Older worker builds ignore unknown job types.

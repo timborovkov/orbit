@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
 import { afterAll, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+
 import postgres from 'postgres';
 
 import { budgetDefaults, BudgetError, budgetViolationMessage } from '@/lib/budgets';
@@ -14,7 +15,12 @@ import {
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
-import { recordConsent, reviewProposedAction } from '@/lib/server/policy-mutations';
+import { persistApprovalTools } from '@/lib/server/lifecycle-mutations';
+import {
+  persistConsentRequirements,
+  recordConsent,
+  reviewProposedAction,
+} from '@/lib/server/policy-mutations';
 
 const databaseUrl =
   process.env.TEST_DATABASE_URL ??
@@ -36,6 +42,8 @@ afterAll(async () => {
     await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
     await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
     await sql`DELETE FROM usage_counters WHERE agent_id=${id}`;
+    await sql`DELETE FROM evaluation_comparisons WHERE agent_id=${id}`;
+    await sql`DELETE FROM evaluation_cases WHERE agent_id=${id}`;
     await sql`DELETE FROM simulation_runs WHERE agent_id=${id}`;
     await sql`DELETE FROM jobs WHERE payload->>'agentId'=${id}`;
     await sql`DELETE FROM agent_credentials WHERE agent_id=${id}`;
@@ -1249,22 +1257,25 @@ test('Stop wins against a model request waiting to reserve quota', async () => {
   expect(run.status).toBe('interrupted');
 });
 
-test('simulated introductions enforce scoped consent before and after human review', async () => {
+test('introductions honor independent consent and administrator review settings', async () => {
   const id = randomUUID();
   ids.push(id);
   await sql`UPDATE controls SET paused=false`;
   await sql`INSERT INTO agents(id,name,mission,budgets) VALUES (${id}, 'Consent', 'Fixture', ${sql.json(uncapped)})`;
-  const [version] = await sql`
+  await sql`
     INSERT INTO agent_configurations(agent_id,version,config,actor)
-    SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id
+    SELECT ${id},1,config,'test' FROM templates WHERE id='support'
   `;
   await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'consent-fixture')})`;
   const actor = 'test@example.com';
   const run = async () => {
+    const [latest] = await sql`
+      SELECT id FROM agent_configurations WHERE agent_id=${id} ORDER BY version DESC LIMIT 1
+    `;
     const queued = await enqueueSimulation({
       actor,
       agentId: id,
-      configurationId: version.id,
+      configurationId: latest.id,
       input: 'Synthetic introduction',
       recipients: ['fixture-a', 'fixture-b'],
     });
@@ -1298,7 +1309,28 @@ test('simulated introductions enforce scoped consent before and after human revi
   await consent('fixture-a', true);
   await consent('fixture-b', true, 'escalate');
   expect((await run()).proposal.policy).toBe('deny');
+
+  await persistConsentRequirements(actor, id, ['escalate']);
+  expect((await run()).proposal.policy).toBe('suppressed');
+  await consent('fixture-b', false);
+  const revoked = await run();
+  expect(revoked.proposal.policy).toBe('deny');
+  expect(revoked.proposal.effect).toContain('revoked consent');
+
   await consent('fixture-b', true);
+  await persistConsentRequirements(actor, id, ['introduce', 'escalate']);
+  const autonomous = await run();
+  expect(autonomous.proposal.policy).toBe('suppressed');
+  const [autonomousIntent] =
+    await sql`SELECT review_status FROM action_intents WHERE id=${autonomous.proposal.intentId}`;
+  expect(autonomousIntent.review_status).toBeNull();
+
+  await persistApprovalTools(actor, id, 1, {
+    approvalTools: ['introduce'],
+    approvalExpiresAfterHours: null,
+    approvalOnReject: 'continue',
+    approvalSpendCents: null,
+  });
   const proposed = await run();
   expect(proposed.proposal.policy).toBe('needs-approval');
   const [suspended] =
@@ -1350,4 +1382,20 @@ test('simulated introductions enforce scoped consent before and after human revi
     'deny',
   ]);
   expect(policyLog.every((row) => row.actor === actor)).toBe(true);
+
+  const escalation = {
+    type: 'escalate',
+    idempotencyKey: 'policy-fixture-escalation',
+    recipients: ['fixture-a'],
+  };
+  // Turning the introduction setting off leaves the escalation requirement independent.
+  await persistConsentRequirements(actor, id, ['escalate']);
+  expect(await authorizeAction(ctx, escalation)).toMatchObject({
+    decision: 'deny',
+    reasons: [expect.stringContaining('consent is required')],
+  });
+  await persistConsentRequirements(actor, id, []);
+  expect(
+    await authorizeAction(ctx, { ...escalation, idempotencyKey: 'policy-fixture-escalation-off' }),
+  ).toMatchObject({ decision: 'suppressed' });
 });

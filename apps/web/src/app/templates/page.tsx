@@ -5,26 +5,31 @@ import { ConfigFields } from '@/app/config-fields';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { WorkspaceHeader } from '@/app/workspace-header';
 import { env } from '@/lib/env';
-import { getTemplates } from '@/lib/server/workspace-queries';
+import { getPendingApprovalCount, getTemplates } from '@/lib/server/workspace-queries';
 
 export const dynamic = 'force-dynamic';
 export default async function Templates() {
-  const { email, items } = await getTemplates();
+  const [{ email, items }, pendingApprovalCount] = await Promise.all([
+    getTemplates(),
+    getPendingApprovalCount(),
+  ]);
   return (
     <div className="agent-shell">
-      <WorkspaceHeader name="Templates" />
-      <main className="agent-main">
+      <WorkspaceHeader current="/templates" pendingApprovalCount={pendingApprovalCount} />
+      <main className="workspace-main" id="main" tabIndex={-1}>
         {env().AUTH_DISABLED && (
           <p className="local-auth-notice" role="status">
             Authentication disabled · Local development · {email}
           </p>
         )}
-        <div className="template-page-heading">
-          <h1>Templates</h1>
-          <p className="muted">
-            A starting point for each agent. Edit the defaults here; existing agents keep their own
-            configuration.
-          </p>
+        <div className="page-heading">
+          <div>
+            <h1>Templates</h1>
+            <p className="muted">
+              A starting point for each agent. Edit the defaults here; existing agents keep their
+              own configuration.
+            </p>
+          </div>
         </div>
         <div className="template-list">
           {items.map((template) => (

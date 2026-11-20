@@ -2,12 +2,11 @@
 
 import { setAgentLifecycle } from '@/actions/lifecycle';
 import { WorkspaceForm } from '@/app/workspace-form';
-import { Button } from '@/components/ui/button';
 import {
   lifecycleDescriptions,
   lifecycleLabels,
-  lifecycleStates,
   type LifecycleState,
+  lifecycleStates,
 } from '@/lib/lifecycle';
 import { cn } from '@/lib/utils';
 
@@ -28,16 +27,11 @@ export function LifecycleControls({
           suppressed.
         </p>
       </div>
-      <div className="lifecycle-cards" role="radiogroup" aria-label="Agent lifecycle">
+      <ul className="lifecycle-cards" role="list" aria-label="Agent lifecycle">
         {lifecycleStates.map((state) => {
           const selected = lifecycle === state;
           return (
-            <div
-              key={state}
-              role="radio"
-              aria-checked={selected}
-              className={cn('lifecycle-card', selected && 'is-selected')}
-            >
+            <li key={state} className={cn('lifecycle-card', selected && 'is-selected')}>
               <div className="lifecycle-card-copy">
                 <div className="lifecycle-card-title">
                   <h3>{lifecycleLabels[state]}</h3>
@@ -45,20 +39,16 @@ export function LifecycleControls({
                 </div>
                 <p className="muted">{lifecycleDescriptions[state]}</p>
               </div>
-              {selected ? (
-                <Button type="button" variant="outline" disabled>
-                  Selected
-                </Button>
-              ) : (
+              {!selected && (
                 <WorkspaceForm action={setAgentLifecycle} label={`Set ${lifecycleLabels[state]}`}>
                   <input type="hidden" name="agentId" value={agentId} />
                   <input type="hidden" name="lifecycle" value={state} />
                 </WorkspaceForm>
               )}
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ul>
     </section>
   );
 }

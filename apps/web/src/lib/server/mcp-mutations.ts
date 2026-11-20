@@ -1,15 +1,16 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
+
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { db } from '@/lib/db';
 import {
-  mcpToolIsReadOnly,
-  normalizeMcpAllowlist,
   type AgentMcpSelection,
   type McpAllowedTool,
+  mcpToolIsReadOnly,
+  normalizeMcpAllowlist,
 } from '@/lib/mcp-allowlist';
 import { mcpEndpointHeaderError, mcpHeadersFromRows, sameMcpEndpoint } from '@/lib/runtime/mcp';
 import { encryptSecret } from '@/lib/runtime/secrets';

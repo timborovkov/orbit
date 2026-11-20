@@ -3,9 +3,10 @@ import 'server-only';
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
-import { parseBudgets } from '@/lib/budgets';
+import { budgetViolationMessage, parseBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import { openRouterKeySource } from '@/lib/runtime/openrouter-key';
+import { isExpiredSimulationRun } from '@/lib/runtime/simulation-watch';
 import {
   actionIntents,
   agentMcpConnections,
@@ -22,25 +23,36 @@ import {
   usageCounters,
 } from '@/lib/schema';
 
+async function countPendingApprovals() {
+  const [pending] = await db()
+    .select({ count: sql<number>`count(*)::int` })
+    .from(actionIntents)
+    .where(eq(actionIntents.reviewStatus, 'pending'));
+  return pending.count;
+}
+
+export async function getPendingApprovalCount() {
+  await requireAdmin();
+  return countPendingApprovals();
+}
+
 export async function getOverview() {
   const email = await requireAdmin();
-  const [team, events, state, presets, pendingApprovals] = await Promise.all([
+  return { email, pendingApprovalCount: countPendingApprovals(), data: loadOverviewData() };
+}
+
+async function loadOverviewData() {
+  const [team, events, state, presets] = await Promise.all([
     db().select().from(agents).orderBy(desc(agents.createdAt)),
     db().select().from(audit).orderBy(desc(audit.createdAt)).limit(12),
     db().select().from(controls),
     db().select().from(templates),
-    db()
-      .select({ count: sql<number>`count(*)::int` })
-      .from(actionIntents)
-      .where(eq(actionIntents.reviewStatus, 'pending')),
   ]);
   return {
-    email,
     team,
     events,
     state,
     presets,
-    pendingApprovalCount: pendingApprovals[0]?.count ?? 0,
   };
 }
 
@@ -76,16 +88,13 @@ export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: st
       .select({ count: sql<number>`count(*)::int` })
       .from(actionIntents)
       .where(and(eq(actionIntents.reviewStatus, 'pending'), agentFilter, runFilter)),
-    db()
-      .select({ count: sql<number>`count(*)::int` })
-      .from(actionIntents)
-      .where(eq(actionIntents.reviewStatus, 'pending')),
+    countPendingApprovals(),
   ]);
   return {
     team,
     items,
     pendingCount: pending[0]?.count ?? 0,
-    totalPendingCount: pendingTotal[0]?.count ?? 0,
+    totalPendingCount: pendingTotal,
   };
 }
 
@@ -129,7 +138,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     db()
       .select()
       .from(runs)
-      .where(eq(runs.agentId, id))
+      .where(and(eq(runs.agentId, id), inArray(runs.origin, ['playground', 'discovery'])))
       .orderBy(
         ...(focusRunId ? [desc(sql`${runs.id} = ${focusRunId}::uuid`)] : []),
         desc(runs.createdAt),
@@ -162,10 +171,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
       .orderBy(desc(recipientConsents.updatedAt))
       .limit(50),
     db().select().from(usageCounters).where(eq(usageCounters.agentId, id)),
-    db()
-      .select({ count: sql<number>`count(*)::int` })
-      .from(actionIntents)
-      .where(eq(actionIntents.reviewStatus, 'pending')),
+    countPendingApprovals(),
     db()
       .select({ count: sql<number>`count(*)::int` })
       .from(runs)
@@ -193,11 +199,11 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
   const jobsById = new Map(linkedJobs.map((job) => [job.id, job]));
   const viewedHistory = history.map((run) => {
     // awaiting_approval waits on reviewExpiresAt, not the execution deadline.
-    const expired =
-      (run.status === 'running' || run.status === 'queued') && run.expiresAt < new Date();
+    const expired = isExpiredSimulationRun(run);
     const deferred = Boolean(run.deferReason) && (run.status === 'failed' || expired);
     return {
       ...run,
+      deferReason: run.deferReason ?? (expired ? budgetViolationMessage('run-deadline') : null),
       interrupted: expired || run.status === 'interrupted',
       displayStatus: expired
         ? ('interrupted' as const)
@@ -222,7 +228,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     keySource: openRouterKeySource(hasAgentCredential),
     history: viewedHistory,
     reviews,
-    pendingApprovalCount: pendingApprovals[0]?.count ?? 0,
+    pendingApprovalCount: pendingApprovals,
     consents,
     current,
     skillIds: skillRows.map((row) => row.skillId),

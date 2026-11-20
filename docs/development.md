@@ -1,6 +1,6 @@
 # Development and testing
 
-Use Bun 1.4.4. Follow the [README setup](../README.md) for the local PostgreSQL database and application.
+Use Bun canary (1.4.6+, see `.bun-version`). Follow the [README setup](../README.md) for the local PostgreSQL database and application.
 
 ## Local development without login
 
@@ -12,6 +12,8 @@ AUTH_LOCAL_ADMIN_EMAIL=local-admin@example.test
 APP_URL=http://127.0.0.1:3000
 DATABASE_URL=postgres://orbit:orbit_dev@127.0.0.1:5432/orbit
 ```
+
+Run `bun run db:seed:demo` after migrations for a realistic local workspace (John, Sarah, Maya). Use `--reset` to wipe only demo-owned rows. See [AGENTS.md](../AGENTS.md#demo-seed).
 
 Run `bun run dev` and open the exact `APP_URL`. The guarded launcher binds to `127.0.0.1`; set `PORT` and update `APP_URL` together to change the port. It accepts no server flags. Do not proxy or tunnel this server.
 
@@ -34,7 +36,7 @@ bun run build
 bun run test:unit
 ```
 
-Validation includes formatting/import order, types, strict lint, unused code and React Doctor 100. Application imports use `@/*`; Prettier sorts imports automatically. Fast unit tests need no database: auth/env, pure simulation helpers, pictures, budgets, lifecycle, policy gateway and in-memory queue state transitions.
+Validation includes `bun fmt --check`, `bun check`, `bun lint --max-warnings 0`, unused code and React Doctor 100. Application imports use `@/*`; `bun fmt` sorts imports. Fast unit tests live under `tests/unit` and need no database.
 
 Heavy suites (production PRs/pushes, or manual workflow dispatch): Docker image
 builds and smoke (`Full validation`), migrated `orbit_test` PostgreSQL suites

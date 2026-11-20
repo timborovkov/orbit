@@ -1,8 +1,10 @@
 'use client';
 
 import { useId, useMemo, useState, useTransition } from 'react';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+
 import { Inbox, Pencil } from 'lucide-react';
 
 import { reviewProposal, reviewProposalsBulk } from '@/actions/policy';
@@ -16,6 +18,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
+import { Field, FieldLabel } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { approvalReviewLimit } from '@/lib/approvals/rules';
@@ -30,6 +33,7 @@ const actionLabels = {
   bookmark: 'Bookmark',
   introduce: 'Introduce',
   escalate: 'Escalate',
+  'email.send': 'Email reply',
 } as Record<string, string>;
 
 export interface ApprovalItem {
@@ -51,7 +55,7 @@ export interface ApprovalItem {
 function statusBadge(status: ApprovalItem['status']) {
   if (status === 'approved') {
     return (
-      <Badge className="border-transparent bg-emerald-600/15 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300">
+      <Badge className="border-transparent bg-emerald-600/15 text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-300">
         approved
       </Badge>
     );
@@ -149,16 +153,18 @@ function PendingCard({
             <AgeWithTooltip value={item.createdAt} renderedAt={renderedAt} />
           </div>
           <div className="approvals-card-actions">
-            <Button
-              type="button"
-              size="sm"
-              disabled={pendingUi}
-              onClick={() => {
-                onReview('approved', editing ? draft : undefined);
-              }}
-            >
-              Approve
-            </Button>
+            {!editing && (
+              <Button
+                type="button"
+                size="sm"
+                disabled={pendingUi}
+                onClick={() => {
+                  onReview('approved');
+                }}
+              >
+                Approve
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
@@ -178,18 +184,19 @@ function PendingCard({
         <div className="approvals-draft-block">
           {editing ? (
             <>
-              <label htmlFor={draftId} className="approvals-draft-label">
-                Draft
-              </label>
-              <Textarea
-                id={draftId}
-                rows={3}
-                value={draft}
-                maxLength={8000}
-                onChange={(event) => {
-                  setDraft(event.target.value);
-                }}
-              />
+              <Field>
+                <FieldLabel htmlFor={draftId}>Draft</FieldLabel>
+                <Textarea
+                  id={draftId}
+                  rows={3}
+                  readOnly={pendingUi}
+                  value={draft}
+                  maxLength={8000}
+                  onChange={(event) => {
+                    setDraft(event.target.value);
+                  }}
+                />
+              </Field>
               <div className="approvals-draft-toolbar">
                 <Button
                   type="button"

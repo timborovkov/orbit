@@ -13,7 +13,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
   page,
 }) => {
   test.setTimeout(120000);
-  await sql`TRUNCATE knowledge_chunks, knowledge_documents, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await page.goto('/login');
   await page.getByLabel(/^Email/).fill('admin@example.com');
   await page.getByLabel(/^Password/).fill('test-only-password-123456');
@@ -62,7 +62,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
     'aria-selected',
     'true',
   );
-  await expect(page.getByText('A safe place to try things')).toBeVisible();
+  await expect(page.getByText('No messages yet')).toBeVisible();
   for (const mode of ['Light', 'Dark']) {
     await page.getByRole('radio', { name: mode, exact: true }).check();
     await capturePage(page, `test-results/agent-Playground-empty-${mode}.png`);
@@ -108,9 +108,12 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await openWorkspaceTab(page, 'Playground');
   await page.getByLabel(/^Post or question/).fill(input);
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
-  await expect(page.getByText('Simulation queued', { exact: false })).toBeVisible({
-    timeout: 15000,
-  });
+  await expect(
+    page
+      .locator('.playground-conversation')
+      .getByText('No OpenRouter credential available.', { exact: false }),
+  ).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('Simulation queued. Watching for results…')).toBeHidden();
   await expect(page.getByLabel('Configuration version')).toContainText('Version 1 · John');
   await openWorkspaceTab(page, /^History/);
   await expect
@@ -118,15 +121,15 @@ test('template copies, independent versions, encrypted keys and durable manual r
       timeout: 30000,
     })
     .toMatch(/failed|completed|interrupted/);
-  await page.locator('.run-detail > summary').click();
+  await page.locator('#history .run-detail > summary').click();
   await expect(
     page.locator('#history').getByText('No OpenRouter credential available.', { exact: false }),
   ).toBeVisible();
   await page.reload();
   await openWorkspaceTab(page, /^History/);
-  await page.locator('.run-detail > summary').click();
+  await page.locator('#history .run-detail > summary').click();
   await expect(
-    page.locator('.run-content').filter({ visible: true }).getByText(input, { exact: true }),
+    page.locator('#history .run-content').getByText(input, { exact: true }),
   ).toBeVisible();
   await openWorkspaceTab(page, 'Configuration');
   await page.getByRole('button', { name: 'Models', exact: true }).click();
@@ -177,8 +180,10 @@ test('template copies, independent versions, encrypted keys and durable manual r
       }
     }
   }
-  await page.getByRole('button', { name: 'Workspace navigation' }).click();
-  await page.getByRole('menuitem', { name: 'Agents', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Agents', exact: true })
+    .click();
   await page.getByRole('link', { name: 'Sarah', exact: true }).click();
   await expect(page.getByLabel('Role', { exact: true })).toHaveValue('Customer support specialist');
   await expect(page.getByLabel('Personality', { exact: true })).toHaveValue(
@@ -187,9 +192,11 @@ test('template copies, independent versions, encrypted keys and durable manual r
   await openWorkspaceTab(page, 'Playground');
   await page.getByLabel(/^Post or question/).fill(input);
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
-  await expect(page.getByText('Simulation queued', { exact: false })).toBeVisible({
-    timeout: 15000,
-  });
+  await expect(
+    page
+      .locator('.playground-conversation')
+      .getByText('No OpenRouter credential available.', { exact: false }),
+  ).toBeVisible({ timeout: 15000 });
   const versions =
     await sql`SELECT a.name,c.version,c.config FROM agents a JOIN agent_configurations c ON c.agent_id=a.id ORDER BY a.name,c.version`;
   expect(versions.map((v) => `${v.name}:${v.version}`)).toEqual(['John:1', 'John:2', 'Sarah:1']);
@@ -200,9 +207,12 @@ test('template copies, independent versions, encrypted keys and durable manual r
       return rows.length === 2 && rows.every((r) => r.input === input && r.status === 'failed');
     })
     .toBe(true);
+  await page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Agents', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Workspace navigation' }).click();
-  await page.getByRole('menuitem', { name: 'Agents', exact: true }).click();
-  await page.getByRole('link', { name: 'Templates', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Templates', exact: true }).click();
   const support = page
     .locator('details')
     .filter({ has: page.locator('summary', { hasText: 'Customer Support' }) });

@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
+
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 
 import {
   BudgetError,
+  type BudgetSnapshot,
   budgetViolationMessage,
   checkRequestBudgets,
   checkRunDeadline,
@@ -11,18 +13,24 @@ import {
   isBudgetError,
   isTrustedBudgetMessage,
   parseBudgets,
-  type BudgetSnapshot,
 } from '@/lib/budgets';
 import { db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
+import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
 import {
   lockApprovalAgent,
   recordApprovalReviews,
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
+import { emailKnowledgeQuery } from '@/lib/runtime/email/input';
+import {
+  proposeEmailReplyFromDraft,
+  recoverEmailReplyProposalIfNeeded,
+} from '@/lib/runtime/email/propose';
+import { EMAIL_DRAFT_JOB } from '@/lib/runtime/email/settings';
 import {
   isRetryableInfrastructureError,
   isUnrecoverablePaidStepFinalizationError,
@@ -42,8 +50,8 @@ import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { prepareRunTools } from '@/lib/runtime/resources';
 import {
   hasSimulationProgress,
-  simulate,
   type ModelCall,
+  simulate,
   type SimulationResult,
 } from '@/lib/runtime/simulation';
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
@@ -51,12 +59,12 @@ import { nativeTools } from '@/lib/runtime/tools/native';
 import {
   actionIntents,
   agents,
+  type ApprovalOnReject,
   configurations,
   credentials,
   jobs,
   runs,
   usageCounters,
-  type ApprovalOnReject,
 } from '@/lib/schema';
 
 export const SIMULATION_JOB_TYPE = 'simulation.run';
@@ -232,7 +240,11 @@ async function expireStaleRuns(tx: Tx, agent: Pick<typeof agents.$inferSelect, '
   // action_intents.review_expires_at / expireStaleApprovals, not run.expiresAt.
   const stale = await tx
     .update(runs)
-    .set({ status: 'interrupted', finishedAt: new Date() })
+    .set({
+      status: 'interrupted',
+      finishedAt: new Date(),
+      deferReason: budgetViolationMessage('run-deadline'),
+    })
     .where(
       and(
         eq(runs.agentId, agent.id),
@@ -301,100 +313,121 @@ export async function enqueueSimulation({
       };
     }
 
-    await expireStaleRuns(tx, agent);
-
-    const budgets = parseBudgets(agent.budgets);
-    const active = (
-      await tx
-        .select({ id: runs.id })
-        .from(runs)
-        .where(
-          and(
-            eq(runs.agentId, agentId),
-            inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
-          ),
-        )
-    ).length;
-    if (active >= budgets.maxConcurrentRuns) {
-      return {
-        error: budgetViolationMessage('concurrency'),
-      };
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const monthStart = `${today.slice(0, 7)}-01`;
-    const counters = await tx
-      .select()
-      .from(usageCounters)
-      .where(eq(usageCounters.agentId, agentId));
-    const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
-    const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
-    const snapshot: BudgetSnapshot = {
-      budgets,
-      day: {
-        spendMicros: day?.spendMicros ?? BigInt(0),
-        requests: day?.requests ?? 0,
-        outboundActions: day?.outboundActions ?? 0,
-      },
-      month: {
-        spendMicros: month?.spendMicros ?? BigInt(0),
-        requests: month?.requests ?? 0,
-        outboundActions: month?.outboundActions ?? 0,
-      },
-      activeRuns: active,
-    };
-    const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
-    if (violation && violation !== 'concurrency') {
-      return { error: budgetViolationMessage(violation) };
-    }
-
-    const config = (
-      await tx
-        .select()
-        .from(configurations)
-        .where(and(eq(configurations.id, configurationId), eq(configurations.agentId, agentId)))
-    ).at(0);
-    if (!config) {
-      return {
-        error: 'The configuration is unavailable. Refresh and try again.' as const,
-      };
-    }
-
-    const deadlineMs = budgets.runDeadlineSeconds * 1000;
-    const run = (
-      await tx
-        .insert(runs)
-        .values({
-          agentId,
-          configurationId,
-          input,
-          recipients,
-          actor,
-          status: 'queued',
-          result: { steps: [], actions: [], error: null },
-          expiresAt: new Date(Date.now() + deadlineMs),
-        })
-        .returning()
-    ).at(0);
-    if (!run) throw new Error('Run insert failed');
-
-    const job = await enqueueJob(tx, {
-      type: SIMULATION_JOB_TYPE,
-      payload: { runId: run.id, agentId, configurationId, actor },
-      idempotencyKey: `simulation:${run.id}`,
-      maxAttempts: 3,
-    });
-
-    await tx.update(runs).set({ jobId: job.id }).where(eq(runs.id, run.id));
-    return { runId: run.id, jobId: job.id };
+    return admitRun(tx, agent, { actor, configurationId, input, recipients, origin: 'playground' });
   });
 
-  if ('error' in result) return result;
+  if ('error' in result) return { error: result.error };
   return {
     message: 'Simulation queued. The worker will run it shortly.',
     runId: result.runId,
     jobId: result.jobId,
   };
+}
+
+/** Admit and enqueue a run while the caller holds the agent row lock. */
+export async function admitRun(
+  tx: Tx,
+  agent: typeof agents.$inferSelect,
+  {
+    actor,
+    configurationId,
+    input,
+    origin,
+    recipients = [],
+  }: {
+    actor: string;
+    configurationId: string;
+    input: string;
+    origin: typeof runs.$inferSelect.origin;
+    recipients?: string[];
+  },
+) {
+  const agentId = agent.id;
+  await expireStaleRuns(tx, agent);
+
+  const budgets = parseBudgets(agent.budgets);
+  const active = (
+    await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.agentId, agentId),
+          inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
+        ),
+      )
+  ).length;
+  if (active >= budgets.maxConcurrentRuns) {
+    return {
+      error: budgetViolationMessage('concurrency'),
+      waitForCapacity: true as const,
+    };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const counters = await tx.select().from(usageCounters).where(eq(usageCounters.agentId, agentId));
+  const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
+  const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
+  const snapshot: BudgetSnapshot = {
+    budgets,
+    day: {
+      spendMicros: day?.spendMicros ?? BigInt(0),
+      requests: day?.requests ?? 0,
+      outboundActions: day?.outboundActions ?? 0,
+    },
+    month: {
+      spendMicros: month?.spendMicros ?? BigInt(0),
+      requests: month?.requests ?? 0,
+      outboundActions: month?.outboundActions ?? 0,
+    },
+    activeRuns: active,
+  };
+  const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
+  if (violation && violation !== 'concurrency') {
+    return { error: budgetViolationMessage(violation) };
+  }
+
+  const config = (
+    await tx
+      .select()
+      .from(configurations)
+      .where(and(eq(configurations.id, configurationId), eq(configurations.agentId, agentId)))
+  ).at(0);
+  if (!config) {
+    return {
+      error: 'The configuration is unavailable. Refresh and try again.' as const,
+    };
+  }
+
+  const deadlineMs = budgets.runDeadlineSeconds * 1000;
+  const run = (
+    await tx
+      .insert(runs)
+      .values({
+        agentId,
+        configurationId,
+        input,
+        origin,
+        recipients,
+        actor,
+        status: 'queued',
+        result: { steps: [], actions: [], error: null },
+        expiresAt: new Date(Date.now() + deadlineMs),
+      })
+      .returning()
+  ).at(0);
+  if (!run) throw new Error('Run insert failed');
+
+  const job = await enqueueJob(tx, {
+    type: origin === 'email' ? EMAIL_DRAFT_JOB : SIMULATION_JOB_TYPE,
+    payload: { runId: run.id, agentId, configurationId, actor },
+    idempotencyKey: origin === 'email' ? `email.draft:${run.id}` : `simulation:${run.id}`,
+    maxAttempts: 3,
+  });
+
+  await tx.update(runs).set({ jobId: job.id }).where(eq(runs.id, run.id));
+  return { runId: run.id, jobId: job.id };
 }
 
 /** Queues then processes inline — used by persistence tests and local sync callers. */
@@ -420,19 +453,30 @@ export async function executeSimulation(
 export interface SimulationJobClaim {
   jobId: string;
   workerId: string;
+  /** When set, claim validation uses this job type instead of deriving it from origin. */
+  jobType?: string;
 }
+
+/** Playground vs email drafting semantics. Replay keeps origin=replay for safety. */
+export type SimulationBehavior = 'playground' | 'email';
 
 async function processSimulationRun(
   runId: string,
   inference: (key: string) => ModelCall = openRouterInference,
   externalSignal?: AbortSignal,
   claim?: SimulationJobClaim,
+  origin: typeof runs.$inferSelect.origin = 'playground',
+  /** Drafting mode when origin is `replay` (defaults to playground). */
+  behavior?: SimulationBehavior,
 ) {
+  // Persisted origin gates reclaim; behavior selects email vs playground simulate paths.
+  const simulationBehavior: SimulationBehavior =
+    behavior ?? (origin === 'email' ? 'email' : 'playground');
   const claimed = await db().transaction(async (tx) => {
     // Peek without locking so we can take the agent lock before the run lock
     // (same order as enqueueSimulation and persistLifecycle) and avoid deadlocks.
     const peek = (await tx.select().from(runs).where(eq(runs.id, runId))).at(0);
-    if (!peek) return null;
+    if (peek?.origin !== origin) return null;
     if (peek.status === 'completed' || peek.status === 'failed' || peek.status === 'interrupted') {
       return { skip: true as const, run: peek };
     }
@@ -449,6 +493,8 @@ async function processSimulationRun(
       if (peek.jobId && peek.jobId !== claim.jobId) {
         return { skip: true as const, run: peek };
       }
+      const expectedType =
+        claim.jobType ?? (origin === 'email' ? EMAIL_DRAFT_JOB : SIMULATION_JOB_TYPE);
       const jobRow = (
         await tx
           .select({ id: jobs.id })
@@ -456,6 +502,7 @@ async function processSimulationRun(
           .where(
             and(
               eq(jobs.id, claim.jobId),
+              eq(jobs.type, expectedType),
               eq(jobs.claimedBy, claim.workerId),
               eq(jobs.status, 'claimed'),
             ),
@@ -478,12 +525,14 @@ async function processSimulationRun(
     }
     // Queued claims (first start and post-approval resumes) refresh the deadline below.
     // Only interrupt mid-flight running work whose wall clock already expired.
+    // awaiting_approval is skipped earlier and waits on reviewExpiresAt instead.
     if (run.status !== 'queued' && run.expiresAt < new Date()) {
+      const deferReason = budgetViolationMessage('run-deadline');
       await tx
         .update(runs)
-        .set({ status: 'interrupted', finishedAt: new Date() })
+        .set({ status: 'interrupted', finishedAt: new Date(), deferReason })
         .where(eq(runs.id, run.id));
-      return { skip: true as const, run: { ...run, status: 'interrupted' as const } };
+      return { skip: true as const, run: { ...run, status: 'interrupted' as const, deferReason } };
     }
 
     const budgets = parseBudgets(agent.budgets);
@@ -523,7 +572,22 @@ async function processSimulationRun(
   });
 
   if (!claimed) return;
-  if (claimed.skip) return;
+  if (claimed.skip) {
+    // Completed email drafts must still have an approval intent. If proposal
+    // persistence failed after completion on an earlier attempt, recover here
+    // before exiting — retries otherwise skip completed runs forever.
+    if (origin === 'email' && claimed.run.status === 'completed' && !claimed.run.result.error) {
+      await retryableStore(() =>
+        recoverEmailReplyProposalIfNeeded({
+          agentId: claimed.run.agentId,
+          runId: claimed.run.id,
+          actor: claimed.run.actor,
+          result: claimed.run.result,
+        }),
+      );
+    }
+    return;
+  }
 
   const { run, config, budgets, executionToken, expiresAt, agent } = claimed;
   // Refuse model work for paused/stopped agents even if a job was already claimed.
@@ -571,7 +635,8 @@ async function processSimulationRun(
     version: config.version,
     jobId: claim?.jobId,
     lifecycle: agent.lifecycle,
-    trigger: 'playground',
+    trigger: origin,
+    allowContentCapture: simulationBehavior !== 'email',
   });
   const failureCorrelation = (extra: { stage?: 'evaluator' | 'main' } = {}) => ({
     runId: run.id,
@@ -735,6 +800,7 @@ async function processSimulationRun(
             if (!updated.length) throw new BudgetError('cancelled');
           },
           {
+            origin: simulationBehavior,
             maxToolSteps: budgets.maxToolStepsPerRun,
             signal,
             initial: checkpointed,
@@ -745,7 +811,10 @@ async function processSimulationRun(
             toolCalls: resources.toolCalls,
             retrieveKnowledge: agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
               ? async (requestSignal) => {
-                  const query = run.input.slice(0, 2000);
+                  const query = (
+                    simulationBehavior === 'email' ? emailKnowledgeQuery(run.input) : run.input
+                  ).slice(0, 2000);
+                  if (!query) return { status: 'deny', reason: 'No text to search.', hits: [] };
                   const args = { query, limit: 4 };
                   const slot = consumeKnowledgeToolStep(
                     resources.toolSteps,
@@ -859,6 +928,7 @@ async function processSimulationRun(
               }
             },
             onActions: async (actions, partial, stage) => {
+              if (simulationBehavior === 'email') return [];
               await assertOwned(run.id, executionToken);
               // Tool invocations are gated separately from paid inference stages
               // (evaluator/main). Do not add steps.length — that double-counts.
@@ -910,13 +980,13 @@ async function processSimulationRun(
                           preliminary: stage === 'evaluator',
                           executionToken,
                           payload: { draft: action.draft, reason: action.reason },
-                          idempotencyKey: idempotencyKey([
-                            run.id,
+                          idempotencyKey: actionIdempotencyKey({
+                            runId: run.id,
                             stage,
-                            action.type,
-                            String(index),
-                            action.reason,
-                          ]),
+                            actionType: action.type,
+                            index,
+                            reason: action.reason,
+                          }),
                         }),
                       ),
                   );
@@ -976,6 +1046,21 @@ async function processSimulationRun(
       else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
       try {
         const traceResult = { ...result, traceId: telemetry.traceId };
+        // Propose before flipping the run to completed so a transient failure
+        // leaves the run running and the job can retry. Wrap with retryableStore so
+        // ordinary DB errors become RetryableInfrastructureError (outer catch rethrows)
+        // instead of permanently failing a paid draft. Idempotent recovery also runs
+        // when skipping already-completed email drafts (see claimed.skip).
+        if (origin === 'email' && !result.error) {
+          await retryableStore(() =>
+            proposeEmailReplyFromDraft({
+              agentId: run.agentId,
+              runId: run.id,
+              actor: run.actor,
+              result: traceResult,
+            }),
+          );
+        }
         const owned = await retryableStore(() =>
           result.error
             ? updateIfOwned(run.id, executionToken, {
@@ -984,13 +1069,20 @@ async function processSimulationRun(
                 result: traceResult,
                 deferReason: isTrustedBudgetMessage(result.error) ? result.error : null,
               })
-            : finishSimulationWithApprovals(
-                run,
-                executionToken,
-                traceResult,
-                config.approvalSettings?.approvalOnReject,
-                claim,
-              ),
+            : simulationBehavior === 'email'
+              ? updateIfOwned(run.id, executionToken, {
+                  status: 'completed',
+                  finishedAt: new Date(),
+                  result: traceResult,
+                  deferReason: null,
+                })
+              : finishSimulationWithApprovals(
+                  run,
+                  executionToken,
+                  traceResult,
+                  config.approvalSettings?.approvalOnReject,
+                  claim,
+                ),
         );
         if (!owned.length) return;
       } catch (error) {
@@ -1249,7 +1341,37 @@ export async function processSimulationJob(
 ) {
   const runId = typeof payload.runId === 'string' ? payload.runId : null;
   if (!runId) throw new Error('simulation.run payload missing runId');
-  await processSimulationRun(runId, inference, signal, claim);
+  const origin =
+    (await db().select({ origin: runs.origin }).from(runs).where(eq(runs.id, runId))).at(0)
+      ?.origin ?? 'playground';
+  if (origin === 'email') {
+    throw new Error('email runs must use email.draft');
+  }
+  await processSimulationRun(runId, inference, signal, claim, origin);
+}
+
+export async function processEmailDraftJob(
+  payload: Record<string, unknown>,
+  inference: (key: string) => ModelCall = openRouterInference,
+  signal?: AbortSignal,
+  claim?: SimulationJobClaim,
+) {
+  const runId = typeof payload.runId === 'string' ? payload.runId : null;
+  if (!runId) throw new Error('email.draft payload missing runId');
+  await processSimulationRun(runId, inference, signal, claim, 'email');
+}
+
+/** Process a run whose origin is already set (playground, email, or replay). */
+export async function processSimulationRunForOrigin(
+  runId: string,
+  origin: typeof runs.$inferSelect.origin,
+  inference: (key: string) => ModelCall = openRouterInference,
+  signal?: AbortSignal,
+  claim?: SimulationJobClaim,
+  /** For origin=replay: select email vs playground drafting without changing safety origin. */
+  behavior?: SimulationBehavior,
+) {
+  await processSimulationRun(runId, inference, signal, claim, origin, behavior);
 }
 
 function exhaustedJobMessage(reason: string) {
@@ -1301,7 +1423,7 @@ export async function finalizeOrphanedDeadSimulationRuns() {
     FROM jobs AS j
     WHERE r.job_id = j.id
       AND j.status = 'dead'
-      AND j.type = ${SIMULATION_JOB_TYPE}
+      AND j.type IN (${SIMULATION_JOB_TYPE}, ${EMAIL_DRAFT_JOB})
       AND r.status IN ('queued', 'running')
   `);
 }
@@ -1328,7 +1450,7 @@ export async function finalizeOrphanedCompletedSimulationRuns() {
     FROM jobs AS j
     WHERE r.job_id = j.id
       AND j.status = 'completed'
-      AND j.type = ${SIMULATION_JOB_TYPE}
+      AND j.type IN (${SIMULATION_JOB_TYPE}, ${EMAIL_DRAFT_JOB})
       AND r.status IN ('queued', 'running')
   `);
 }

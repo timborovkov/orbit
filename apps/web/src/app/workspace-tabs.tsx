@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+
+import { useSearchParams } from 'next/navigation';
 
 import {
   Select,
@@ -12,14 +14,40 @@ import {
 
 export function WorkspaceTabs({
   items,
-  initialTab,
 }: {
-  initialTab?: string;
   items: { id: string; label: string; count?: number; content: React.ReactNode }[];
 }) {
   const prefix = useId();
-  const [selected, setSelected] = useState(initialTab ?? items[0]?.id);
+  const [selectedTab, setSelectedTab] = useState<string>();
   const [compact, setCompact] = useState(false);
+  const openedHistoryRun = useRef<HTMLDetailsElement | null>(null);
+  const search = useSearchParams();
+  const historyRunId = search.get('run');
+  const emailRequested = search.get('tab') === 'email';
+  const linkedTab = historyRunId ? 'history' : emailRequested ? 'email' : undefined;
+  const selected = linkedTab ?? selectedTab ?? items.at(0)?.id;
+
+  function selectTab(id: string) {
+    if (linkedTab && id !== linkedTab) {
+      const url = new URL(window.location.href);
+      for (const key of ['run', 'tab', 'emailThread', 'emailPage', 'messagePage']) {
+        url.searchParams.delete(key);
+      }
+      window.history.replaceState(null, '', url);
+      openedHistoryRun.current = null;
+    }
+    setSelectedTab(id);
+  }
+
+  useEffect(() => {
+    if (!historyRunId) return;
+    const run = document.getElementById(`run-${historyRunId}`);
+    if (!(run instanceof HTMLDetailsElement) || openedHistoryRun.current === run) return;
+    openedHistoryRun.current = run;
+    run.open = true;
+    run.scrollIntoView({ block: 'start' });
+    run.querySelector('summary')?.focus({ preventScroll: true });
+  }, [historyRunId, items]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 600px)');
@@ -34,11 +62,11 @@ export function WorkspaceTabs({
   }, []);
 
   useEffect(() => {
-    if (!selected || compact) return;
+    if (!selected || compact || historyRunId) return;
     document
       .getElementById(`${prefix}-${selected}-tab`)
       ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
-  }, [compact, prefix, selected]);
+  }, [compact, historyRunId, prefix, selected]);
 
   return (
     <>
@@ -50,7 +78,7 @@ export function WorkspaceTabs({
           <Select
             value={selected}
             onValueChange={(value) => {
-              setSelected(value);
+              selectTab(value);
             }}
           >
             <SelectTrigger
@@ -83,10 +111,10 @@ export function WorkspaceTabs({
                 aria-selected={selected === item.id}
                 tabIndex={selected === item.id ? 0 : -1}
                 onClick={() => {
-                  setSelected(item.id);
+                  selectTab(item.id);
                 }}
                 onKeyDown={(event) => {
-                  let next = index;
+                  let next: number;
                   if (event.key === 'ArrowRight') next = (index + 1) % items.length;
                   else if (event.key === 'ArrowLeft')
                     next = (index - 1 + items.length) % items.length;
@@ -95,7 +123,7 @@ export function WorkspaceTabs({
                   else return;
                   event.preventDefault();
                   const target = items[next];
-                  setSelected(target.id);
+                  selectTab(target.id);
                   document.getElementById(`${prefix}-${target.id}-tab`)?.focus();
                 }}
               >

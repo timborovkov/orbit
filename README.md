@@ -6,12 +6,13 @@ A privately deployed control centre for persistent AI representatives, built wit
 
 ## Setup
 
-Install Bun 1.4.4 and Docker. Copy [`.env.example`](.env.example) to `.env` and fill in the values.
+Install Bun canary (1.4.6+, see `.bun-version`) and Docker. Copy [`.env.example`](.env.example) to `.env` and fill in the values.
 
 ```sh
 bun install --frozen-lockfile
 docker compose up -d --wait postgres rustfs
 bun run db:migrate
+bun run db:seed:demo
 bun run storage:setup
 bun run dev
 ```

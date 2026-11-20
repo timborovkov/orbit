@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
 import { afterAll, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
@@ -25,6 +26,8 @@ afterAll(async () => {
     await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
     await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
     await sql`DELETE FROM usage_counters WHERE agent_id=${id}`;
+    await sql`DELETE FROM evaluation_comparisons WHERE agent_id=${id}`;
+    await sql`DELETE FROM evaluation_cases WHERE agent_id=${id}`;
     await sql`DELETE FROM simulation_runs WHERE agent_id=${id}`;
     await sql`DELETE FROM jobs WHERE payload->>'agentId'=${id}`;
     await sql`DELETE FROM agent_credentials WHERE agent_id=${id}`;

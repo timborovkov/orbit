@@ -1,10 +1,14 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
 import { lockApprovalAgent, recordApprovalReviews } from '@/lib/runtime/approval-work';
-import { actionIntents, agents, runs } from '@/lib/schema';
+import { finalizeOutboundForCancelledJobs } from '@/lib/runtime/email/send';
+import { EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
+import { finalizeCancelledEvaluationComparisons } from '@/lib/runtime/evaluation';
+import { skipScheduledFollowUpsForLifecycle } from '@/lib/runtime/follow-ups/process';
+import { actionIntents, agents, emailMessages, runs } from '@/lib/schema';
 
 /**
  * Cancel jobs for a pause/stop transition and interrupt linked non-terminal runs.
@@ -18,15 +22,44 @@ export async function cancelWorkForLifecycle(
 ): Promise<string[]> {
   if (!store) {
     return db().transaction(async (tx) => {
+      // Lock order for cancellation: agents → jobs → evaluationComparisons (→ runs / approvals).
+      // Replay admission and exhausted-finalize follow the same agent → job → comparison order.
       await lockApprovalAgent(tx, agentId);
       return cancelWorkForLifecycle(agentId, next, tx);
     });
   }
+  // Capture and thread email even when its draft is cancelled.
+  await store
+    .update(emailMessages)
+    .set({ skipReason: `Agent is ${next}.`, waitingForCapacity: false })
+    .where(
+      and(
+        eq(emailMessages.agentId, agentId),
+        isNull(emailMessages.runId),
+        isNull(emailMessages.skipReason),
+      ),
+    );
   const includeClaimed = next === 'stopped';
   const cancelledIds = await cancelPendingJobsForAgent(agentId, store, {
     includeClaimed,
-    excludeTypes: [KNOWLEDGE_JOB_TYPE],
+    excludeTypes: [KNOWLEDGE_JOB_TYPE, EMAIL_RECEIVE_JOB],
   });
+  await finalizeCancelledEvaluationComparisons(
+    store,
+    cancelledIds,
+    next === 'stopped'
+      ? 'Agent stopped; pending comparison cancelled.'
+      : 'Agent paused; queued comparison cancelled.',
+  );
+  // Follow-ups use skip-and-record: mark scheduled commitments skipped and
+  // write activity events when pause/stop cancels their delayed jobs.
+  await skipScheduledFollowUpsForLifecycle(agentId, next, store);
+  // Cancelled email.send jobs never reach dispatch; finalize linked outbound rows now.
+  await finalizeOutboundForCancelledJobs(
+    store,
+    cancelledIds,
+    `Agent ${next}; outbound send cancelled.`,
+  );
   if (next === 'stopped') {
     await store
       .update(runs)

@@ -31,7 +31,7 @@ repo-wide validation; do not routinely duplicate it locally.
   called out.
 - Fix failures caused by the change, then rerun the affected checks. Report
   unrelated failures separately with evidence.
-- GitHub's static gate runs `bun run validate` (Prettier, TypeScript, ESLint,
+- GitHub's static gate runs `bun run validate` (`bun fmt`, `bun check`, `bun lint`,
   Knip, React Doctor), `bun run build`, and `bun run test:unit`. React Doctor must
   show score 100 and no issues; an exit without a score is not proof of 100.
 
@@ -128,6 +128,9 @@ routing edits.
 - Run `bun run test:queue` / `bun run test:integration` when the durable job queue,
   worker claim/lease path or web→worker enqueue path changes (requires migrated
   `orbit_test`).
+- Run `bun run test:follow-ups` (also part of `test:integration`) when follow-up
+  scheduling, delayed execution, cancellation or lifecycle skip-and-record
+  behaviour changes (requires migrated `orbit_test`). See [follow-ups](../follow-ups.md).
 - Run `bun run test:simulation` when simulation persistence, isolation, or shared
   runtime execution changes (requires migrated `orbit_test`).
 - Run `bun run test:knowledge` when knowledge upload/processing, embeddings,

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
+
 import { MoreHorizontal, Pencil, Plus } from 'lucide-react';
 
 import { removeMcpConnection } from '@/actions/mcp';
@@ -52,19 +53,7 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
   const [deletePending, startDelete] = useTransition();
   const slugRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const timer = window.setTimeout(() => {
-      const input = slugRef.current;
-      if (!input) return;
-      input.focus({ preventScroll: true });
-      const end = input.value.length;
-      input.setSelectionRange(end, end);
-    }, 0);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [open, editor.connectionId]);
+  const dialogTrigger = useRef<HTMLElement | null>(null);
 
   function openCreate() {
     setEditor(emptyMcpEditor());
@@ -98,7 +87,13 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
           </>
         }
         action={
-          <Button type="button" onClick={openCreate}>
+          <Button
+            type="button"
+            onClick={(event) => {
+              dialogTrigger.current = event.currentTarget;
+              openCreate();
+            }}
+          >
             <Plus size={16} aria-hidden="true" />
             New connection
           </Button>
@@ -109,12 +104,6 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
         <LibraryEmpty
           title="No MCP connections yet"
           description="Register a shared HTTP or SSE server, choose which tools agents may see, then attach the connection from Access."
-          action={
-            <Button type="button" onClick={openCreate}>
-              <Plus size={16} aria-hidden="true" />
-              New connection
-            </Button>
-          }
         />
       ) : (
         <>
@@ -146,7 +135,8 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
                       variant="ghost"
                       size="icon"
                       aria-label={`Edit ${connection.name}`}
-                      onClick={() => {
+                      onClick={(event) => {
+                        dialogTrigger.current = event.currentTarget;
                         openEdit(connection);
                       }}
                     >
@@ -191,6 +181,7 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
                       type="button"
                       variant="ghost"
                       size="icon"
+                      id={`connection-actions-${connection.id}`}
                       aria-label={`Actions for ${connection.name}`}
                     >
                       <MoreHorizontal size={16} aria-hidden="true" />
@@ -199,6 +190,9 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
                   <DropdownMenuContent align="end" className="library-menu">
                     <DropdownMenuItem
                       onSelect={() => {
+                        dialogTrigger.current = document.getElementById(
+                          `connection-actions-${connection.id}`,
+                        );
                         openEdit(connection);
                       }}
                     >
@@ -228,13 +222,21 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
         }}
       >
         <DialogContent
-          className="library-dialog flex max-h-[calc(100dvh-2rem)] w-[min(560px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[560px]"
+          className="form-dialog form-dialog-medium"
           showCloseButton={!pending}
-          onOpenAutoFocus={(event) => {
+          onPointerDownOutside={(event) => {
             event.preventDefault();
           }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            dialogTrigger.current?.focus();
+          }}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            slugRef.current?.focus({ preventScroll: true });
+          }}
         >
-          <DialogHeader className="library-dialog-header">
+          <DialogHeader className="form-dialog-header">
             <DialogTitle>{editor.connectionId ? 'Edit connection' : 'New connection'}</DialogTitle>
             <DialogDescription>
               Auth header values are write-only. Existing secrets are never shown back.

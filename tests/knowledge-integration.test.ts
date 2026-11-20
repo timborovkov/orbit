@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import { afterAll, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+
 import postgres from 'postgres';
 
-import { budgetDefaults, type AgentBudgets } from '@/lib/budgets';
+import { type AgentBudgets, budgetDefaults } from '@/lib/budgets';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { createPlaygroundStreamProgress, playgroundChunksFromResult } from '@/lib/runtime/chat-ui';
 import { enqueueSimulation, processSimulationJob } from '@/lib/runtime/execute';
@@ -37,6 +38,8 @@ afterAll(async () => {
       await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
       await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
       await sql`DELETE FROM usage_counters WHERE agent_id=${id}`;
+      await sql`DELETE FROM evaluation_comparisons WHERE agent_id=${id}`;
+      await sql`DELETE FROM evaluation_cases WHERE agent_id=${id}`;
       await sql`DELETE FROM simulation_runs WHERE agent_id=${id}`;
       await sql`DELETE FROM agent_configurations WHERE agent_id=${id}`;
       await sql`DELETE FROM jobs WHERE payload->>'agentId'=${id}`;

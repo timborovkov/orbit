@@ -35,6 +35,8 @@ const actionLabels = {
   repost: 'Repost',
   follow: 'Follow',
   bookmark: 'Bookmark',
+  introduce: 'Introduce',
+  escalate: 'Escalate',
 } as Record<string, string>;
 
 const actionHints = {
@@ -43,6 +45,8 @@ const actionHints = {
   repost: 'Repost proposals stay pending until approved.',
   follow: 'Follow proposals stay pending until approved.',
   bookmark: 'Bookmark proposals stay pending until approved.',
+  introduce: 'Introduction proposals stay pending until approved when enabled.',
+  escalate: 'Escalation proposals stay pending until approved when enabled.',
 } as Record<string, string>;
 
 export function ApprovalToolsForm({
@@ -60,7 +64,7 @@ export function ApprovalToolsForm({
   approvalOnReject: 'continue' | 'end';
   approvalSpendCents: number | null;
 }) {
-  const tools = proposalTypes.filter((tool) => tool !== 'introduce' && tool !== 'escalate');
+  const tools = [...proposalTypes];
   const [checked, setChecked] = useState<Record<string, boolean>>(() => {
     const initial = new Set(approvalTools);
     return Object.fromEntries(tools.map((tool) => [tool, initial.has(tool)]));

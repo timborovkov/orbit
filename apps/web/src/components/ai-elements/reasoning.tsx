@@ -1,6 +1,7 @@
 'use client';
 
-import { memo, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
+import { type ComponentProps, memo, type ReactNode, useEffect, useMemo, useState } from 'react';
+
 import { useControllableState } from '@radix-ui/react-use-controllable-state';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import { Streamdown } from 'streamdown';
