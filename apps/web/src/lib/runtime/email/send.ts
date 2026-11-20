@@ -4,6 +4,7 @@ import { db, type Tx } from '@/lib/db';
 import { recipientConsentFailure } from '@/lib/policy/consent';
 import { evaluateCandidate, loadPolicyContext } from '@/lib/policy/gateway';
 import type { JobRecord } from '@/lib/queue/types';
+import { lockApprovalAgent } from '@/lib/runtime/approval-work';
 import {
   extractEmailAddress,
   replySubject,
@@ -20,7 +21,13 @@ import {
   recordOutboundUsage,
 } from '@/lib/runtime/outbound/dispatch';
 import { EMAIL_SEND_ACTION, EMAIL_SEND_JOB } from '@/lib/runtime/outbound/types';
-import { emailMailboxes, emailMessages, outboundActions, policyDecisions } from '@/lib/schema';
+import {
+  emailMailboxes,
+  emailMessages,
+  jobs,
+  outboundActions,
+  policyDecisions,
+} from '@/lib/schema';
 
 function draftBody(payload: Record<string, unknown>, fallback: string): string {
   const draft = payload.draft;
@@ -149,60 +156,6 @@ export async function processEmailSendJob(
     return;
   }
 
-  const ctx = await loadPolicyContext(outbound.agentId, actor, intent.runId);
-  if (!ctx) {
-    await db().transaction(async (tx) => {
-      await markOutboundStatus(tx, outbound.id, {
-        status: 'blocked',
-        reason: 'Agent unavailable for dispatch policy checks.',
-        completedAt: new Date(),
-      });
-    });
-    return;
-  }
-
-  const policy = await db().transaction(async (tx) => {
-    const consent = await recipientConsentFailure(
-      tx,
-      outbound.agentId,
-      EMAIL_SEND_ACTION,
-      [to],
-      ctx.consentRequiredTools,
-    );
-    return evaluateCandidate(
-      ctx,
-      {
-        type: EMAIL_SEND_ACTION,
-        idempotencyKey: outbound.idempotencyKey,
-        payload: { draft: outbound.body },
-        recipients: [to],
-      },
-      consent,
-      false,
-      { skipApproval: true },
-    );
-  });
-
-  if (policy.decision !== 'allow') {
-    await db().transaction(async (tx) => {
-      await tx.insert(policyDecisions).values({
-        agentId: outbound.agentId,
-        runId: intent.runId,
-        actionType: EMAIL_SEND_ACTION,
-        decision: policy.decision,
-        reasons: policy.reasons,
-        intentId: intent.id,
-        actor,
-      });
-      await markOutboundStatus(tx, outbound.id, {
-        status: 'blocked',
-        reason: policy.reasons.join(' ') || 'Dispatch blocked by policy.',
-        completedAt: new Date(),
-      });
-    });
-    return;
-  }
-
   const body = draftBody(intent.payload, outbound.body);
   if (!body) {
     await db().transaction(async (tx) => {
@@ -239,28 +192,102 @@ export async function processEmailSendJob(
     return;
   }
 
-  const outcome = await activeTransport.send(
-    {
-      from: mailbox.address,
-      to,
-      subject: replySubject(message.subject),
-      text: body,
-      headers,
-      idempotencyKey: outbound.idempotencyKey,
-    },
-    signal,
-  );
+  // Hold the same agent lock lifecycle uses so Stop/Pause cannot cancel the job
+  // after a stale allow decision and before the provider request starts.
+  const dispatch = await db().transaction(async (tx) => {
+    await lockApprovalAgent(tx, outbound.agentId);
 
-  if (outcome.ok) {
-    await db().transaction(async (tx) => {
-      const current = (
-        await tx
-          .select()
-          .from(outboundActions)
-          .where(eq(outboundActions.id, outbound.id))
-          .for('update')
-      ).at(0);
-      if (current?.status === 'sent') return;
+    const row = (
+      await tx
+        .select()
+        .from(outboundActions)
+        .where(eq(outboundActions.id, outbound.id))
+        .for('update')
+    ).at(0);
+    if (!row) return null;
+    if (row.status === 'sent') return null;
+    if (row.status === 'blocked' || row.status === 'failed') return null;
+    if (row.status !== 'sending') {
+      await markOutboundStatus(tx, outbound.id, {
+        status: 'blocked',
+        reason: 'Outbound send was cancelled before dispatch.',
+        completedAt: new Date(),
+      });
+      return null;
+    }
+
+    const jobRow = (await tx.select().from(jobs).where(eq(jobs.id, job.id)).for('update')).at(0);
+    if (jobRow?.status !== 'claimed' || !job.claimedBy || jobRow.claimedBy !== job.claimedBy) {
+      await markOutboundStatus(tx, outbound.id, {
+        status: 'blocked',
+        reason: 'Outbound send cancelled before dispatch.',
+        completedAt: new Date(),
+      });
+      return null;
+    }
+
+    const ctx = await loadPolicyContext(outbound.agentId, actor, intent.runId, tx);
+    if (!ctx) {
+      await markOutboundStatus(tx, outbound.id, {
+        status: 'blocked',
+        reason: 'Agent unavailable for dispatch policy checks.',
+        completedAt: new Date(),
+      });
+      return null;
+    }
+
+    const consent = await recipientConsentFailure(
+      tx,
+      outbound.agentId,
+      EMAIL_SEND_ACTION,
+      [to],
+      ctx.consentRequiredTools,
+    );
+    const policy = evaluateCandidate(
+      ctx,
+      {
+        type: EMAIL_SEND_ACTION,
+        idempotencyKey: outbound.idempotencyKey,
+        payload: { draft: outbound.body },
+        recipients: [to],
+      },
+      consent,
+      false,
+      { skipApproval: true },
+    );
+
+    if (policy.decision !== 'allow') {
+      await tx.insert(policyDecisions).values({
+        agentId: outbound.agentId,
+        runId: intent.runId,
+        actionType: EMAIL_SEND_ACTION,
+        decision: policy.decision,
+        reasons: policy.reasons,
+        intentId: intent.id,
+        actor,
+      });
+      await markOutboundStatus(tx, outbound.id, {
+        status: 'blocked',
+        reason: policy.reasons.join(' ') || 'Dispatch blocked by policy.',
+        completedAt: new Date(),
+      });
+      return null;
+    }
+
+    signal.throwIfAborted();
+    const outcome = await activeTransport.send(
+      {
+        from: mailbox.address,
+        to,
+        subject: replySubject(message.subject),
+        text: body,
+        headers,
+        idempotencyKey: outbound.idempotencyKey,
+      },
+      signal,
+    );
+
+    if (outcome.ok) {
       await markOutboundStatus(tx, outbound.id, {
         status: 'sent',
         reason: null,
@@ -279,15 +306,13 @@ export async function processEmailSendJob(
         intentId: intent.id,
         actor,
       });
-    });
-    return;
-  }
+      return null;
+    }
 
-  if (outcome.retryable) {
-    throw new RetryableInfrastructureError(outcome.error);
-  }
+    if (outcome.retryable) {
+      return { retryable: outcome.error };
+    }
 
-  await db().transaction(async (tx) => {
     await markOutboundStatus(tx, outbound.id, {
       status: 'failed',
       reason: outcome.error,
@@ -295,7 +320,12 @@ export async function processEmailSendJob(
       providerResult: outcome.raw ?? null,
       completedAt: new Date(),
     });
+    return null;
   });
+
+  if (dispatch?.retryable) {
+    throw new RetryableInfrastructureError(dispatch.retryable);
+  }
 }
 
 function exhaustedOutboundMessage(reason: string) {

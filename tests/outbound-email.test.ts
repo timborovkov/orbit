@@ -526,6 +526,53 @@ test('pausing an agent finalizes queued outbound when email.send is cancelled', 
   expect(inbox.messages[0]?.sendOutcome?.status).toBe('blocked');
 });
 
+test('lifecycle stop after claim prevents transport send under agent lock', async () => {
+  await releasePause();
+  const agent = await createAgent('live');
+  const seeded = await seedDraft(agent.id, agent.version);
+  expect(await reviewProposedAction(admin, agent.id, seeded.intentId, 'approved')).toMatchObject({
+    message: expect.stringContaining('queued'),
+  });
+
+  const claimed = await claimJobs({ workerId, limit: 1, types: [EMAIL_SEND_JOB] });
+  expect(claimed).toHaveLength(1);
+
+  // Stop cancels the claimed job and blocks outbound while holding the agent lock.
+  await cancelWorkForLifecycle(agent.id, 'stopped');
+
+  const transport = createStubEmailTransport();
+  await processEmailSendJob(claimed[0]!, signal, transport);
+  expect(transport.calls).toHaveLength(0);
+
+  const [outbound] =
+    await sql`SELECT status, reason FROM outbound_actions WHERE intent_id=${seeded.intentId}`;
+  expect(outbound?.status).toBe('blocked');
+  expect(String(outbound?.reason).length).toBeGreaterThan(0);
+});
+
+test('cancelled job ownership is rechecked before provider send', async () => {
+  await releasePause();
+  const agent = await createAgent('live');
+  const seeded = await seedDraft(agent.id, agent.version);
+  expect(await reviewProposedAction(admin, agent.id, seeded.intentId, 'approved')).toMatchObject({
+    message: expect.stringContaining('queued'),
+  });
+
+  const claimed = await claimJobs({ workerId, limit: 1, types: [EMAIL_SEND_JOB] });
+  expect(claimed).toHaveLength(1);
+  // Simulate a stop that cancelled the job but left outbound mid-flight as sending.
+  await sql`UPDATE jobs SET status='cancelled', claimed_by=null, claim_expires_at=null, finished_at=now() WHERE id=${claimed[0]!.id}`;
+  await sql`UPDATE outbound_actions SET status='sending', dispatched_at=now() WHERE intent_id=${seeded.intentId}`;
+
+  const transport = createStubEmailTransport();
+  await processEmailSendJob(claimed[0]!, signal, transport);
+  expect(transport.calls).toHaveLength(0);
+  const [outbound] =
+    await sql`SELECT status, reason FROM outbound_actions WHERE intent_id=${seeded.intentId}`;
+  expect(outbound?.status).toBe('blocked');
+  expect(String(outbound?.reason)).toContain('cancelled');
+});
+
 test('reconcileCancelledOutboundJobs repairs stranded queued rows after cancelled jobs', async () => {
   await releasePause();
   const agent = await createAgent('live');
