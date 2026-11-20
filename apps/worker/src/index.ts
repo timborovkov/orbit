@@ -96,6 +96,7 @@ const worker = startJobWorker({
         await processEvaluationReplayJob(job.payload, undefined, signal, {
           jobId: job.id,
           workerId,
+          jobType: EVALUATION_REPLAY_JOB,
         });
       } catch (error) {
         reportFailure('worker.queue', jobCorrelation(job), error);

@@ -448,6 +448,8 @@ export async function executeSimulation(
 export interface SimulationJobClaim {
   jobId: string;
   workerId: string;
+  /** When set, claim validation uses this job type instead of deriving it from origin. */
+  jobType?: string;
 }
 
 /** Playground vs email drafting semantics. Replay keeps origin=replay for safety. */
@@ -486,6 +488,8 @@ async function processSimulationRun(
       if (peek.jobId && peek.jobId !== claim.jobId) {
         return { skip: true as const, run: peek };
       }
+      const expectedType =
+        claim.jobType ?? (origin === 'email' ? EMAIL_DRAFT_JOB : SIMULATION_JOB_TYPE);
       const jobRow = (
         await tx
           .select({ id: jobs.id })
@@ -493,7 +497,7 @@ async function processSimulationRun(
           .where(
             and(
               eq(jobs.id, claim.jobId),
-              eq(jobs.type, origin === 'email' ? EMAIL_DRAFT_JOB : SIMULATION_JOB_TYPE),
+              eq(jobs.type, expectedType),
               eq(jobs.claimedBy, claim.workerId),
               eq(jobs.status, 'claimed'),
             ),

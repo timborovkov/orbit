@@ -7,12 +7,13 @@ import { closeDb } from '@/lib/db';
 import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import {
+  finalizeExhaustedEvaluationReplayJob,
   processEvaluationReplayJob,
   saveEvaluationCase,
   startEvaluationComparison,
 } from '@/lib/runtime/evaluation';
 import { encryptCredential } from '@/lib/runtime/secrets';
-import type { ModelCall } from '@/lib/runtime/simulation';
+import { draftAnswerFromResult, type ModelCall } from '@/lib/runtime/simulation';
 
 const databaseUrl =
   process.env.TEST_DATABASE_URL ??
@@ -32,6 +33,8 @@ afterAll(async () => {
   for (const id of ids) {
     await sql`DELETE FROM evaluation_comparisons WHERE agent_id=${id}`;
     await sql`DELETE FROM evaluation_cases WHERE agent_id=${id}`;
+    await sql`DELETE FROM email_messages WHERE agent_id=${id}`;
+    await sql`DELETE FROM email_threads WHERE agent_id=${id}`;
     await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
     await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
     await sql`DELETE FROM usage_counters WHERE agent_id=${id}`;
@@ -285,17 +288,51 @@ test('retry reuses each side run instead of admitting duplicates', async () => {
   expect(n).toBe(2);
 });
 
-test('email case replay uses email drafting semantics', async () => {
+test('email case saves structured drafting snapshot and uses email semantics', async () => {
   const { id, v1, v2 } = await seedAgent();
+  const threadId = randomUUID();
+  await sql`
+    INSERT INTO email_threads(id, agent_id, provisional)
+    VALUES (${threadId}, ${id}, false)
+  `;
+  const [message] = await sql`
+    INSERT INTO email_messages(
+      agent_id, resend_email_id, event, sender, subject, received_at, thread_id, body
+    )
+    VALUES (
+      ${id},
+      ${`resend-${randomUUID()}`},
+      ${sql.json({})},
+      ${'lead@example.com'},
+      ${'Pricing'},
+      now(),
+      ${threadId},
+      ${'Can you send pricing?'}
+    )
+    RETURNING id
+  `;
+
   const saved = await saveEvaluationCase({
     actor: admin,
     agentId: id,
     title: 'Inbound lead mail',
     sourceKind: 'email',
-    caseInput: 'From: lead@example.com\nSubject: Pricing\n\nCan you send pricing?',
+    sourceEmailMessageId: message.id,
+    // Client may send a plain body; server must persist the production JSON snapshot.
+    caseInput: 'Can you send pricing?',
   });
   expect('caseId' in saved).toBe(true);
   if (!('caseId' in saved)) return;
+
+  const [caseRow] = await sql`SELECT input FROM evaluation_cases WHERE id=${saved.caseId}`;
+  const snapshot = JSON.parse(caseRow.input as string) as {
+    currentMessage: { subject: string; body: string; sender: string };
+  };
+  expect(snapshot.currentMessage).toEqual({
+    subject: 'Pricing',
+    body: 'Can you send pricing?',
+    sender: 'lead@example.com',
+  });
 
   const started = await startEvaluationComparison({
     actor: admin,
@@ -353,8 +390,70 @@ test('email case replay uses email drafting semantics', async () => {
   const stages = (left.result.steps as { stage: string }[]).map((step) => step.stage);
   expect(stages).toContain('evaluator');
   expect(stages).toContain('main');
-  const main = (
-    left.result.steps as { stage: string; decision: { answer?: string | null } }[]
-  ).find((step) => step.stage === 'main');
-  expect(main?.decision.answer).toContain('pricing');
+  const draft = draftAnswerFromResult(left.result);
+  expect(draft?.answer).toContain('pricing');
+  // Uncited email drafts must still surface (groundedAnswerFromResult would be null).
+  expect(draft?.sources).toEqual([]);
+});
+
+test('exhausted evaluation retries finalize linked non-terminal runs', async () => {
+  const { id, v1, v2 } = await seedAgent();
+  const saved = await saveEvaluationCase({
+    actor: admin,
+    agentId: id,
+    title: 'Exhaust case',
+    sourceKind: 'playground',
+    caseInput: 'Stuck comparison.',
+  });
+  expect('caseId' in saved).toBe(true);
+  if (!('caseId' in saved)) return;
+
+  const started = await startEvaluationComparison({
+    actor: admin,
+    agentId: id,
+    caseId: saved.caseId,
+    leftConfigurationId: v1.id,
+    rightConfigurationId: v2.id,
+  });
+  expect('comparisonId' in started).toBe(true);
+  if (!('comparisonId' in started)) return;
+
+  const [leftRun] = await sql`
+    INSERT INTO simulation_runs(
+      agent_id, configuration_id, origin, input, status, result, actor, expires_at
+    )
+    VALUES (
+      ${id},
+      ${v1.id},
+      'replay',
+      'Stuck comparison.',
+      'running',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      ${admin},
+      now() + interval '10 minutes'
+    )
+    RETURNING id
+  `;
+  await sql`
+    UPDATE evaluation_comparisons
+    SET status='running', left_run_id=${leftRun.id}
+    WHERE id=${started.comparisonId}
+  `;
+
+  await finalizeExhaustedEvaluationReplayJob(
+    { comparisonId: started.comparisonId },
+    'lease expired',
+  );
+
+  const [comparison] = await sql`
+    SELECT status, error FROM evaluation_comparisons WHERE id=${started.comparisonId}
+  `;
+  expect(comparison.status).toBe('failed');
+  expect(comparison.error).toContain('retries exhausted');
+
+  const [run] = await sql`
+    SELECT status, defer_reason FROM simulation_runs WHERE id=${leftRun.id}
+  `;
+  expect(run.status).toBe('failed');
+  expect(run.defer_reason).toContain('retries exhausted');
 });

@@ -7,7 +7,15 @@ import type { getEvaluationComparison } from '@/lib/server/evaluation-queries';
 
 type Detail = NonNullable<Awaited<ReturnType<typeof getEvaluationComparison>>>;
 
-function SideColumn({ label, side }: { label: string; side: Detail['left'] }) {
+function SideColumn({
+  label,
+  side,
+  preferDraftAnswer,
+}: {
+  label: string;
+  side: Detail['left'];
+  preferDraftAnswer: boolean;
+}) {
   return (
     <section className="evaluation-side" aria-label={label}>
       <header className="evaluation-side-heading">
@@ -25,7 +33,11 @@ function SideColumn({ label, side }: { label: string; side: Detail['left'] }) {
         )}
       </header>
       {side.run ? (
-        <RunContent run={side.run} interrupted={side.run.status === 'interrupted'} />
+        <RunContent
+          run={side.run}
+          interrupted={side.run.status === 'interrupted'}
+          preferDraftAnswer={preferDraftAnswer}
+        />
       ) : (
         <p className="muted">Replay has not produced a run for this side yet.</p>
       )}
@@ -35,6 +47,7 @@ function SideColumn({ label, side }: { label: string; side: Detail['left'] }) {
 
 export function EvaluationComparisonView({ detail }: { detail: Detail }) {
   const pending = detail.comparison.status === 'queued' || detail.comparison.status === 'running';
+  const preferDraftAnswer = detail.comparison.caseSourceKind === 'email';
   return (
     <div className="evaluation-comparison">
       <PendingRunRefresh active={pending} />
@@ -68,8 +81,16 @@ export function EvaluationComparisonView({ detail }: { detail: Detail }) {
         </p>
       )}
       <div className="evaluation-side-by-side">
-        <SideColumn label="Configuration A" side={detail.left} />
-        <SideColumn label="Configuration B" side={detail.right} />
+        <SideColumn
+          label="Configuration A"
+          side={detail.left}
+          preferDraftAnswer={preferDraftAnswer}
+        />
+        <SideColumn
+          label="Configuration B"
+          side={detail.right}
+          preferDraftAnswer={preferDraftAnswer}
+        />
       </div>
     </div>
   );

@@ -10,7 +10,7 @@ import {
 
 import { KnowledgeCitations } from '@/app/knowledge-citations';
 import { formatUtcTimestamp } from '@/lib/format';
-import { groundedAnswerFromResult } from '@/lib/runtime/simulation';
+import { draftAnswerFromResult, groundedAnswerFromResult } from '@/lib/runtime/simulation';
 import type { runs } from '@/lib/schema';
 
 function PolicyLabel({ policy }: { policy: string | undefined }) {
@@ -45,14 +45,18 @@ function PolicyLabel({ policy }: { policy: string | undefined }) {
 export function RunContent({
   run,
   interrupted = false,
+  /** Email drafting (and email evaluation replay) show uncited drafts, matching the inbox. */
+  preferDraftAnswer = false,
 }: {
   run: typeof runs.$inferSelect;
   interrupted?: boolean;
+  preferDraftAnswer?: boolean;
 }) {
   const pending =
     !interrupted &&
     (run.status === 'queued' || run.status === 'running' || run.status === 'awaiting_approval');
   const grounded = groundedAnswerFromResult(run.result);
+  const draft = preferDraftAnswer && !grounded ? draftAnswerFromResult(run.result) : null;
   return (
     <div className="run-content">
       <section className="run-input">
@@ -76,6 +80,12 @@ export function RunContent({
           <h3>Answer from knowledge</h3>
           <p className="preserve-text">{grounded.answer}</p>
           <KnowledgeCitations sources={grounded.sources} />
+        </section>
+      )}
+      {draft && (
+        <section>
+          <h3>Draft reply</h3>
+          <p className="preserve-text">{draft.answer}</p>
         </section>
       )}
       {run.result.steps.map((step) => (

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import {
   budgetViolationMessage,
@@ -9,6 +9,7 @@ import {
 import { db, type Tx } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { enqueueJob } from '@/lib/queue/jobs';
+import { buildEmailDraftInput } from '@/lib/runtime/email/receive';
 import {
   processSimulationRunForOrigin,
   type SimulationBehavior,
@@ -22,6 +23,7 @@ import {
   emailMessages,
   evaluationCases,
   evaluationComparisons,
+  jobs,
   runs,
   usageCounters,
   type EvaluationCaseSource,
@@ -35,6 +37,36 @@ export const EVALUATION_REPLAY_JOB = 'evaluation.replay';
 
 function emptyUsageBucket() {
   return { spendMicros: BigInt(0), requests: 0, outboundActions: 0 };
+}
+
+function evaluationClaim(claim?: SimulationJobClaim): SimulationJobClaim | undefined {
+  if (!claim) return undefined;
+  return { ...claim, jobType: claim.jobType ?? EVALUATION_REPLAY_JOB };
+}
+
+/** Prove this worker still owns the comparison job before mutating state or rotating tokens. */
+async function assertEvaluationJobClaim(
+  tx: Tx,
+  claim: SimulationJobClaim | undefined,
+  comparisonJobId: string | null,
+): Promise<boolean> {
+  if (!claim) return true;
+  if (comparisonJobId && comparisonJobId !== claim.jobId) return false;
+  const jobRow = (
+    await tx
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, claim.jobId),
+          eq(jobs.type, claim.jobType ?? EVALUATION_REPLAY_JOB),
+          eq(jobs.claimedBy, claim.workerId),
+          eq(jobs.status, 'claimed'),
+        ),
+      )
+      .for('update')
+  ).at(0);
+  return Boolean(jobRow);
 }
 
 /** Insert a replay-origin run without its own queue job — the comparison job owns execution. */
@@ -163,10 +195,11 @@ export async function saveEvaluationCase(input: {
       if (!source) return { error: 'Playground run not found for this agent.' };
     }
 
+    let persistedInput = caseInput;
     if (input.sourceKind === 'email' && input.sourceEmailMessageId) {
       const source = (
         await tx
-          .select({ id: emailMessages.id })
+          .select()
           .from(emailMessages)
           .where(
             and(
@@ -176,6 +209,8 @@ export async function saveEvaluationCase(input: {
           )
       ).at(0);
       if (!source) return { error: 'Inbound email message not found for this agent.' };
+      // Prefer the production drafting snapshot over a client-supplied body excerpt.
+      persistedInput = await buildEmailDraftInput(tx, source);
     }
 
     const row = (
@@ -187,7 +222,7 @@ export async function saveEvaluationCase(input: {
           sourceKind: input.sourceKind,
           sourceRunId: input.sourceRunId ?? null,
           sourceEmailMessageId: input.sourceEmailMessageId ?? null,
-          input: caseInput,
+          input: persistedInput,
           recipients: input.recipients ?? [],
           actor: input.actor,
         })
@@ -286,7 +321,9 @@ async function runReplaySide(
   configurationId: string,
   inference: (key: string) => ModelCall,
   signal?: AbortSignal,
-): Promise<{ runId: string } | { error: string }> {
+  claim?: SimulationJobClaim,
+): Promise<{ runId: string } | { error: string } | { skipped: true }> {
+  const ownedClaim = evaluationClaim(claim);
   const admitted = await db().transaction(async (tx) => {
     const comparison = (
       await tx
@@ -296,6 +333,9 @@ async function runReplaySide(
         .for('update')
     ).at(0);
     if (!comparison) return { error: 'Comparison not found.' as const };
+    if (!(await assertEvaluationJobClaim(tx, ownedClaim, comparison.jobId))) {
+      return { skipped: true as const };
+    }
 
     const evaluationCase = (
       await tx.select().from(evaluationCases).where(eq(evaluationCases.id, comparison.caseId))
@@ -356,13 +396,14 @@ async function runReplaySide(
   });
 
   if ('error' in admitted) return admitted;
+  if ('skipped' in admitted) return admitted;
   if (!admitted.skipProcess) {
     await processSimulationRunForOrigin(
       admitted.runId,
       'replay',
       inference,
       signal,
-      undefined,
+      ownedClaim,
       admitted.behavior,
     );
   }
@@ -377,24 +418,32 @@ export async function processEvaluationReplayJob(
   payload: Record<string, unknown>,
   inference: (key: string) => ModelCall = openRouterInference,
   signal?: AbortSignal,
-  _claim?: SimulationJobClaim,
+  claim?: SimulationJobClaim,
 ) {
   const comparisonId = typeof payload.comparisonId === 'string' ? payload.comparisonId : null;
   if (!comparisonId) throw new Error('evaluation.replay payload missing comparisonId');
+  const ownedClaim = evaluationClaim(claim);
 
-  const comparison = (
-    await db()
-      .select()
-      .from(evaluationComparisons)
-      .where(eq(evaluationComparisons.id, comparisonId))
-  ).at(0);
-  if (!comparison) throw new Error('Comparison not found');
-  if (comparison.status === 'completed') return;
-
-  await db()
-    .update(evaluationComparisons)
-    .set({ status: 'running', error: null })
-    .where(eq(evaluationComparisons.id, comparisonId));
+  const comparison = await db().transaction(async (tx) => {
+    const row = (
+      await tx
+        .select()
+        .from(evaluationComparisons)
+        .where(eq(evaluationComparisons.id, comparisonId))
+        .for('update')
+    ).at(0);
+    if (!row) return null;
+    if (row.status === 'completed') return { ...row, skip: true as const };
+    if (!(await assertEvaluationJobClaim(tx, ownedClaim, row.jobId))) {
+      return { ...row, skip: true as const };
+    }
+    await tx
+      .update(evaluationComparisons)
+      .set({ status: 'running', error: null })
+      .where(eq(evaluationComparisons.id, comparisonId));
+    return { ...row, skip: false as const };
+  });
+  if (!comparison || comparison.skip) return;
 
   try {
     const left = await runReplaySide(
@@ -403,7 +452,9 @@ export async function processEvaluationReplayJob(
       comparison.leftConfigurationId,
       inference,
       signal,
+      ownedClaim,
     );
+    if ('skipped' in left) return;
     if ('error' in left) throw new Error(left.error);
 
     const right = await runReplaySide(
@@ -412,29 +463,39 @@ export async function processEvaluationReplayJob(
       comparison.rightConfigurationId,
       inference,
       signal,
+      ownedClaim,
     );
+    if ('skipped' in right) return;
     if ('error' in right) throw new Error(right.error);
 
-    await db()
-      .update(evaluationComparisons)
-      .set({
-        status: 'completed',
-        finishedAt: new Date(),
-        error: null,
-        leftRunId: left.runId,
-        rightRunId: right.runId,
-      })
-      .where(eq(evaluationComparisons.id, comparisonId));
+    const completed = await db().transaction(async (tx) => {
+      if (!(await assertEvaluationJobClaim(tx, ownedClaim, comparison.jobId))) return false;
+      await tx
+        .update(evaluationComparisons)
+        .set({
+          status: 'completed',
+          finishedAt: new Date(),
+          error: null,
+          leftRunId: left.runId,
+          rightRunId: right.runId,
+        })
+        .where(eq(evaluationComparisons.id, comparisonId));
+      return true;
+    });
+    if (!completed) return;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Comparison failed.';
-    await db()
-      .update(evaluationComparisons)
-      .set({
-        status: 'failed',
-        finishedAt: new Date(),
-        error: message.slice(0, 500),
-      })
-      .where(eq(evaluationComparisons.id, comparisonId));
+    await db().transaction(async (tx) => {
+      if (!(await assertEvaluationJobClaim(tx, ownedClaim, comparison.jobId))) return;
+      await tx
+        .update(evaluationComparisons)
+        .set({
+          status: 'failed',
+          finishedAt: new Date(),
+          error: message.slice(0, 500),
+        })
+        .where(eq(evaluationComparisons.id, comparisonId));
+    });
     throw error;
   }
 }
@@ -446,19 +507,44 @@ export async function finalizeExhaustedEvaluationReplayJob(
   const comparisonId = typeof payload.comparisonId === 'string' ? payload.comparisonId : null;
   if (!comparisonId) return;
   const detail = reason.trim().slice(0, 200);
-  await db()
-    .update(evaluationComparisons)
-    .set({
-      status: 'failed',
-      finishedAt: new Date(),
-      error: detail
-        ? `Job retries exhausted (${detail}).`
-        : 'Job retries exhausted after infrastructure failures.',
-    })
-    .where(
-      and(
-        eq(evaluationComparisons.id, comparisonId),
-        inArray(evaluationComparisons.status, ['queued', 'running']),
-      ),
+  const inspectable = detail
+    ? `Job retries exhausted (${detail}).`
+    : 'Job retries exhausted after infrastructure failures.';
+
+  await db().transaction(async (tx) => {
+    const comparison = (
+      await tx
+        .select()
+        .from(evaluationComparisons)
+        .where(eq(evaluationComparisons.id, comparisonId))
+        .for('update')
+    ).at(0);
+    if (!comparison) return;
+    if (comparison.status !== 'queued' && comparison.status !== 'running') return;
+
+    await tx
+      .update(evaluationComparisons)
+      .set({
+        status: 'failed',
+        finishedAt: new Date(),
+        error: inspectable,
+      })
+      .where(eq(evaluationComparisons.id, comparisonId));
+
+    // Replay sides have no jobId, so orphan reconciliation cannot clear them — finalize here.
+    const sideRunIds = [comparison.leftRunId, comparison.rightRunId].filter(
+      (runId): runId is string => Boolean(runId),
     );
+    if (sideRunIds.length > 0) {
+      await tx
+        .update(runs)
+        .set({
+          status: 'failed',
+          finishedAt: new Date(),
+          deferReason: inspectable,
+          result: sql`jsonb_set(coalesce(${runs.result}, '{"steps":[],"actions":[],"error":null}'::jsonb), '{error}', to_jsonb(${inspectable}::text))`,
+        })
+        .where(and(inArray(runs.id, sideRunIds), inArray(runs.status, ['queued', 'running'])));
+    }
+  });
 }
