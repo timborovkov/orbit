@@ -5,6 +5,7 @@ import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
 import { lockApprovalAgent, recordApprovalReviews } from '@/lib/runtime/approval-work';
 import { EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
+import { finalizeCancelledEvaluationComparisons } from '@/lib/runtime/evaluation';
 import { actionIntents, agents, emailMessages, runs } from '@/lib/schema';
 
 /**
@@ -39,6 +40,13 @@ export async function cancelWorkForLifecycle(
     includeClaimed,
     excludeTypes: [KNOWLEDGE_JOB_TYPE, EMAIL_RECEIVE_JOB],
   });
+  await finalizeCancelledEvaluationComparisons(
+    store,
+    cancelledIds,
+    next === 'stopped'
+      ? 'Agent stopped; pending comparison cancelled.'
+      : 'Agent paused; queued comparison cancelled.',
+  );
   if (next === 'stopped') {
     await store
       .update(runs)

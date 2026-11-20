@@ -3,10 +3,12 @@ import { afterAll, expect, test } from 'bun:test';
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
-import { closeDb } from '@/lib/db';
+import { closeDb, db } from '@/lib/db';
 import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import {
+  EVALUATION_REPLAY_JOB,
+  finalizeCancelledEvaluationComparisons,
   finalizeExhaustedEvaluationReplayJob,
   processEvaluationReplayJob,
   saveEvaluationCase,
@@ -394,6 +396,91 @@ test('email case saves structured drafting snapshot and uses email semantics', a
   expect(draft?.answer).toContain('pricing');
   // Uncited email drafts must still surface (groundedAnswerFromResult would be null).
   expect(draft?.sources).toEqual([]);
+});
+
+test('email case save rebuilds snapshot without requiring a short client body', async () => {
+  const { id } = await seedAgent();
+  const threadId = randomUUID();
+  const longBody = `${'Please review. '.repeat(1200)}End.`;
+  expect(longBody.length).toBeGreaterThan(16_000);
+  await sql`
+    INSERT INTO email_threads(id, agent_id, provisional)
+    VALUES (${threadId}, ${id}, false)
+  `;
+  const [message] = await sql`
+    INSERT INTO email_messages(
+      agent_id, resend_email_id, event, sender, subject, received_at, thread_id, body
+    )
+    VALUES (
+      ${id},
+      ${`resend-${randomUUID()}`},
+      ${sql.json({})},
+      ${'lead@example.com'},
+      ${'Long thread'},
+      now(),
+      ${threadId},
+      ${longBody}
+    )
+    RETURNING id
+  `;
+
+  const saved = await saveEvaluationCase({
+    actor: admin,
+    agentId: id,
+    title: 'Long inbound',
+    sourceKind: 'email',
+    sourceEmailMessageId: message.id,
+    caseInput: '',
+  });
+  expect('caseId' in saved).toBe(true);
+  if (!('caseId' in saved)) return;
+  const [caseRow] = await sql`SELECT input FROM evaluation_cases WHERE id=${saved.caseId}`;
+  const snapshot = JSON.parse(caseRow.input as string) as {
+    currentMessage: { body: string };
+  };
+  expect(snapshot.currentMessage.body?.length).toBeLessThanOrEqual(8_000);
+  expect(snapshot.currentMessage.body).toContain('Please review.');
+});
+
+test('cancelled evaluation jobs finalize open comparisons', async () => {
+  const { id, v1, v2 } = await seedAgent();
+  const saved = await saveEvaluationCase({
+    actor: admin,
+    agentId: id,
+    title: 'Cancel case',
+    sourceKind: 'playground',
+    caseInput: 'Will be cancelled.',
+  });
+  expect('caseId' in saved).toBe(true);
+  if (!('caseId' in saved)) return;
+
+  const started = await startEvaluationComparison({
+    actor: admin,
+    agentId: id,
+    caseId: saved.caseId,
+    leftConfigurationId: v1.id,
+    rightConfigurationId: v2.id,
+  });
+  expect('comparisonId' in started).toBe(true);
+  if (!('comparisonId' in started)) return;
+
+  await db().transaction(async (tx) => {
+    await finalizeCancelledEvaluationComparisons(
+      tx,
+      [started.jobId],
+      'Agent paused; queued comparison cancelled.',
+    );
+  });
+
+  const [comparison] = await sql`
+    SELECT status, error, job_id FROM evaluation_comparisons WHERE id=${started.comparisonId}
+  `;
+  expect(comparison.status).toBe('failed');
+  expect(comparison.error).toContain('paused');
+  expect(comparison.job_id).toBe(started.jobId);
+
+  const [job] = await sql`SELECT type FROM jobs WHERE id=${started.jobId}`;
+  expect(job.type).toBe(EVALUATION_REPLAY_JOB);
 });
 
 test('exhausted evaluation retries finalize linked non-terminal runs', async () => {

@@ -173,7 +173,10 @@ export async function saveEvaluationCase(input: {
   const title = input.title.trim();
   const caseInput = input.caseInput.trim();
   if (!title) return { error: 'Give this case a short title.' };
-  if (!caseInput) return { error: 'The case needs a non-empty input snapshot.' };
+  const emailFromMessage = input.sourceKind === 'email' && Boolean(input.sourceEmailMessageId);
+  if (!caseInput && !emailFromMessage) {
+    return { error: 'The case needs a non-empty input snapshot.' };
+  }
 
   return await db().transaction(async (tx) => {
     const agent = (await tx.select().from(agents).where(eq(agents.id, input.agentId))).at(0);
@@ -498,6 +501,61 @@ export async function processEvaluationReplayJob(
     });
     throw error;
   }
+}
+
+/**
+ * When lifecycle pause/stop cancels evaluation.replay jobs, mark the linked comparisons
+ * (and any admitted side runs) failed so the UI stops refreshing and concurrency frees.
+ */
+export async function finalizeCancelledEvaluationComparisons(
+  tx: Tx,
+  cancelledJobIds: string[],
+  reason: string,
+) {
+  if (!cancelledJobIds.length) return;
+  const inspectable = reason.trim().slice(0, 500) || 'Comparison cancelled.';
+  const open = await tx
+    .select({
+      id: evaluationComparisons.id,
+      leftRunId: evaluationComparisons.leftRunId,
+      rightRunId: evaluationComparisons.rightRunId,
+    })
+    .from(evaluationComparisons)
+    .where(
+      and(
+        inArray(evaluationComparisons.jobId, cancelledJobIds),
+        inArray(evaluationComparisons.status, ['queued', 'running']),
+      ),
+    );
+  if (!open.length) return;
+
+  await tx
+    .update(evaluationComparisons)
+    .set({
+      status: 'failed',
+      finishedAt: new Date(),
+      error: inspectable,
+    })
+    .where(
+      inArray(
+        evaluationComparisons.id,
+        open.map((row) => row.id),
+      ),
+    );
+
+  const sideRunIds = open.flatMap((row) =>
+    [row.leftRunId, row.rightRunId].filter((runId): runId is string => Boolean(runId)),
+  );
+  if (sideRunIds.length === 0) return;
+  await tx
+    .update(runs)
+    .set({
+      status: 'failed',
+      finishedAt: new Date(),
+      deferReason: inspectable,
+      result: sql`jsonb_set(coalesce(${runs.result}, '{"steps":[],"actions":[],"error":null}'::jsonb), '{error}', to_jsonb(${inspectable}::text))`,
+    })
+    .where(and(inArray(runs.id, sideRunIds), inArray(runs.status, ['queued', 'running'])));
 }
 
 export async function finalizeExhaustedEvaluationReplayJob(

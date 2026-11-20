@@ -66,18 +66,19 @@ export async function saveCaseFromPlaygroundRun(form: FormData) {
 export async function saveCaseFromEmailMessage(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
+  // Body is rebuilt server-side from the message; do not apply the playground 16k limit.
   const parsed = z
     .object({
       agentId: z.uuid(),
       messageId: z.uuid(),
       title: titleSchema,
-      input: inputSchema,
+      input: z.string().optional(),
     })
     .safeParse({
       agentId: form.get('agentId'),
       messageId: form.get('messageId'),
       title: form.get('title'),
-      input: form.get('input'),
+      input: form.get('input') ?? undefined,
     });
   if (!parsed.success) return { error: 'Invalid case details.' };
 
@@ -86,7 +87,8 @@ export async function saveCaseFromEmailMessage(form: FormData) {
     title: parsed.data.title,
     sourceKind: 'email',
     sourceEmailMessageId: parsed.data.messageId,
-    caseInput: parsed.data.input,
+    // Replaced server-side by buildEmailDraftInput(); body length is not validated here.
+    caseInput: parsed.data.input?.trim() ?? '',
     recipients: [],
   });
   if (!('error' in result)) {
