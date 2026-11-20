@@ -111,7 +111,7 @@ export function ConfigFields({
                     label={label}
                     initialValue={config[name]}
                     required={requiredFields.has(name)}
-                    multiline={!short}
+                    markdown={!short}
                     maxLength={
                       name === 'name'
                         ? 80
@@ -123,7 +123,6 @@ export function ConfigFields({
                               ? 2000
                               : 12000
                     }
-                    rows={group.id === 'behaviour' ? 7 : 3}
                   />
                 );
               })}

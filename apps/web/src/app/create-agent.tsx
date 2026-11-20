@@ -9,6 +9,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
@@ -61,7 +62,7 @@ export function CreateAgent({
         </Button>
       </DialogTrigger>
       <DialogContent
-        className="create-dialog"
+        className="form-dialog"
         showCloseButton={false}
         onPointerDownOutside={(event) => {
           event.preventDefault();
@@ -71,24 +72,26 @@ export function CreateAgent({
           nameInput.current?.focus();
         }}
       >
-        <div className="dialog-heading">
+        <DialogHeader className="form-dialog-header">
           <DialogTitle>Create agent</DialogTitle>
           <Button
             type="button"
             variant="ghost"
             size="icon"
             aria-label="Close dialog"
+            className="form-dialog-close"
             disabled={pending}
             onClick={close}
           >
             <X size={18} aria-hidden="true" />
           </Button>
-        </div>
-        <DialogDescription>
-          Your agent starts in shadow mode, with external writes suppressed. You can set its
-          OpenRouter key under Access.
-        </DialogDescription>
+          <DialogDescription>
+            Your agent starts in shadow mode, with external writes suppressed. You can set its
+            OpenRouter key under Access.
+          </DialogDescription>
+        </DialogHeader>
         <form
+          className="form-dialog-form"
           action={(data) => {
             startTransition(async () => {
               setForm((previous) => ({ ...previous, error: '', errors: {} }));
@@ -112,8 +115,8 @@ export function CreateAgent({
             });
           }}
         >
-          <fieldset aria-disabled={pending}>
-            <FieldGroup className="gap-5">
+          <fieldset aria-disabled={pending} className="form-dialog-body">
+            <FieldGroup className="form-fields">
               <Field>
                 <FieldLabel htmlFor="agent-template">Template</FieldLabel>
                 <input type="hidden" name="templateId" value={form.templateId} />
@@ -129,7 +132,12 @@ export function CreateAgent({
                     }));
                   }}
                 >
-                  <SelectTrigger id="agent-template" className="w-full" aria-label="Template">
+                  <SelectTrigger
+                    id="agent-template"
+                    className="w-full"
+                    aria-label="Template"
+                    aria-describedby="agent-template-hint"
+                  >
                     <SelectValue placeholder="Choose a template" />
                   </SelectTrigger>
                   <SelectContent>
@@ -140,7 +148,9 @@ export function CreateAgent({
                     ))}
                   </SelectContent>
                 </Select>
-                <FieldDescription>Choosing a template fills in the mission.</FieldDescription>
+                <FieldDescription id="agent-template-hint">
+                  Choosing a template fills in the mission.
+                </FieldDescription>
               </Field>
               <Field data-invalid={nameInvalid || undefined}>
                 <FieldLabel htmlFor="agent-name">
@@ -198,12 +208,12 @@ export function CreateAgent({
               </Field>
             </FieldGroup>
           </fieldset>
-          {form.error ? (
-            <p role="alert" className="form-error">
-              {form.error}
-            </p>
-          ) : null}
-          <div className="dialog-actions">
+          <div className="form-dialog-footer">
+            {form.error ? (
+              <p role="alert" className="form-error">
+                {form.error}
+              </p>
+            ) : null}
             <Button type="button" variant="outline" disabled={pending} onClick={close}>
               Cancel
             </Button>

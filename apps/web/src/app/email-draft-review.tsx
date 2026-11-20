@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import { reviewEmailReply } from '@/actions/email';
 import { Button } from '@/components/ui/button';
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 
 export function EmailDraftReview({
@@ -41,24 +42,29 @@ export function EmailDraftReview({
 
   return (
     <div className="email-draft-review">
-      <label className="email-draft-label" htmlFor={draftId}>
-        Reply draft
-      </label>
-      <Textarea
-        id={draftId}
-        value={draft}
-        onChange={(event) => {
-          setDraft(event.target.value);
-        }}
-        rows={6}
-        disabled={pending}
-        className="email-draft-editor"
-      />
-      {error && (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
-      )}
+      <Field>
+        <FieldLabel htmlFor={draftId}>Reply draft</FieldLabel>
+        <Textarea
+          id={draftId}
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value);
+          }}
+          rows={6}
+          disabled={pending}
+          className="email-draft-editor"
+          aria-describedby={error ? `${draftId}-hint ${draftId}-error` : `${draftId}-hint`}
+        />
+        <FieldDescription id={`${draftId}-hint`}>
+          Sending requires Live lifecycle, released global pause, and an enabled mailbox.
+          Destination and threading come from the inbound message.
+        </FieldDescription>
+        {error && (
+          <FieldError className="form-error" id={`${draftId}-error`}>
+            {error}
+          </FieldError>
+        )}
+      </Field>
       <div className="email-draft-actions">
         <Button
           type="button"
@@ -80,10 +86,6 @@ export function EmailDraftReview({
           Reject
         </Button>
       </div>
-      <p className="muted">
-        Sending requires Live lifecycle, released global pause, and an enabled mailbox. Destination
-        and threading come from the inbound message.
-      </p>
     </div>
   );
 }

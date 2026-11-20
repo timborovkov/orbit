@@ -3,16 +3,14 @@
 import { useId } from 'react';
 
 import { saveSkill } from '@/actions/skills';
+import { MarkdownEditor } from '@/components/markdown-editor';
 import type { SkillEditorState } from '@/components/skill-editor-state';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { renderMarkdownPreview } from '@/lib/markdown-preview';
 import { slugifyTitle } from '@/lib/slug';
-import { cn } from '@/lib/utils';
 
 export function SkillEditorForm({
   editor,
@@ -36,7 +34,7 @@ export function SkillEditorForm({
   return (
     <form
       id={formId}
-      className="library-form"
+      className="form-dialog-form"
       action={(data) => {
         startTransition(async () => {
           setEditor((previous) => ({ ...previous, error: undefined }));
@@ -56,13 +54,12 @@ export function SkillEditorForm({
         });
       }}
     >
-      <div className="library-dialog-body">
+      <div className="form-dialog-body">
         {editor.skillId && <input type="hidden" name="skillId" value={editor.skillId} />}
-        <FieldGroup className="gap-5">
-          <div className="library-form-grid">
+        <FieldGroup className="form-fields">
+          <div className="form-grid">
             <Field>
               <FieldLabel htmlFor={`${formId}-title`}>Title</FieldLabel>
-              <FieldDescription>Shown in the catalogue and Access picker.</FieldDescription>
               <Input
                 ref={titleRef}
                 id={`${formId}-title`}
@@ -71,7 +68,6 @@ export function SkillEditorForm({
                 maxLength={120}
                 disabled={pending}
                 value={editor.title}
-                className="library-field-control"
                 onFocus={(event) => {
                   const input = event.currentTarget;
                   const end = input.value.length;
@@ -89,16 +85,15 @@ export function SkillEditorForm({
             </Field>
             <Field>
               <FieldLabel htmlFor={`${formId}-name`}>Slug</FieldLabel>
-              <FieldDescription>Stable id used by load_skill.</FieldDescription>
               <Input
                 id={`${formId}-name`}
                 name="name"
+                aria-describedby={`${formId}-name-hint`}
                 required
                 maxLength={80}
-                pattern="^[a-z0-9][a-z0-9_-]{0,79}$"
+                pattern="[a-z0-9][a-z0-9_\-]{0,79}"
                 disabled={pending}
                 value={editor.name}
-                className="library-field-control"
                 onChange={(event) => {
                   setEditor((previous) => ({
                     ...previous,
@@ -107,22 +102,22 @@ export function SkillEditorForm({
                   }));
                 }}
               />
+              <FieldDescription id={`${formId}-name-hint`}>
+                Stable id used by load_skill.
+              </FieldDescription>
             </Field>
           </div>
           <Field>
             <FieldLabel htmlFor={`${formId}-description`}>When to use</FieldLabel>
-            <FieldDescription>
-              Short guidance the model sees before loading the body.
-            </FieldDescription>
             <Textarea
               id={`${formId}-description`}
               name="description"
+              aria-describedby={`${formId}-description-hint`}
               required
               maxLength={500}
               rows={2}
               disabled={pending}
               value={editor.description}
-              className="library-field-control"
               onChange={(event) => {
                 setEditor((previous) => ({
                   ...previous,
@@ -130,47 +125,34 @@ export function SkillEditorForm({
                 }));
               }}
             />
+            <FieldDescription id={`${formId}-description-hint`}>
+              Short guidance the model sees before loading the body.
+            </FieldDescription>
           </Field>
           <Field>
-            <FieldLabel htmlFor="skill-body">Markdown body</FieldLabel>
-            <FieldDescription>Write the full skill, then preview the rendering.</FieldDescription>
-            <input type="hidden" name="body" value={editor.body} />
-            <Tabs defaultValue="write" className="markdown-editor">
-              <TabsList className="markdown-tabs" variant="line">
-                <TabsTrigger value="write">Write</TabsTrigger>
-                <TabsTrigger value="preview">Preview</TabsTrigger>
-              </TabsList>
-              <TabsContent value="write">
-                <Textarea
-                  id="skill-body"
-                  maxLength={100000}
-                  rows={12}
-                  disabled={pending}
-                  value={editor.body}
-                  className={cn('library-field-control')}
-                  onChange={(event) => {
-                    setEditor((previous) => ({ ...previous, body: event.target.value }));
-                  }}
-                />
-              </TabsContent>
-              <TabsContent value="preview">
-                <div
-                  className="markdown-preview"
-                  dangerouslySetInnerHTML={{
-                    __html: renderMarkdownPreview(editor.body || '_Nothing to preview yet._'),
-                  }}
-                />
-              </TabsContent>
-            </Tabs>
+            <FieldLabel htmlFor={`${formId}-body`}>Markdown body</FieldLabel>
+            <MarkdownEditor
+              id={`${formId}-body`}
+              name="body"
+              required
+              large
+              maxLength={100000}
+              disabled={pending}
+              value={editor.body}
+              placeholder="# Instructions"
+              onValueChange={(body) => {
+                setEditor((previous) => ({ ...previous, body }));
+              }}
+            />
           </Field>
         </FieldGroup>
+      </div>
+      <div className="form-dialog-footer">
         {editor.error && (
           <p role="alert" className="form-error">
             {editor.error}
           </p>
         )}
-      </div>
-      <div className="library-footer">
         <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>
           Cancel
         </Button>
