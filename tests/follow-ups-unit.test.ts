@@ -5,6 +5,8 @@ import {
   localDatetimeToOffsetIso,
   parseOffsetBearingDueAt,
 } from '@/lib/runtime/follow-ups/due';
+import { mergeFollowUpListViews } from '@/lib/runtime/follow-ups/list';
+import { followUpWorkspaceRefresh } from '@/lib/runtime/follow-ups/refresh';
 import {
   FOLLOW_UP_ACTIVITY_KINDS,
   FOLLOW_UP_JOB_TYPE,
@@ -13,6 +15,7 @@ import {
   followUpStatusLabels,
   offsetBearingDueAtSchema,
   scheduleFollowUpInputSchema,
+  type FollowUpStatus,
 } from '@/lib/runtime/follow-ups/types';
 
 describe('follow-up schemas and constants', () => {
@@ -91,5 +94,79 @@ describe('follow-up due time timezone conversion', () => {
     expect(iso).toBeTruthy();
     const parsed = offsetBearingDueAtSchema.safeParse(iso!);
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe('follow-up list merging', () => {
+  function row(id: string, status: FollowUpStatus, dueAt: string, createdAt = dueAt) {
+    return { id, status, dueAt: new Date(dueAt), createdAt: new Date(createdAt) };
+  }
+
+  test('keeps every scheduled row ahead of capped history', () => {
+    const earliest = row('early', 'scheduled', '2026-01-01T00:00:00.000Z');
+    const later = row('later', 'scheduled', '2027-01-01T00:00:00.000Z');
+    const history = Array.from({ length: 100 }, (_, index) =>
+      row(
+        `done-${index}`,
+        'completed',
+        `2028-01-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`,
+      ),
+    );
+
+    const merged = mergeFollowUpListViews([later, earliest], history);
+    expect(merged[0]?.id).toBe('early');
+    expect(merged[1]?.id).toBe('later');
+    expect(merged).toHaveLength(102);
+    expect(merged.some((item) => item.id === 'early')).toBe(true);
+  });
+
+  test('dedupes scheduled rows that also appear in history', () => {
+    const scheduled = row('same', 'scheduled', '2026-06-01T00:00:00.000Z');
+    const merged = mergeFollowUpListViews(
+      [scheduled],
+      [
+        { ...scheduled, status: 'completed' as const },
+        row('other', 'cancelled', '2026-05-01T00:00:00.000Z'),
+      ],
+    );
+    expect(merged.map((item) => item.id)).toEqual(['same', 'other']);
+  });
+});
+
+describe('follow-up workspace refresh plan', () => {
+  test('polls frequently when a follow-up is already due', () => {
+    const plan = followUpWorkspaceRefresh({
+      now: new Date('2026-06-15T12:00:00.000Z'),
+      scheduled: [{ dueAt: new Date('2026-06-15T11:00:00.000Z'), jobStatus: 'pending' }],
+    });
+    expect(plan).toEqual({ pollFrequently: true, refreshAt: null });
+  });
+
+  test('polls frequently while the follow-up job is claimed', () => {
+    const plan = followUpWorkspaceRefresh({
+      now: new Date('2026-06-15T12:00:00.000Z'),
+      scheduled: [{ dueAt: new Date('2026-06-20T12:00:00.000Z'), jobStatus: 'claimed' }],
+    });
+    expect(plan.pollFrequently).toBe(true);
+  });
+
+  test('schedules a single refresh for the next future due time', () => {
+    const next = new Date('2026-06-20T15:30:00.000Z');
+    const plan = followUpWorkspaceRefresh({
+      now: new Date('2026-06-15T12:00:00.000Z'),
+      scheduled: [
+        { dueAt: new Date('2026-07-01T00:00:00.000Z'), jobStatus: 'pending' },
+        { dueAt: next, jobStatus: 'pending' },
+      ],
+    });
+    expect(plan.pollFrequently).toBe(false);
+    expect(plan.refreshAt?.toISOString()).toBe(next.toISOString());
+  });
+
+  test('is idle when nothing is scheduled', () => {
+    expect(followUpWorkspaceRefresh({ now: new Date(), scheduled: [] })).toEqual({
+      pollFrequently: false,
+      refreshAt: null,
+    });
   });
 });

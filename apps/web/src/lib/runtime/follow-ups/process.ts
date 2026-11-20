@@ -8,7 +8,7 @@ import {
   followUpJobPayloadSchema,
   type FollowUpOutcomeKind,
 } from '@/lib/runtime/follow-ups/types';
-import { agentActivityEvents, agents, followUps } from '@/lib/schema';
+import { agentActivityEvents, agents, followUps, jobs } from '@/lib/schema';
 
 type Store = Tx;
 
@@ -242,6 +242,7 @@ export async function skipScheduledFollowUpsForLifecycle(
 export async function finalizeFailedFollowUpJob(
   payload: Record<string, unknown>,
   error: string,
+  options: { attempts?: number } = {},
 ): Promise<void> {
   const parsed = followUpJobPayloadSchema.safeParse(payload);
   if (!parsed.success) return;
@@ -258,11 +259,26 @@ export async function finalizeFailedFollowUpJob(
         .for('update')
     ).at(0);
     if (row?.status !== 'scheduled') return;
+
+    let attempts = options.attempts;
+    if (attempts === undefined && row.jobId) {
+      const linked = (
+        await tx
+          .select({ attempts: jobs.attempts })
+          .from(jobs)
+          .where(eq(jobs.id, row.jobId))
+          .limit(1)
+      ).at(0);
+      attempts = linked?.attempts;
+    }
+    attempts ??= Math.max(row.attempts, 1);
+
     const detail = error.slice(0, 2000);
     await tx
       .update(followUps)
       .set({
         status: 'failed',
+        attempts,
         finishedAt: now,
         outcome: `Follow-up failed: ${detail}`,
         outcomeKind: 'failed',
@@ -287,7 +303,11 @@ export async function finalizeFailedFollowUpJob(
  */
 export async function reconcileDeadFollowUpJobs(): Promise<number> {
   const orphaned = await db().execute(sql`
-    SELECT f.id, f.agent_id, coalesce(j.last_error, 'The worker could not finish the follow-up.') AS last_error
+    SELECT
+      f.id,
+      f.agent_id,
+      j.attempts,
+      coalesce(j.last_error, 'The worker could not finish the follow-up.') AS last_error
     FROM follow_ups AS f
     INNER JOIN jobs AS j ON j.id = f.job_id
     WHERE f.status = 'scheduled'
@@ -301,6 +321,7 @@ export async function reconcileDeadFollowUpJobs(): Promise<number> {
       finalizeFailedFollowUpJob(
         { followUpId: String(row.id), agentId: String(row.agent_id) },
         String(row.last_error),
+        { attempts: Number(row.attempts) },
       ),
     ),
   );

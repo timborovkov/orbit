@@ -315,11 +315,12 @@ test('reconcileDeadFollowUpJobs finalizes scheduled rows whose jobs are already 
   const dueAt = new Date(Date.now() - 1_000);
   const followUpId = randomUUID();
   const [job] = await sql`
-    INSERT INTO jobs(type,payload,status,available_at,idempotency_key,last_error,finished_at)
+    INSERT INTO jobs(type,payload,status,attempts,available_at,idempotency_key,last_error,finished_at)
     VALUES(
       ${FOLLOW_UP_JOB_TYPE},
       ${sql.json({ followUpId, agentId })},
       'dead',
+      5,
       ${dueAt.toISOString()},
       ${`followup:${followUpId}`},
       ${'Lease expired after max attempts'},
@@ -333,9 +334,10 @@ test('reconcileDeadFollowUpJobs finalizes scheduled rows whose jobs are already 
   expect(recovered).toBeGreaterThanOrEqual(1);
 
   const [row] =
-    await sql`SELECT status, outcome_kind, outcome FROM follow_ups WHERE id=${followUpId}`;
+    await sql`SELECT status, outcome_kind, outcome, attempts FROM follow_ups WHERE id=${followUpId}`;
   expect(row!.status).toBe('failed');
   expect(row!.outcome_kind).toBe('failed');
+  expect(row!.attempts).toBe(5);
   expect(String(row!.outcome)).toContain('Lease expired');
 
   const events = await sql`SELECT kind FROM agent_activity_events WHERE follow_up_id=${followUpId}`;
@@ -344,4 +346,35 @@ test('reconcileDeadFollowUpJobs finalizes scheduled rows whose jobs are already 
 
   // Idempotent: already failed rows are ignored.
   expect(await reconcileDeadFollowUpJobs()).toBe(0);
+});
+
+test('selectFollowUpsForAgentView always surfaces scheduled rows past the history limit', async () => {
+  const { selectFollowUpsForAgentView } = await import('@/lib/server/follow-up-queries');
+  const agentId = await createAgent('Follow-up list coverage');
+  const earliestDue = new Date('2026-01-01T00:00:00.000Z');
+  const earliestId = randomUUID();
+  await sql`INSERT INTO follow_ups(id,agent_id,source,created_by,subject,note,due_at,status)
+    VALUES(${earliestId},${agentId},'admin',${admin},'Earliest pending','',${earliestDue.toISOString()},'scheduled')`;
+
+  for (let index = 0; index < 100; index += 1) {
+    const due = new Date(Date.UTC(2028, 0, 1 + (index % 28), 0, 0, 0));
+    await sql`INSERT INTO follow_ups(id,agent_id,source,created_by,subject,note,due_at,status,finished_at,outcome,outcome_kind)
+      VALUES(
+        ${randomUUID()},
+        ${agentId},
+        'admin',
+        ${admin},
+        ${`Completed ${index}`},
+        '',
+        ${due.toISOString()},
+        'completed',
+        ${due.toISOString()},
+        'done',
+        'executed'
+      )`;
+  }
+
+  const rows = await selectFollowUpsForAgentView(agentId);
+  expect(rows.some((row) => row.id === earliestId && row.status === 'scheduled')).toBe(true);
+  expect(rows[0]?.id).toBe(earliestId);
 });

@@ -23,6 +23,7 @@ import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
+import { followUpWorkspaceRefresh } from '@/lib/runtime/follow-ups/refresh';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { latestPersistedRun } from '@/lib/runtime/playground-ui';
 import { getEmailInbox } from '@/lib/server/email-queries';
@@ -101,7 +102,12 @@ export default async function AgentWorkspace({
   const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const latestRun = latestPersistedRun(history);
-  const hasPendingFollowUps = followUps.some((item) => item.status === 'scheduled');
+  const followUpRefresh = followUpWorkspaceRefresh({
+    now: new Date(),
+    scheduled: followUps
+      .filter((item) => item.status === 'scheduled')
+      .map((item) => ({ dueAt: item.dueAt, jobStatus: item.jobStatus })),
+  });
   const hasPendingRuns = history.some(
     (run) =>
       run.displayStatus === 'queued' ||
@@ -226,7 +232,10 @@ export default async function AgentWorkspace({
           </div>
         </div>
         <PendingRunRefresh
-          active={hasPendingRuns || hasPendingKnowledge || hasPendingFollowUps || inbox.pending}
+          active={
+            hasPendingRuns || hasPendingKnowledge || inbox.pending || followUpRefresh.pollFrequently
+          }
+          refreshAt={followUpRefresh.refreshAt}
         />
         <Suspense
           fallback={
