@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { updateEmailMailbox } from '@/actions/email';
+import { EmailDraftReview } from '@/app/email-draft-review';
 import { KnowledgeCitations } from '@/app/knowledge-citations';
 import { SaveEmailCaseForm } from '@/app/save-evaluation-case-form';
 import { WorkspaceForm } from '@/app/workspace-form';
@@ -21,7 +22,9 @@ function MailboxSettings({
     <section className="email-mailbox" aria-labelledby="mailbox-heading">
       <div>
         <h2 id="mailbox-heading">Inbound email</h2>
-        <p className="muted">Replies are saved as drafts in Shadow and Live.</p>
+        <p className="muted">
+          Drafts are saved in Shadow and Live. Live + administrator approval can send replies.
+        </p>
         {mailbox && <p className="email-address">{mailbox.address}</p>}
         {!configured && <p className="muted">Configure Resend receiving to enable email.</p>}
       </div>
@@ -78,6 +81,25 @@ function ThreadList({ inbox, page, inboxUrl }: { inbox: Inbox; page: number; inb
   );
 }
 
+function SendOutcome({
+  outcome,
+}: {
+  outcome: NonNullable<Inbox['messages'][number]['sendOutcome']>;
+}) {
+  return (
+    <section className="email-send-outcome" aria-label="Send outcome">
+      <h4>Send outcome</h4>
+      <p>
+        <span className="state-label">{outcome.label}</span>
+        {outcome.providerMessageId && (
+          <span className="muted email-provider-id"> · {outcome.providerMessageId}</span>
+        )}
+      </p>
+      {outcome.reason && <p className="muted">{outcome.reason}</p>}
+    </section>
+  );
+}
+
 function SelectedThread({
   agentId,
   inbox,
@@ -125,13 +147,26 @@ function SelectedThread({
           </header>
           {!!message.body && <p className="preserve-text">{message.body}</p>}
           {message.detail && <p className="muted">{message.detail}</p>}
-          {message.draft && (
+          {message.review?.status === 'pending' && message.review.draft !== null && (
             <section className="email-draft">
-              <h4>Reply draft</h4>
-              <p className="preserve-text">{message.draft.answer}</p>
-              <KnowledgeCitations sources={message.draft.sources} />
+              <EmailDraftReview
+                agentId={agentId}
+                intentId={message.review.intentId}
+                initialDraft={message.review.draft}
+              />
+              {message.draft && <KnowledgeCitations sources={message.draft.sources} />}
             </section>
           )}
+          {message.review?.status !== 'pending' && (message.review?.draft ?? message.draft) && (
+            <section className="email-draft">
+              <h4>Reply draft</h4>
+              <p className="preserve-text">
+                {message.review?.draft ?? message.draft?.answer ?? ''}
+              </p>
+              {message.draft && <KnowledgeCitations sources={message.draft.sources} />}
+            </section>
+          )}
+          {message.sendOutcome && <SendOutcome outcome={message.sendOutcome} />}
           {!!message.body && (
             <SaveEmailCaseForm
               agentId={agentId}

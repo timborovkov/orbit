@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useId, useState, useTransition } from 'react';
 
 import { saveCaseFromEmailMessage, saveCaseFromPlaygroundRun } from '@/actions/evaluation';
+import { Field, FieldError, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 
 export function SavePlaygroundCaseForm({
@@ -18,6 +20,7 @@ export function SavePlaygroundCaseForm({
   recipients: string[];
   defaultTitle: string;
 }) {
+  const formId = useId();
   const [state, setState] = useState<{ error?: string; message?: string }>({});
   const [pending, startTransition] = useTransition();
   return (
@@ -39,21 +42,17 @@ export function SavePlaygroundCaseForm({
       <input type="hidden" name="runId" value={runId} />
       <input type="hidden" name="input" value={input} />
       <input type="hidden" name="recipients" value={JSON.stringify(recipients)} />
-      <label className="workspace-field">
-        <span>Case title</span>
-        <input
-          className="library-field-control"
+      <Field data-invalid={state.error ? true : undefined}>
+        <FieldLabel htmlFor={`${formId}-title`}>Case title</FieldLabel>
+        <Input
+          id={`${formId}-title`}
           name="title"
           defaultValue={defaultTitle}
           maxLength={200}
           required
         />
-      </label>
-      {state.error && (
-        <p role="alert" className="form-error">
-          {state.error}
-        </p>
-      )}
+        {state.error && <FieldError>{state.error}</FieldError>}
+      </Field>
       {state.message && <p role="status">{state.message}</p>}
       <SubmitButton disabled={pending} pendingLabel="Saving…" size="sm" variant="outline">
         {pending ? 'Saving…' : 'Save as case'}
@@ -73,6 +72,7 @@ export function SaveEmailCaseForm({
   input: string;
   defaultTitle: string;
 }) {
+  const formId = useId();
   const [state, setState] = useState<{ error?: string; message?: string }>({});
   const [pending, startTransition] = useTransition();
   return (
@@ -93,21 +93,17 @@ export function SaveEmailCaseForm({
       <input type="hidden" name="agentId" value={agentId} />
       <input type="hidden" name="messageId" value={messageId} />
       <input type="hidden" name="input" value={input} />
-      <label className="workspace-field">
-        <span>Case title</span>
-        <input
-          className="library-field-control"
+      <Field data-invalid={state.error ? true : undefined}>
+        <FieldLabel htmlFor={`${formId}-title`}>Case title</FieldLabel>
+        <Input
+          id={`${formId}-title`}
           name="title"
           defaultValue={defaultTitle}
           maxLength={200}
           required
         />
-      </label>
-      {state.error && (
-        <p role="alert" className="form-error">
-          {state.error}
-        </p>
-      )}
+        {state.error && <FieldError>{state.error}</FieldError>}
+      </Field>
       {state.message && <p role="status">{state.message}</p>}
       <SubmitButton disabled={pending} pendingLabel="Saving…" size="sm" variant="outline">
         {pending ? 'Saving…' : 'Save as case'}

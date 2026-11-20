@@ -4,7 +4,7 @@
 ALTER TABLE simulation_runs DROP CONSTRAINT IF EXISTS simulation_runs_origin_check;
 ALTER TABLE simulation_runs
   ADD CONSTRAINT simulation_runs_origin_check
-  CHECK (origin IN ('playground', 'email', 'replay'));
+  CHECK (origin IN ('playground', 'email', 'discovery', 'replay'));
 
 CREATE TABLE evaluation_cases (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

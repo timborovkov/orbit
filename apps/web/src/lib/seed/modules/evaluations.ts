@@ -3,14 +3,13 @@ import {
   DEMO_ACTOR,
   DEMO_AGENTS,
   DEMO_CONFIGS,
+  DEMO_EMAIL,
   DEMO_EVAL_CASES,
   DEMO_EVAL_COMPARISONS,
   DEMO_EVAL_REPLAY_RUNS,
   DEMO_RUNS,
 } from '@/lib/seed/ids';
 import type { SeedModule } from '@/lib/seed/types';
-
-const emailMessageId = '00000000-0000-4000-a800-000000000002';
 
 /** Matches `buildEmailDraftInput` so Sarah's knowledge.search replay path can JSON.parse. */
 export const DEMO_SARAH_EMAIL_CASE_INPUT = JSON.stringify({
@@ -45,7 +44,7 @@ export const evaluationsModule: SeedModule = {
           agentId: DEMO_AGENTS.sarah,
           title: 'Demo: invoice email',
           sourceKind: 'email',
-          sourceEmailMessageId: emailMessageId,
+          sourceEmailMessageId: DEMO_EMAIL.messageId,
           input: DEMO_SARAH_EMAIL_CASE_INPUT,
           recipients: [],
           actor: DEMO_ACTOR,

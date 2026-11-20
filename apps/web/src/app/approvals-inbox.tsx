@@ -16,6 +16,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
+import { Field, FieldLabel } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { approvalReviewLimit } from '@/lib/approvals/rules';
@@ -30,6 +31,7 @@ const actionLabels = {
   bookmark: 'Bookmark',
   introduce: 'Introduce',
   escalate: 'Escalate',
+  'email.send': 'Email reply',
 } as Record<string, string>;
 
 export interface ApprovalItem {
@@ -149,16 +151,18 @@ function PendingCard({
             <AgeWithTooltip value={item.createdAt} renderedAt={renderedAt} />
           </div>
           <div className="approvals-card-actions">
-            <Button
-              type="button"
-              size="sm"
-              disabled={pendingUi}
-              onClick={() => {
-                onReview('approved', editing ? draft : undefined);
-              }}
-            >
-              Approve
-            </Button>
+            {!editing && (
+              <Button
+                type="button"
+                size="sm"
+                disabled={pendingUi}
+                onClick={() => {
+                  onReview('approved');
+                }}
+              >
+                Approve
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
@@ -178,18 +182,19 @@ function PendingCard({
         <div className="approvals-draft-block">
           {editing ? (
             <>
-              <label htmlFor={draftId} className="approvals-draft-label">
-                Draft
-              </label>
-              <Textarea
-                id={draftId}
-                rows={3}
-                value={draft}
-                maxLength={8000}
-                onChange={(event) => {
-                  setDraft(event.target.value);
-                }}
-              />
+              <Field>
+                <FieldLabel htmlFor={draftId}>Draft</FieldLabel>
+                <Textarea
+                  id={draftId}
+                  rows={3}
+                  readOnly={pendingUi}
+                  value={draft}
+                  maxLength={8000}
+                  onChange={(event) => {
+                    setDraft(event.target.value);
+                  }}
+                />
+              </Field>
               <div className="approvals-draft-toolbar">
                 <Button
                   type="button"

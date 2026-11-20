@@ -83,19 +83,66 @@ export const DEMO_KNOWLEDGE_CHUNKS = {
 export const DEMO_KNOWLEDGE_DOC_IDS = Object.values(DEMO_KNOWLEDGE_DOCS);
 export const DEMO_KNOWLEDGE_CHUNK_IDS = Object.values(DEMO_KNOWLEDGE_CHUNKS);
 
-/** Evaluation cases and comparisons owned by the demo seed. */
+/** Inbound email + approved-reply demo rows (email seed module). */
+export const DEMO_EMAIL = {
+  threadId: '00000000-0000-4000-a800-000000000001',
+  messageId: '00000000-0000-4000-a800-000000000002',
+  runId: '00000000-0000-4000-a800-000000000003',
+  intentId: '00000000-0000-4000-a800-000000000004',
+  policyId: '00000000-0000-4000-a800-000000000005',
+  outboundId: '00000000-0000-4000-a800-000000000006',
+} as const;
+
+/** Fixed X discovery fixture rows for John (shadow). */
+export const DEMO_SOURCE_EVENTS = {
+  johnPost1001: '00000000-0000-4000-a900-000000000001',
+  johnPost1002: '00000000-0000-4000-a900-000000000002',
+} as const;
+
+export const DEMO_DISCOVERY_RUNS = {
+  johnPost1001: '00000000-0000-4000-a910-000000000001',
+  johnPost1002: '00000000-0000-4000-a910-000000000002',
+} as const;
+
+export const DEMO_SOURCE_EVENT_IDS = Object.values(DEMO_SOURCE_EVENTS);
+export const DEMO_DISCOVERY_RUN_IDS = Object.values(DEMO_DISCOVERY_RUNS);
+
+/** Durable follow-ups and their delayed jobs owned by the demo seed. */
+export const DEMO_FOLLOW_UPS = {
+  johnScheduled: '00000000-0000-4000-a920-000000000001',
+  sarahCompleted: '00000000-0000-4000-a920-000000000011',
+} as const;
+
+export const DEMO_FOLLOW_UP_JOBS = {
+  johnScheduled: '00000000-0000-4000-a930-000000000001',
+  sarahCompleted: '00000000-0000-4000-a930-000000000011',
+} as const;
+
+export const DEMO_ACTIVITY = {
+  sarahFollowUpCompleted: '00000000-0000-4000-a940-000000000011',
+} as const;
+
+export const DEMO_FOLLOW_UP_IDS = Object.values(DEMO_FOLLOW_UPS);
+export const DEMO_FOLLOW_UP_JOB_IDS = Object.values(DEMO_FOLLOW_UP_JOBS);
+export const DEMO_ACTIVITY_IDS = Object.values(DEMO_ACTIVITY);
+
+/**
+ * Evaluation cases and comparisons owned by the demo seed.
+ * Uses a950–a970 so they never collide with email (a800), discovery (a900/a910),
+ * or follow-ups (a920/a930/a940).
+ */
 export const DEMO_EVAL_CASES = {
-  johnPlayground: '00000000-0000-4000-a900-000000000001',
-  sarahEmail: '00000000-0000-4000-a900-000000000002',
+  johnPlayground: '00000000-0000-4000-a950-000000000001',
+  sarahEmail: '00000000-0000-4000-a950-000000000002',
 } as const;
 
 export const DEMO_EVAL_COMPARISONS = {
-  johnVersions: '00000000-0000-4000-a910-000000000001',
+  johnVersions: '00000000-0000-4000-a960-000000000001',
 } as const;
 
 export const DEMO_EVAL_REPLAY_RUNS = {
-  johnLeft: '00000000-0000-4000-a920-000000000001',
-  johnRight: '00000000-0000-4000-a920-000000000002',
+  johnLeft: '00000000-0000-4000-a970-000000000001',
+  johnRight: '00000000-0000-4000-a970-000000000002',
 } as const;
 
 export const DEMO_EVAL_CASE_IDS = Object.values(DEMO_EVAL_CASES);

@@ -65,6 +65,32 @@ test('shadow and live suppress writes when adapters are absent', () => {
   ).toBe('suppressed');
 });
 
+test('email.send always needs approval and allows after approval in Live', () => {
+  expect(
+    evaluateActionForTest(base, { type: 'email.send', idempotencyKey: 'email-shadow' }).decision,
+  ).toBe('needs-approval');
+  expect(
+    evaluateActionForTest(
+      { ...base, lifecycle: 'live' },
+      { type: 'email.send', idempotencyKey: 'email-live' },
+    ).decision,
+  ).toBe('needs-approval');
+  expect(
+    evaluateActionForTest(
+      base,
+      { type: 'email.send', idempotencyKey: 'email-shadow-skip' },
+      { skipApproval: true },
+    ).decision,
+  ).toBe('suppressed');
+  expect(
+    evaluateActionForTest(
+      { ...base, lifecycle: 'live' },
+      { type: 'email.send', idempotencyKey: 'email-live-skip' },
+      { skipApproval: true },
+    ).decision,
+  ).toBe('allow');
+});
+
 test('read-only tools can allow when budgets permit', () => {
   const result = evaluateActionForTest(
     { ...base, enabledTools: ['knowledge.search'] },

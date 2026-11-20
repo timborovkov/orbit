@@ -1,22 +1,21 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ChevronDown } from 'lucide-react';
 import { z } from 'zod';
 
 import { saveConfiguration } from '@/actions/workspace';
 import { AccessWorkbench } from '@/app/access-workbench';
 import { AgentAvatar } from '@/app/agent-avatar';
-import { AgentHistoryPanel } from '@/app/agent-history-panel';
 import { ConfigFields } from '@/app/config-fields';
 import { EmailInbox } from '@/app/email-inbox';
+import { FollowUpsWorkbench } from '@/app/follow-ups-workbench';
+import { HistoryWorkbench } from '@/app/history-workbench';
 import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
 import { LoadingStatus } from '@/app/loading-status';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
-import { PlaygroundChat } from '@/app/playground-chat';
+import { PlaygroundPanel } from '@/app/playground-panel';
 import { ProposalReview } from '@/app/policy-settings';
 import { ProfilePictureEditor } from '@/app/profile-picture-editor';
-import { RunContent } from '@/app/run-content';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { WorkspaceHeader } from '@/app/workspace-header';
 import { WorkspaceTabs } from '@/app/workspace-tabs';
@@ -24,9 +23,11 @@ import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
+import { followUpWorkspaceRefresh } from '@/lib/runtime/follow-ups/refresh';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { latestPersistedRun } from '@/lib/runtime/playground-ui';
 import { getEmailInbox } from '@/lib/server/email-queries';
+import { listActivityEventsForAgent, listFollowUpsForAgent } from '@/lib/server/follow-up-queries';
 import { listKnowledgeDocuments } from '@/lib/server/knowledge-queries';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
@@ -82,17 +83,31 @@ export default async function AgentWorkspace({
     skillIds,
     mcpSelections,
   } = workspace;
-  const [knowledgeDocuments, { items: librarySkills }, { items: libraryMcp }, inbox] =
-    await Promise.all([
-      listKnowledgeDocuments(id),
-      listSkillSummaries(),
-      listMcpConnections(),
-      getEmailInbox(id, selectedThread, emailPage, messagePage),
-    ]);
+  const [
+    knowledgeDocuments,
+    { items: librarySkills },
+    { items: libraryMcp },
+    inbox,
+    followUps,
+    activityEvents,
+  ] = await Promise.all([
+    listKnowledgeDocuments(id),
+    listSkillSummaries(),
+    listMcpConnections(),
+    getEmailInbox(id, selectedThread, emailPage, messagePage),
+    listFollowUpsForAgent(id),
+    listActivityEventsForAgent(id),
+  ]);
   const lifecycle = agent.lifecycle;
   const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const latestRun = latestPersistedRun(history);
+  const followUpRefresh = followUpWorkspaceRefresh({
+    now: new Date(),
+    scheduled: followUps
+      .filter((item) => item.status === 'scheduled')
+      .map((item) => ({ dueAt: item.dueAt, jobStatus: item.jobStatus })),
+  });
   const hasPendingRuns = history.some(
     (run) =>
       run.displayStatus === 'queued' ||
@@ -103,7 +118,7 @@ export default async function AgentWorkspace({
     (doc) => doc.status === 'pending' || doc.status === 'processing',
   );
   const versionFor = (configurationId: string) =>
-    versions.find((version) => version.id === configurationId)?.version;
+    versions.find((version) => version.id === configurationId)?.version ?? '—';
   const configuration = (
     <section id="configuration" className="configuration-workbench">
       <WorkspaceForm
@@ -161,46 +176,26 @@ export default async function AgentWorkspace({
   );
   const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;
   const playground = (
-    <section id="simulation" className="playground-panel">
-      <PlaygroundChat
-        key={id}
-        agentId={id}
-        agentName={agent.name}
-        canSimulate={canSimulate}
-        lifecycle={lifecycle}
-        versions={versions.map(({ id, version, config }) => ({ id, version, name: config.name }))}
-        currentConfigurationId={current.id}
-        latestRun={
-          latestRun && (
-            <section className="playground-latest-run" aria-label="Latest persisted run">
-              <h3>Latest persisted run</h3>
-              <details key={latestRun.id} className="run-detail">
-                <summary>
-                  <div>
-                    <span className="run-title">{latestRun.input}</span>
-                    <span className="muted">Version {versionFor(latestRun.configurationId)}</span>
-                  </div>
-                  <span className="state-label" role="status">
-                    {latestRun.displayStatus}
-                  </span>
-                  <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
-                </summary>
-                <RunContent run={latestRun} interrupted={latestRun.interrupted} />
-              </details>
-            </section>
-          )
-        }
-        runStatuses={Object.fromEntries(history.map(({ id, status }) => [id, status]))}
-      />
-    </section>
+    <PlaygroundPanel
+      agentId={id}
+      agentName={agent.name}
+      canSimulate={canSimulate}
+      lifecycle={lifecycle}
+      versions={versions}
+      currentConfigurationId={current.id}
+      history={history}
+      latestRun={latestRun}
+      versionFor={versionFor}
+    />
   );
   const historyPanel = (
-    <AgentHistoryPanel
+    <HistoryWorkbench
       agentId={id}
       history={history}
       versions={versions}
+      activityEvents={activityEvents}
       focusRunId={focusRunId}
-      versionFor={(configurationId) => versionFor(configurationId) ?? '—'}
+      versionFor={versionFor}
     />
   );
   return (
@@ -237,7 +232,12 @@ export default async function AgentWorkspace({
             <span className="muted">{openRouterConnectionLabel(keySource)}</span>
           </div>
         </div>
-        <PendingRunRefresh active={hasPendingRuns || hasPendingKnowledge || inbox.pending} />
+        <PendingRunRefresh
+          active={
+            hasPendingRuns || hasPendingKnowledge || inbox.pending || followUpRefresh.pollFrequently
+          }
+          refreshAt={followUpRefresh.refreshAt}
+        />
         <Suspense
           fallback={
             <div className="workspace-tab-panel">
@@ -275,7 +275,18 @@ export default async function AgentWorkspace({
                   />
                 ),
               },
-              { id: 'history', label: 'History', count: history.length, content: historyPanel },
+              {
+                id: 'follow-ups',
+                label: 'Follow-ups',
+                count: followUps.length,
+                content: <FollowUpsWorkbench agentId={id} items={followUps} />,
+              },
+              {
+                id: 'history',
+                label: 'History',
+                count: history.length + activityEvents.length,
+                content: historyPanel,
+              },
               {
                 id: 'approvals',
                 label: 'Approvals',

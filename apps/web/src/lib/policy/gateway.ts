@@ -21,6 +21,7 @@ import { executionContextForOrigin, type ExecutionContext } from '@/lib/policy/e
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
+import { hasWriteAdapter } from '@/lib/runtime/outbound/types';
 import {
   actionIntents,
   agentMcpConnections,
@@ -170,17 +171,13 @@ export function evaluateCandidate(
   action: CandidateAction,
   consentFailure: string | null = null,
   mcpGranted = false,
+  options: { skipApproval?: boolean } = {},
 ): {
   decision: PolicyDecision;
   reasons: string[];
   violation?: BudgetViolation;
 } {
   const reasons: string[] = [];
-
-  if (ctx.globalPaused && !action.readOnly) {
-    reasons.push('Global outbound pause is enabled.');
-    return { decision: 'deny', reasons };
-  }
 
   if (ctx.lifecycle === 'stopped') {
     reasons.push('Agent is stopped; external writes are blocked.');
@@ -239,7 +236,10 @@ export function evaluateCandidate(
       return { decision: 'suppressed', reasons };
     }
 
+    // Record approval proposals even while the global pause is on; pause still
+    // blocks approve-time rechecks and dispatch (skipApproval path below).
     if (
+      !options.skipApproval &&
       actionNeedsApproval({
         actionType: action.type,
         preliminary: action.preliminary,
@@ -254,21 +254,26 @@ export function evaluateCandidate(
       };
     }
 
-    // Structural outbound gate — future adapters flip adapterAvailable; replay still refuses.
+    if (ctx.globalPaused) {
+      reasons.push('Global outbound pause is enabled.');
+      return { decision: 'deny', reasons };
+    }
+
+    // Structural outbound gate — replay refuses; live needs a write adapter.
     const dispatch = authorizeOutboundDispatch({
       executionContext: ctx.executionContext,
       lifecycle: ctx.lifecycle,
-      adapterAvailable: false,
+      adapterAvailable: hasWriteAdapter(action.type),
     });
     if (!dispatch.allowed) {
       reasons.push(
         ctx.lifecycle === 'live'
-          ? dispatch.reason
+          ? 'Live mode is active, but no external action adapter is configured for this action. Proposal suppressed.'
           : 'Shadow mode suppresses external writes. Proposal logged only.',
       );
       return { decision: 'suppressed', reasons };
     }
-    reasons.push('External write authorised.');
+    reasons.push('Authorized for outbound dispatch.');
     return { decision: 'allow', reasons };
   }
 
@@ -760,6 +765,7 @@ export function evaluateActionForTest(
     executionContext?: ExecutionContext;
   },
   action: CandidateAction,
+  options?: { skipApproval?: boolean },
 ) {
   return evaluateCandidate(
     {
@@ -779,5 +785,8 @@ export function evaluateActionForTest(
       ...ctx,
     },
     action,
+    null,
+    false,
+    options,
   );
 }

@@ -2,47 +2,62 @@ import { inArray, or, sql } from 'drizzle-orm';
 
 import {
   actionIntents,
+  agentActivityEvents,
   agentMcpConnections,
   agents,
   agentSkills,
   audit,
   configurations,
   credentials,
+  discoveryCursors,
+  emailMailboxes,
+  emailMessages,
+  emailThreads,
   evaluationCases,
   evaluationComparisons,
+  followUps,
   jobs,
   knowledgeChunks,
   knowledgeDocuments,
   mcpConnections,
+  outboundActions,
   policyDecisions,
   recipientConsents,
   runs,
   skills,
+  sourceEvents,
   usageCounters,
 } from '@/lib/schema';
 import {
+  DEMO_ACTIVITY_IDS,
   DEMO_ACTOR,
   DEMO_AGENT_IDS,
   DEMO_AUDIT,
+  DEMO_DISCOVERY_RUN_IDS,
+  DEMO_EMAIL,
   DEMO_EVAL_CASE_IDS,
   DEMO_EVAL_COMPARISON_IDS,
   DEMO_EVAL_REPLAY_RUN_IDS,
+  DEMO_FOLLOW_UP_IDS,
+  DEMO_FOLLOW_UP_JOB_IDS,
   DEMO_INTENTS,
   DEMO_JOBS,
   DEMO_KNOWLEDGE_CHUNK_IDS,
   DEMO_KNOWLEDGE_DOC_IDS,
   DEMO_POLICY,
   DEMO_RUNS,
+  DEMO_SOURCE_EVENT_IDS,
 } from '@/lib/seed/ids';
 import type { SeedContext } from '@/lib/seed/types';
 
-const demoJobIds = Object.values(DEMO_JOBS);
+const demoJobIds = [...Object.values(DEMO_JOBS), ...DEMO_FOLLOW_UP_JOB_IDS];
 const demoRunIds = [...Object.values(DEMO_RUNS), ...DEMO_EVAL_REPLAY_RUN_IDS];
 const demoIntentIds = Object.values(DEMO_INTENTS);
 const demoPolicyIds = Object.values(DEMO_POLICY);
 const demoAuditIds = Object.values(DEMO_AUDIT);
 const demoAgentIds = [...DEMO_AGENT_IDS];
 const demoKnowledgeDocIds = [...DEMO_KNOWLEDGE_DOC_IDS];
+const demoFollowUpIds = [...DEMO_FOLLOW_UP_IDS];
 
 /**
  * Whether a job row belongs to the demo seed. Matches fixed demo job IDs,
@@ -59,9 +74,11 @@ export function isDemoOwnedJob(job: {
   const runId = typeof job.payload.runId === 'string' ? job.payload.runId : null;
   const agentId = typeof job.payload.agentId === 'string' ? job.payload.agentId : null;
   const documentId = typeof job.payload.documentId === 'string' ? job.payload.documentId : null;
+  const followUpId = typeof job.payload.followUpId === 'string' ? job.payload.followUpId : null;
   if (runId && (demoRunIds as readonly string[]).includes(runId)) return true;
   if (agentId && (demoAgentIds as readonly string[]).includes(agentId)) return true;
   if (documentId && (demoKnowledgeDocIds as readonly string[]).includes(documentId)) return true;
+  if (followUpId && (demoFollowUpIds as readonly string[]).includes(followUpId)) return true;
   const comparisonId =
     typeof job.payload.comparisonId === 'string' ? job.payload.comparisonId : null;
   if (comparisonId && (DEMO_EVAL_COMPARISON_IDS as readonly string[]).includes(comparisonId)) {
@@ -83,10 +100,15 @@ function sqlTextInList(column: ReturnType<typeof sql>, values: readonly string[]
 export async function resetDemoData(ctx: SeedContext): Promise<void> {
   const { tx } = ctx;
 
+  await tx.delete(outboundActions).where(inArray(outboundActions.agentId, demoAgentIds));
+  await tx.delete(outboundActions).where(inArray(outboundActions.id, [DEMO_EMAIL.outboundId]));
+
   await tx.delete(policyDecisions).where(inArray(policyDecisions.id, demoPolicyIds));
+  await tx.delete(policyDecisions).where(inArray(policyDecisions.id, [DEMO_EMAIL.policyId]));
   await tx.delete(policyDecisions).where(inArray(policyDecisions.agentId, demoAgentIds));
 
   await tx.delete(actionIntents).where(inArray(actionIntents.id, demoIntentIds));
+  await tx.delete(actionIntents).where(inArray(actionIntents.id, [DEMO_EMAIL.intentId]));
   await tx.delete(actionIntents).where(inArray(actionIntents.agentId, demoAgentIds));
 
   await tx
@@ -98,9 +120,33 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
   await tx.delete(evaluationCases).where(inArray(evaluationCases.id, [...DEMO_EVAL_CASE_IDS]));
   await tx.delete(evaluationCases).where(inArray(evaluationCases.agentId, demoAgentIds));
 
+  await tx
+    .delete(agentActivityEvents)
+    .where(inArray(agentActivityEvents.id, [...DEMO_ACTIVITY_IDS]));
+  await tx.delete(agentActivityEvents).where(inArray(agentActivityEvents.agentId, demoAgentIds));
+  await tx.update(followUps).set({ jobId: null }).where(inArray(followUps.id, demoFollowUpIds));
+  await tx.delete(followUps).where(inArray(followUps.id, demoFollowUpIds));
+  await tx.delete(followUps).where(inArray(followUps.agentId, demoAgentIds));
+
+  await tx.delete(sourceEvents).where(inArray(sourceEvents.id, [...DEMO_SOURCE_EVENT_IDS]));
+  await tx.delete(sourceEvents).where(inArray(sourceEvents.agentId, demoAgentIds));
+  await tx.delete(discoveryCursors).where(inArray(discoveryCursors.agentId, demoAgentIds));
+
+  await tx.delete(emailMessages).where(inArray(emailMessages.agentId, demoAgentIds));
+  await tx.delete(emailThreads).where(inArray(emailThreads.agentId, demoAgentIds));
+  await tx.delete(emailMailboxes).where(inArray(emailMailboxes.agentId, demoAgentIds));
+
   // Clear run → job FK before deleting jobs.
+  const discoveryRunIds = [...DEMO_DISCOVERY_RUN_IDS];
   await tx.update(runs).set({ jobId: null }).where(inArray(runs.id, demoRunIds));
+  await tx.update(runs).set({ jobId: null }).where(inArray(runs.id, discoveryRunIds));
+  await tx
+    .update(runs)
+    .set({ jobId: null })
+    .where(inArray(runs.id, [DEMO_EMAIL.runId]));
   await tx.delete(runs).where(inArray(runs.id, demoRunIds));
+  await tx.delete(runs).where(inArray(runs.id, discoveryRunIds));
+  await tx.delete(runs).where(inArray(runs.id, [DEMO_EMAIL.runId]));
   await tx.delete(runs).where(inArray(runs.agentId, demoAgentIds));
 
   // Fixed seed jobs, orbit-demo keys, and runtime jobs for demo runs/agents
@@ -114,6 +160,8 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
         sqlTextInList(sql`${jobs.payload}->>'runId'`, demoRunIds),
         sqlTextInList(sql`${jobs.payload}->>'agentId'`, demoAgentIds),
         sqlTextInList(sql`${jobs.payload}->>'documentId'`, demoKnowledgeDocIds),
+        sqlTextInList(sql`${jobs.payload}->>'followUpId'`, demoFollowUpIds),
+        sqlTextInList(sql`${jobs.payload}->>'comparisonId'`, [...DEMO_EVAL_COMPARISON_IDS]),
       ),
     );
   await tx

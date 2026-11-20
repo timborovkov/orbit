@@ -164,7 +164,8 @@ starts with a keyboard-visible skip link to its main content.
 ### Overview
 
 Show database-derived counts, the agent table, recent audit activity and global
-outbound controls. Explain that external writes are suppressed in all modes.
+outbound controls. Explain that external writes stay suppressed except for
+registered Live adapters after administrator approval (email replies today).
 Put the full mission beneath each agent name in muted,
 wrapping text. Preserve line breaks and let long words wrap. Align table
 headers to the logical start. Activity stacks below the primary column on
@@ -209,12 +210,22 @@ and reduced-motion interaction remain immediate. Use a visible two-pixel
 focus outline with clearance from the control.
 
 Use the shared shadcn Field, Label, Description, Error, Input and Textarea
-primitives with the dedicated control-border token. Keep labels visible.
-Place help and validation beside the field and link errors with
-`aria-describedby` and `aria-invalid`. Preserve entries on recoverable
-errors, reveal the containing section before focusing an invalid field and
-show pending, saved or unsaved state where it helps. Separate the save bar
-with a top border and subtle fill.
+primitives with the dedicated control-border token. Align related inputs at
+40px on desktop, and place help below the control so wrapping help does not
+stagger paired inputs. Link help and validation with `aria-describedby`
+and use `aria-invalid` for invalid fields. Preserve entries on recoverable
+errors and reveal the containing section before focusing an invalid field.
+Use a shared form dialog with a compact header, scrollable body and a visible
+action footer. Match the width to the task. Use a narrow dialog for agent
+creation, a medium dialog for connections and a wide dialog for skills.
+Separate save bars with a top border and subtle fill.
+
+Use the Markdown editor for skill bodies and configuration prompt fields.
+Write uses the editable Markdown source. Preview renders it and Split shows
+both panes side by side, stacking them on phones. Toolbar actions format the
+selection and participate in native undo. Keep the source value in the form
+when changing modes. Email and approval drafts use the shared plain text
+textarea.
 
 Use the shared Select for choice lists and compact section navigation.
 Menus align to the trigger and match its width. Flip or scroll the menu
@@ -240,18 +251,19 @@ the first invalid field. On success, close after the server action completes.
 
 Show agent identity, lifecycle, current configuration version and OpenRouter
 status above the task tabs. The tasks are Configuration, Playground,
-Knowledge, Email, History, Approvals and Access. Save evaluation cases from
-History or Email; open Comparisons from the global Evaluations page. Use a
-horizontal tablist with
-Left, Right, Home and End support above 600px and a full-width Select at
-600px and narrower. Keep task panels mounted so drafts survive navigation.
+Knowledge, Email, Follow-ups, History, Approvals and Access. Save evaluation
+cases from History or Email; open Comparisons from the global Evaluations
+page. Use a horizontal tablist with Left, Right, Home and End support above
+600px and a full-width Select at 600px and narrower. Keep task panels mounted
+so drafts survive navigation.
 
 ### Configuration and identity
 
-Use one editor and one save bar. Identity, Behaviour and Models each expose
-one field group. The section navigator is 192px wide and reduces to 156px
-at 900px and narrower. At 600px and narrower it becomes a horizontal row
-and identity fields stack.
+Use one editor and one save bar. Identity, Behaviour, Discovery and Models
+each expose one field group. Discovery holds the admin-only X search query
+(one per agent); blank disables polling. The section navigator is 192px wide
+and reduces to 156px at 900px and narrower. At 600px and narrower it becomes
+a horizontal row and identity fields stack.
 
 Each configuration save creates an immutable version. Keep unsaved values
 on conflicts. After saving, Playground defaults to the newest version.
@@ -275,16 +287,32 @@ text composer is easy to reach. Explain that model usage can incur charges
 and that the simulation does not post or send anything. Use the same
 recipient IDs as the consent records.
 
+The History tab is the agent activity timeline: playground simulations and
+X discovery evaluations. Label each entry by origin. Discovery rows show
+evaluator reasoning and proposed actions; shadow mode keeps proposals
+recorded and never sent.
+
 Show queued, running, awaiting approval, completed, failed and interrupted
 states from persisted records. Stop watching explains that inference can
 continue and links to the matching History entry. An awaiting-approval run
-links to its review. Refresh while runs or knowledge jobs are in flight so
-saved results appear without a manual reload.
+links to its review. Refresh while runs, knowledge jobs or scheduled
+follow-ups are in flight so saved results appear without a manual reload.
 
-History shows run details, exact configuration snapshots, linked job
-status and the provider's recorded cost. Label missing cost explicitly.
-Use a flexible run list and a 280px version column, stacked at 900px and
-narrower. Preserve source citations with saved runs.
+History leads with the per-agent activity timeline (follow-up outcomes and
+related internal events), then run details, exact configuration snapshots,
+linked job status and the provider's recorded cost. Label missing cost
+explicitly. Use a flexible primary column and a 280px version column,
+stacked at 900px and narrower. Preserve source citations with saved runs.
+
+### Follow-ups
+
+Administrators schedule durable follow-ups for an agent from the Follow-ups
+tab: subject, optional note and due time. Rows use the same disclosure
+pattern as History. Expand a row to inspect source, actor, attempts, job
+status, cancellation and the recorded outcome. Cancel is available only
+while status is scheduled. Due execution writes an internal activity
+outcome only — no external side effects. Paused and stopped agents
+skip-and-record due follow-ups (see [docs/follow-ups.md](docs/follow-ups.md)).
 
 ### Knowledge
 
@@ -307,13 +335,14 @@ with filename, page or section and the quoted passage.
 The Email task tab uses the existing responsive workspace navigation. The mailbox
 card shows the assigned address and the enable or disable action. The thread list
 highlights the selected conversation. Messages show the processing state beside the
-subject and sender, with the saved reply draft and its knowledge citations beneath
-the message. Message content and replies render as plain text. Email work participates
-in the workspace’s pending-state refresh.
+subject and sender. Pending reply drafts use an editable textarea with Approve &
+queue and Reject. Knowledge citations stay beneath the draft. After review, the
+thread shows the send outcome (queued, sending, sent, failed, blocked) and reason.
+Message content and replies render as plain text. Destination and threading headers
+are never editable. Email work participates in the workspace’s pending-state refresh.
 
-Playwright verified admin mailbox controls, thread navigation, draft and citation
-rendering, and the mobile layout in both themes. The inbox had no axe violations
-at 390px in either theme.
+Playwright verified admin mailbox controls, thread navigation, draft review,
+send-outcome rendering, and the mobile layout in both themes at 1440px and 390px.
 
 ### Access
 
@@ -336,8 +365,9 @@ agent creation.
 
 Skills and MCP have list-first pages with one New action in the heading, a
 bordered table for saved entries and a concise empty state. Create and edit
-open the shared Dialog. Skill bodies use Markdown Write and Preview tabs.
-The slug follows the title until edited. The MCP connection form uses a
+open the shared form dialog. Give the skill body the largest editing surface
+and keep the title, slug and usage guidance above it. The slug follows the
+title until edited. The MCP connection form uses a
 transport Select, chip rows for the tool allowlist, an optional Fetch tools
 action and key/value rows for auth headers. Display stored auth as a masked
 state. New tools default to Mutating. Changing an endpoint requires the
@@ -366,7 +396,9 @@ external writes for that execution context.
 Review the console as an operational tool. Use the task-appropriate
 Impeccable, Emil Design Engineering, Better Interface or focused design
 workflow. Prefer familiar controls, clear labels, short task paths and
-behavior that the running application can demonstrate.
+behavior that the running application can demonstrate. Check formatting,
+undo, preview, saving from Preview and focus return with the Skills browser
+regression when changing the editor.
 
 Use seeded local data for screenshots and a disposable test database for
 browser integration. Check Light and Dark at desktop, tablet and phone

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useId, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { startComparison } from '@/actions/evaluation';
@@ -9,6 +9,14 @@ import {
   type EvaluationCaseRow,
   type EvaluationComparisonRow,
 } from '@/app/evaluation-lists';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { SubmitButton } from '@/components/ui/submit-button';
 
 interface VersionRow {
@@ -40,6 +48,7 @@ export function EvaluationsWorkbench({
   comparisons: EvaluationComparisonRow[];
   versions: VersionRow[];
 }) {
+  const formId = useId();
   const router = useRouter();
   const [selectedAgent, setSelectedAgent] = useState(() => firstAgentId(agents, agentId));
   const [caseId, setCaseId] = useState(
@@ -97,91 +106,96 @@ export function EvaluationsWorkbench({
               });
             }}
           >
-            <label className="workspace-field">
-              <span>Agent</span>
-              <select
-                className="library-field-control"
-                name="agentId"
-                value={selectedAgent}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setSelectedAgent(next);
-                  const nextCase = cases.find((row) => row.agentId === next);
-                  setCaseId(nextCase?.id ?? '');
-                  const nextVersions = versionsFor(versions, next);
-                  setLeftId(nextVersions.at(1)?.id ?? nextVersions.at(0)?.id ?? '');
-                  setRightId(nextVersions.at(0)?.id ?? '');
-                }}
-              >
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="workspace-field">
-              <span>Case</span>
-              <select
-                className="library-field-control"
-                name="caseId"
-                value={selectedCase ? selectedCase.id : ''}
-                onChange={(event) => {
-                  setCaseId(event.target.value);
-                }}
-                required
-              >
-                {agentCases.length === 0 && <option value="">No saved cases</option>}
-                {agentCases.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="workspace-field">
-              <span>Configuration A</span>
-              <select
-                className="library-field-control"
-                name="leftConfigurationId"
-                value={leftId}
-                onChange={(event) => {
-                  setLeftId(event.target.value);
-                }}
-                required
-              >
-                {currentVersions.map((version) => (
-                  <option key={version.id} value={version.id}>
-                    v{version.version}
-                    {version.name ? ` · ${version.name}` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="workspace-field">
-              <span>Configuration B</span>
-              <select
-                className="library-field-control"
-                name="rightConfigurationId"
-                value={rightId}
-                onChange={(event) => {
-                  setRightId(event.target.value);
-                }}
-                required
-              >
-                {currentVersions.map((version) => (
-                  <option key={version.id} value={version.id}>
-                    v{version.version}
-                    {version.name ? ` · ${version.name}` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {error && (
-              <p role="alert" className="form-error">
-                {error}
-              </p>
-            )}
+            <FieldGroup className="evaluation-compare-fields">
+              <Field>
+                <FieldLabel htmlFor={`${formId}-agent`}>Agent</FieldLabel>
+                <input type="hidden" name="agentId" value={selectedAgent} />
+                <Select
+                  value={selectedAgent}
+                  onValueChange={(next) => {
+                    setSelectedAgent(next);
+                    const nextCase = cases.find((row) => row.agentId === next);
+                    setCaseId(nextCase?.id ?? '');
+                    const nextVersions = versionsFor(versions, next);
+                    setLeftId(nextVersions.at(1)?.id ?? nextVersions.at(0)?.id ?? '');
+                    setRightId(nextVersions.at(0)?.id ?? '');
+                  }}
+                >
+                  <SelectTrigger id={`${formId}-agent`} className="w-full" aria-label="Agent">
+                    <SelectValue placeholder="Choose an agent" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {agents.map((agent) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        {agent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${formId}-case`}>Case</FieldLabel>
+                <input type="hidden" name="caseId" value={selectedCase ? selectedCase.id : ''} />
+                <Select
+                  value={selectedCase ? selectedCase.id : undefined}
+                  onValueChange={setCaseId}
+                >
+                  <SelectTrigger id={`${formId}-case`} className="w-full" aria-label="Case">
+                    <SelectValue placeholder="No saved cases" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {agentCases.map((row) => (
+                      <SelectItem key={row.id} value={row.id}>
+                        {row.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${formId}-left`}>Configuration A</FieldLabel>
+                <input type="hidden" name="leftConfigurationId" value={leftId} />
+                <Select value={leftId || undefined} onValueChange={setLeftId}>
+                  <SelectTrigger
+                    id={`${formId}-left`}
+                    className="w-full"
+                    aria-label="Configuration A"
+                  >
+                    <SelectValue placeholder="Choose a version" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {currentVersions.map((version) => (
+                      <SelectItem key={version.id} value={version.id}>
+                        v{version.version}
+                        {version.name ? ` · ${version.name}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${formId}-right`}>Configuration B</FieldLabel>
+                <input type="hidden" name="rightConfigurationId" value={rightId} />
+                <Select value={rightId || undefined} onValueChange={setRightId}>
+                  <SelectTrigger
+                    id={`${formId}-right`}
+                    className="w-full"
+                    aria-label="Configuration B"
+                  >
+                    <SelectValue placeholder="Choose a version" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {currentVersions.map((version) => (
+                      <SelectItem key={version.id} value={version.id}>
+                        v{version.version}
+                        {version.name ? ` · ${version.name}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </FieldGroup>
+            {error && <FieldError>{error}</FieldError>}
             <div className="workspace-form-footer">
               <SubmitButton
                 disabled={pending || !selectedCase || currentVersions.length < 2}

@@ -69,14 +69,27 @@ test('the admin can enable Sarah’s inbox and inspect a draft on mobile', async
       await sql`INSERT INTO simulation_runs(agent_id,configuration_id,input,actor,origin,status,result,expires_at)
       VALUES(${agentId},${version!.id},'Invoice','fixture','email','completed',${sql.json(result)},now()) RETURNING id`;
     await sql`INSERT INTO email_threads(id,agent_id) VALUES (${threadId},${agentId})`;
-    await sql`INSERT INTO email_messages(agent_id,resend_email_id,event,sender,subject,received_at,run_id,thread_id,body)
-      VALUES (${agentId},${randomUUID()},'{}','customer@example.test',${subject},now(),${run!.id},${threadId},'<img src=x>Where are my invoices?')`;
+    const messageId = randomUUID();
+    await sql`INSERT INTO email_messages(id,agent_id,resend_email_id,event,sender,subject,received_at,run_id,thread_id,body)
+      VALUES (${messageId},${agentId},${messageId},'{}','customer@example.test',${subject},now(),${run!.id},${threadId},'<img src=x>Where are my invoices?')`;
+    const intentId = randomUUID();
+    await sql`INSERT INTO action_intents(
+      id,agent_id,run_id,action_type,recipients,review_status,payload,idempotency_key,decision,reasons
+    ) VALUES (
+      ${intentId},${agentId},${run!.id},'email.send',${sql.json(['customer@example.test'])},'pending',
+      ${sql.json({
+        draft: 'Open Billing to find your invoices.',
+        emailMessageId: messageId,
+        threadId,
+      })},
+      ${`email.send:${messageId}`},'needs-approval',${sql.json(['An administrator must review this proposal.'])}
+    )`;
 
     await page.goto(url);
     await page.getByRole('link', { name: new RegExp(subject) }).click();
     await expect(page).toHaveURL(new RegExp(threadId));
-    await expect(page.getByText('Draft ready')).toBeVisible();
-    await expect(page.getByText('Open Billing to find your invoices.')).toBeVisible();
+    await expect(page.getByText('Awaiting approval')).toBeVisible();
+    await expect(page.getByLabel('Reply draft')).toBeVisible();
     await expect(page.getByText(/sarah-faq.md/)).toBeVisible();
     await expect(
       page.getByText('<img src=x>Where are my invoices?', { exact: true }),
@@ -84,7 +97,8 @@ test('the admin can enable Sarah’s inbox and inspect a draft on mobile', async
 
     await page.setViewportSize({ width: 390, height: 844 });
     await openWorkspaceTab(page, 'Email');
-    await expect(page.getByRole('heading', { name: 'Reply draft' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve & queue' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reject' })).toBeVisible();
     for (const mode of ['Light', 'Dark']) {
       await page.getByRole('radio', { name: mode, exact: true }).check();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
@@ -96,10 +110,13 @@ test('the admin can enable Sarah’s inbox and inspect a draft on mobile', async
         .analyze();
       expect(audit.violations).toEqual([]);
     }
-    await expect(page.getByRole('button', { name: /send/i })).toHaveCount(0);
   } finally {
     await sql`DELETE FROM evaluation_comparisons WHERE agent_id=${agentId}`;
     await sql`DELETE FROM evaluation_cases WHERE agent_id=${agentId}`;
+    await sql`DELETE FROM outbound_actions WHERE agent_id=${agentId}`;
+    await sql`DELETE FROM action_intents WHERE agent_id=${agentId}`;
+    await sql`DELETE FROM email_messages WHERE agent_id=${agentId}`;
+    await sql`DELETE FROM email_threads WHERE agent_id=${agentId}`;
     await sql`DELETE FROM simulation_runs WHERE agent_id=${agentId}`;
     await sql`DELETE FROM agent_configurations WHERE agent_id=${agentId}`;
     await sql`DELETE FROM agents WHERE id=${agentId}`;

@@ -68,3 +68,14 @@ test('introduce and escalate are opt-in via approvalTools', () => {
     ).toBe(true);
   }
 });
+
+test('email.send always requires administrator approval', () => {
+  expect(
+    actionNeedsApproval({
+      actionType: 'email.send',
+      approvalTools: [],
+      approvalSpendCents: null,
+      daySpendMicros: BigInt(0),
+    }),
+  ).toBe(true);
+});
