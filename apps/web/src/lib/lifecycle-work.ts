@@ -20,6 +20,8 @@ export async function cancelWorkForLifecycle(
 ): Promise<string[]> {
   if (!store) {
     return db().transaction(async (tx) => {
+      // Lock order for cancellation: agents → jobs → evaluationComparisons (→ runs / approvals).
+      // Replay admission and exhausted-finalize follow the same agent → job → comparison order.
       await lockApprovalAgent(tx, agentId);
       return cancelWorkForLifecycle(agentId, next, tx);
     });
