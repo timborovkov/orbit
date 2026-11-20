@@ -37,7 +37,14 @@ function artifactPath(name: string) {
   return path.join(ARTIFACT_DIRS[0], name);
 }
 
+async function scrollToTop(page: Page) {
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+  });
+}
+
 async function screenshotToArtifacts(page: Page, name: string) {
+  await scrollToTop(page);
   const primary = artifactPath(name);
   await capturePage(page, primary);
   for (const dir of ARTIFACT_DIRS.slice(1)) {
@@ -128,6 +135,8 @@ for (const width of [1440, 390] as const) {
     await expect(page.getByRole('heading', { name: 'Run history' })).toBeVisible();
     await expect(page.locator(`#run-${run.id}`)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save as case' })).toBeVisible();
+    // Ensure Save as case is laid out, then reset scroll so the sticky header is at the top.
+    await page.getByRole('button', { name: 'Save as case' }).scrollIntoViewIfNeeded();
     await screenshotToArtifacts(page, `evaluation-save-case-${width}.png`);
 
     const saved = await saveEvaluationCase({
@@ -147,6 +156,19 @@ for (const width of [1440, 390] as const) {
     await page.locator('select[name="caseId"]').selectOption({ label: 'CRM lead post' });
     await page.locator('select[name="leftConfigurationId"]').selectOption({ value: v1.id });
     await page.locator('select[name="rightConfigurationId"]').selectOption({ value: v2.id });
+    if (width === 390) {
+      const mobileCase = page.locator('.library-card-list .library-card', {
+        has: page.locator('.library-primary', { hasText: 'CRM lead post' }),
+      });
+      await expect(mobileCase).toBeVisible();
+      await expect(mobileCase.locator('.library-secondary')).toContainText(
+        'Need a CRM that keeps follow-ups personal.',
+      );
+    } else {
+      await expect(
+        page.locator('.library-table .library-primary', { hasText: 'CRM lead post' }),
+      ).toBeVisible();
+    }
     await screenshotToArtifacts(page, `evaluation-choose-configs-${width}.png`);
 
     const started = await startEvaluationComparison({
