@@ -5,12 +5,15 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { budgetDefaults, budgetsSchema, type AgentBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import {
+  canAcceptBackgroundWork,
   lifecycleLabels,
   lifecycleSchema,
   shouldCancelPendingJobs,
   type LifecycleState,
 } from '@/lib/lifecycle';
 import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
+import { configSchema } from '@/lib/runtime/config';
+import { ensureDiscoveryPollJob } from '@/lib/runtime/x/poll';
 import { agents, audit, configurations, type ApprovalSettings } from '@/lib/schema';
 
 export async function persistLifecycle(actor: string, agentId: string, next: LifecycleState) {
@@ -45,6 +48,19 @@ export async function persistLifecycle(actor: string, agentId: string, next: Lif
             ? `Cancelled ${cancelledIds.length} pending/claimed job(s) for ${agent.name} on stopped`
             : `Cancelled ${cancelledIds.length} pending job(s) for ${agent.name} on paused`,
       });
+    }
+
+    if (canAcceptBackgroundWork(parsed.data)) {
+      const version = (
+        await tx
+          .select()
+          .from(configurations)
+          .where(eq(configurations.agentId, agentId))
+          .orderBy(desc(configurations.version))
+          .limit(1)
+      ).at(0);
+      const query = version ? configSchema.parse(version.config).xSearchQuery.trim() : '';
+      if (query) await ensureDiscoveryPollJob(agentId, tx);
     }
 
     return {

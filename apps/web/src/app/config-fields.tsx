@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { Cpu, Fingerprint, SlidersHorizontal } from 'lucide-react';
+import { Cpu, Fingerprint, Radar, SlidersHorizontal } from 'lucide-react';
 
 import { WorkspaceField } from '@/app/workspace-field';
 import { configFields, type AgentConfig } from '@/lib/runtime/config';
 
-const shortFields = new Set(['name', 'role', 'mainModel', 'evaluatorModel']);
+const shortFields = new Set(['name', 'role', 'mainModel', 'evaluatorModel', 'xSearchQuery']);
 const requiredFields = new Set(['name', 'mainModel', 'evaluatorModel']);
 const definitions = new Map<string, (typeof configFields)[number]>(
   configFields.map((field) => [field[0], field]),
@@ -26,6 +26,13 @@ const groups = [
     icon: SlidersHorizontal,
     description: 'Set the operating rules and when this agent should engage.',
     fields: ['instructions', 'engagementCriteria'],
+  },
+  {
+    id: 'discovery',
+    title: 'Discovery',
+    icon: Radar,
+    description: 'Configure proactive X search. Polling stays read-only in shadow mode.',
+    fields: ['xSearchQuery'],
   },
   {
     id: 'models',
@@ -110,14 +117,22 @@ export function ConfigFields({
                         ? 80
                         : name === 'mainModel' || name === 'evaluatorModel'
                           ? 160
-                          : name === 'mission'
-                            ? 2000
-                            : 12000
+                          : name === 'xSearchQuery'
+                            ? 512
+                            : name === 'mission'
+                              ? 2000
+                              : 12000
                     }
                   />
                 );
               })}
             </div>
+            {group.id === 'discovery' && (
+              <p className="field-hint">
+                One X recent-search query per agent. Leave blank to disable polling. New posts are
+                stored and evaluated in shadow mode; proposals are recorded and never sent.
+              </p>
+            )}
             {group.id === 'models' && (
               <p className="field-hint">
                 Use an OpenRouter model ID. Both steps can use the same model. Keys are managed

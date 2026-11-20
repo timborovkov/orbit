@@ -267,7 +267,10 @@ test('signed inbound mail isolates Sarah and a Live agent, threads replies, and 
   expect(
     await persistConfiguration(admin, sarah.id, 2, { ...sarah.config, name: 'Sarah Current' }),
   ).toBe(true);
-  await processSimulationJob({ runId: queued!.run_id }, () => model);
+  // Email drafts are owned by email.draft — simulation.run must refuse them.
+  await expect(processSimulationJob({ runId: queued!.run_id }, () => model)).rejects.toThrow(
+    'email runs must use email.draft',
+  );
   const [stillQueued] = await sql`SELECT status FROM simulation_runs WHERE id=${queued!.run_id}`;
   expect(stillQueued!.status).toBe('queued');
   const groundedModel: ModelCall = Object.assign(

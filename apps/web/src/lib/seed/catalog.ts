@@ -105,9 +105,12 @@ export interface DemoKnowledgeDocumentSpec {
 
 function baseConfig(
   name: string,
-  template: Omit<AgentConfig, 'name' | 'mission'> & { mission: string },
+  template: Omit<AgentConfig, 'name' | 'mission' | 'xSearchQuery'> & {
+    mission: string;
+    xSearchQuery?: string;
+  },
 ): AgentConfig {
-  return { name, ...template };
+  return { name, xSearchQuery: '', ...template };
 }
 
 const johnPersonality =
@@ -183,6 +186,7 @@ export function demoConfigurations(): DemoConfigSpec[] {
       'Ask useful discovery questions. Offer a demo only when interest is expressed. Never invent features, prices or customer claims.',
     engagementCriteria:
       'Engage with explicit buying intent, relevant business problems and product questions.',
+    xSearchQuery: 'work history OR audit trail OR "timeline" (product OR SaaS) -is:retweet lang:en',
     mainModel: 'deepseek/deepseek-v4.1-flash-1017',
     evaluatorModel: 'deepseek/deepseek-v4.1-flash-1017',
   };
