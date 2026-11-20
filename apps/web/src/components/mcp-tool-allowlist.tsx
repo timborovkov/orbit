@@ -67,7 +67,7 @@ export function McpToolAllowlist({
   }
 
   return (
-    <Field>
+    <Field className="form-section">
       <FieldLabel>Tool allowlist</FieldLabel>
       <FieldDescription>
         Mark verified read-only tools here, then grant access to individual agents. New tools are
@@ -128,7 +128,6 @@ export function McpToolAllowlist({
             placeholder="tool_name"
             value={toolDraft}
             disabled={pending}
-            className="library-field-control"
             onChange={(event) => {
               setToolDraft(event.target.value);
             }}

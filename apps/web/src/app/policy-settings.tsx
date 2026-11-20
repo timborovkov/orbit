@@ -12,7 +12,8 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
-import { FieldGroup } from '@/components/ui/field';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/textarea';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
@@ -115,7 +116,7 @@ export function ConsentSettings({
       </div>
       <WorkspaceForm action={saveConsent} label="Save consent">
         <input type="hidden" name="agentId" value={agentId} />
-        <FieldGroup className="gap-5">
+        <FieldGroup className="form-fields">
           <WorkspaceField
             id="consent-recipient"
             name="recipient"
@@ -124,23 +125,25 @@ export function ConsentSettings({
             required
             description="Use the same recipient ID the playground consent checks will receive."
           />
-          <WorkspaceSelect
-            id="consent-scope"
-            name="scope"
-            label="Consent scope"
-            initialValue="introduce"
-            options={consentOptions}
-          />
-          <WorkspaceSelect
-            id="consent-outcome"
-            name="outcome"
-            label="Recipient decision"
-            initialValue="grant"
-            options={[
-              { value: 'grant', label: 'Grant' },
-              { value: 'revoke', label: 'Revoke' },
-            ]}
-          />
+          <div className="form-grid">
+            <WorkspaceSelect
+              id="consent-scope"
+              name="scope"
+              label="Consent scope"
+              initialValue="introduce"
+              options={consentOptions}
+            />
+            <WorkspaceSelect
+              id="consent-outcome"
+              name="outcome"
+              label="Recipient decision"
+              initialValue="grant"
+              options={[
+                { value: 'grant', label: 'Grant' },
+                { value: 'revoke', label: 'Revoke' },
+              ]}
+            />
+          </div>
           <WorkspaceField
             id="consent-evidence"
             name="evidence"
@@ -203,16 +206,18 @@ export function ProposalReview({
                     <input type="hidden" name="agentId" value={agentId} />
                     <input type="hidden" name="intentId" value={proposal.id} />
                     <input type="hidden" name="decision" value="approved" />
-                    <div className="approvals-draft">
-                      <label htmlFor={`draft-${proposal.id}`}>Draft (edit before approve)</label>
-                      <textarea
+                    <Field>
+                      <FieldLabel htmlFor={`draft-${proposal.id}`}>
+                        Draft (edit before approve)
+                      </FieldLabel>
+                      <Textarea
                         id={`draft-${proposal.id}`}
                         name="draft"
                         rows={3}
                         defaultValue={proposal.draft ?? ''}
                         maxLength={8000}
                       />
-                    </div>
+                    </Field>
                   </WorkspaceForm>
                   <WorkspaceForm action={reviewProposal} label="Reject">
                     <input type="hidden" name="agentId" value={agentId} />

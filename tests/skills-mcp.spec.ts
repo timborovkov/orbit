@@ -216,15 +216,33 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
   await page.getByLabel(/^Title/).fill('Research brief');
   await expect(page.getByLabel(/^Slug/)).toHaveValue('research-brief');
   await page.getByLabel(/^When to use/).fill('Use when drafting a research summary.');
-  await page.getByRole('tab', { name: 'Write' }).click();
-  await page
-    .getByLabel(/^Markdown body/)
-    .fill('# Research brief\n\nCollect sources first.\n\n- Note claims\n- Cite links');
-  await page.getByRole('tab', { name: 'Preview' }).click();
-  await expect(page.locator('.markdown-preview h1')).toContainText('Research brief');
-  await page.getByRole('tab', { name: 'Write' }).click();
+  const body = page.getByLabel(/^Markdown body/);
+  const preview = page.getByRole('tab', { name: 'Preview', exact: true });
+  await preview.click();
+  await page.getByRole('button', { name: 'Create skill', exact: true }).click();
+  await expect(body).toBeFocused();
+  await body.fill('Collect sources first.');
+  await body.press('ControlOrMeta+a');
+  await page.getByRole('button', { name: 'Bold', exact: true }).click();
+  await expect(body).toHaveValue('**Collect sources first.**');
+  await body.press('ControlOrMeta+z');
+  await expect(body).toHaveValue('Collect sources first.');
+  const markdown =
+    '# Research brief\n\n- Note claims\n- Cite links\n\n| Source | Status |\n| --- | --- |\n| Reports | Reviewed |';
+  await body.fill(markdown);
+  await page.getByRole('tab', { name: 'Split', exact: true }).click();
+  await expect(body).toBeVisible();
+  await expect(page.locator('.markdown-preview h1')).toHaveText('Research brief');
+  await expect(
+    page.locator('.markdown-preview').getByRole('cell', { name: 'Reviewed' }),
+  ).toBeVisible();
+  await preview.click();
   await page.getByRole('button', { name: 'Create skill', exact: true }).click();
   await expect(page.getByText('Research brief').first()).toBeVisible();
+  await page.getByRole('button', { name: /Edit Research brief/ }).click();
+  await expect(body).toHaveValue(markdown);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: /Edit Research brief/ })).toBeFocused();
 
   await page.goto('/mcp');
   await page.getByRole('button', { name: 'New connection', exact: true }).click();

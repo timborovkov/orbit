@@ -210,12 +210,22 @@ and reduced-motion interaction remain immediate. Use a visible two-pixel
 focus outline with clearance from the control.
 
 Use the shared shadcn Field, Label, Description, Error, Input and Textarea
-primitives with the dedicated control-border token. Keep labels visible.
-Place help and validation beside the field and link errors with
-`aria-describedby` and `aria-invalid`. Preserve entries on recoverable
-errors, reveal the containing section before focusing an invalid field and
-show pending, saved or unsaved state where it helps. Separate the save bar
-with a top border and subtle fill.
+primitives with the dedicated control-border token. Align related inputs at
+40px on desktop, and place help below the control so wrapping help does not
+stagger paired inputs. Link help and validation with `aria-describedby`
+and use `aria-invalid` for invalid fields. Preserve entries on recoverable
+errors and reveal the containing section before focusing an invalid field.
+Use a shared form dialog with a compact header, scrollable body and a visible
+action footer. Match the width to the task. Use a narrow dialog for agent
+creation, a medium dialog for connections and a wide dialog for skills.
+Separate save bars with a top border and subtle fill.
+
+Use the Markdown editor for skill bodies and configuration prompt fields.
+Write uses the editable Markdown source. Preview renders it and Split shows
+both panes side by side, stacking them on phones. Toolbar actions format the
+selection and participate in native undo. Keep the source value in the form
+when changing modes. Email and approval drafts use the shared plain text
+textarea.
 
 Use the shared Select for choice lists and compact section navigation.
 Menus align to the trigger and match its width. Flip or scroll the menu
@@ -336,8 +346,9 @@ agent creation.
 
 Skills and MCP have list-first pages with one New action in the heading, a
 bordered table for saved entries and a concise empty state. Create and edit
-open the shared Dialog. Skill bodies use Markdown Write and Preview tabs.
-The slug follows the title until edited. The MCP connection form uses a
+open the shared form dialog. Give the skill body the largest editing surface
+and keep the title, slug and usage guidance above it. The slug follows the
+title until edited. The MCP connection form uses a
 transport Select, chip rows for the tool allowlist, an optional Fetch tools
 action and key/value rows for auth headers. Display stored auth as a masked
 state. New tools default to Mutating. Changing an endpoint requires the
