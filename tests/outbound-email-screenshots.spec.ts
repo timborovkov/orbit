@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+
+import { expect, type Page, test } from '@playwright/test';
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';

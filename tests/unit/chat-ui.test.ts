@@ -3,8 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   createPlaygroundStreamProgress,
   playgroundChunksFromResult,
-} from '../apps/web/src/lib/runtime/chat-ui';
-import type { SimulationResult } from '../apps/web/src/lib/runtime/simulation';
+} from '../../apps/web/src/lib/runtime/chat-ui';
+import type { SimulationResult } from '../../apps/web/src/lib/runtime/simulation';
 
 const baseResult = (): SimulationResult => ({
   steps: [],

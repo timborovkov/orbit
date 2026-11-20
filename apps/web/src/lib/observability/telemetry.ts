@@ -3,18 +3,18 @@ import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-ho
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
-  SimpleSpanProcessor,
   type ReadableSpan,
+  SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
 import type { TelemetryOptions } from 'ai';
 
 import { isBudgetError } from '@/lib/budgets';
 import {
+  type ObservabilityEnv,
   observabilityEnvironment,
   parseObservabilityEnv,
-  type ObservabilityEnv,
 } from '@/lib/observability/env';
-import { reportFailure, type FailureCorrelation } from '@/lib/observability/errors';
+import { type FailureCorrelation, reportFailure } from '@/lib/observability/errors';
 import {
   applyOpenRouterCostToSpan,
   langfuseBlockedStatus,

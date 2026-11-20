@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
 import type { Tx } from '@/lib/db';
-import { consentScope, type ConsentScope } from '@/lib/policy/scopes';
+import { type ConsentScope, consentScope } from '@/lib/policy/scopes';
 import { recipientConsents } from '@/lib/schema';
 
 export async function recipientConsentFailure(

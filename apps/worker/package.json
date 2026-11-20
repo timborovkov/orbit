@@ -5,11 +5,10 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "bun check --no-script"
   },
   "devDependencies": {
-    "@typescript/native": "npm:typescript@7.0.2",
-    "typescript": "npm:@typescript/typescript6@6.0.2"
+    "typescript": "7.0.2"
   },
   "dependencies": {
     "@sentry/bun": "^11.14.0"

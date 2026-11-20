@@ -4,7 +4,7 @@ import { db, type Tx } from '@/lib/db';
 import { canAcceptBackgroundWork } from '@/lib/lifecycle';
 import { enqueueJob } from '@/lib/queue/jobs';
 import type { JobRecord } from '@/lib/queue/types';
-import { configSchema, type AgentConfig } from '@/lib/runtime/config';
+import { type AgentConfig, configSchema } from '@/lib/runtime/config';
 import { admitRun } from '@/lib/runtime/execute';
 import { createXSearchAdapter } from '@/lib/runtime/x/adapter';
 import { compareSnowflake } from '@/lib/runtime/x/fixture';

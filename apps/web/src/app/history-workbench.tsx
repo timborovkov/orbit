@@ -1,6 +1,6 @@
 import { ChevronDown, History } from 'lucide-react';
 
-import { ActivityTimeline, type ActivityEventRow } from '@/app/activity-timeline';
+import { type ActivityEventRow, ActivityTimeline } from '@/app/activity-timeline';
 import { RunContent } from '@/app/run-content';
 import { SavePlaygroundCaseForm } from '@/app/save-evaluation-case-form';
 import { formatUtcTimestamp } from '@/lib/format';

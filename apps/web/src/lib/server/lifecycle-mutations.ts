@@ -2,19 +2,19 @@ import 'server-only';
 
 import { and, desc, eq, isNull } from 'drizzle-orm';
 
-import { budgetDefaults, budgetsSchema, type AgentBudgets } from '@/lib/budgets';
+import { type AgentBudgets, budgetDefaults, budgetsSchema } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import {
   canAcceptBackgroundWork,
   lifecycleLabels,
   lifecycleSchema,
-  shouldCancelPendingJobs,
   type LifecycleState,
+  shouldCancelPendingJobs,
 } from '@/lib/lifecycle';
 import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
 import { configSchema } from '@/lib/runtime/config';
 import { ensureDiscoveryPollJob } from '@/lib/runtime/x/poll';
-import { agents, audit, configurations, type ApprovalSettings } from '@/lib/schema';
+import { agents, type ApprovalSettings, audit, configurations } from '@/lib/schema';
 
 export async function persistLifecycle(actor: string, agentId: string, next: LifecycleState) {
   const parsed = lifecycleSchema.safeParse(next);

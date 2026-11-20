@@ -8,8 +8,8 @@ import {
   createLoadSkillTool,
   formatSkillCatalog,
   LOAD_SKILL_TOOL,
-  skillVersionsAttached,
   type SkillSummary,
+  skillVersionsAttached,
   type ToolCallRecord,
 } from '@/lib/runtime/skills';
 import { createToolStepGate } from '@/lib/runtime/tool-steps';

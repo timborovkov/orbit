@@ -1,5 +1,7 @@
 import { join } from 'node:path';
+
 import type { NextConfig } from 'next';
+
 import { withSentryConfig } from '@sentry/nextjs/config';
 
 const nextConfig: NextConfig = {

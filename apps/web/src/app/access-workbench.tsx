@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
+
 import {
   BookOpen,
   KeyRound,
@@ -15,7 +16,7 @@ import { AccessPanel } from '@/app/access-panel';
 import { BudgetSettings, type BudgetUsageView } from '@/app/budget-settings';
 import { LifecycleControls } from '@/app/lifecycle-controls';
 import { ConsentSettings, ReviewSettings } from '@/app/policy-settings';
-import { McpPicker, SkillPicker, type McpPickerConnection } from '@/app/resource-pickers';
+import { McpPicker, type McpPickerConnection, SkillPicker } from '@/app/resource-pickers';
 import {
   Select,
   SelectContent,

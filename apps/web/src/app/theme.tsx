@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useSyncExternalStore } from 'react';
+
 import { Monitor, Moon, Sun } from 'lucide-react';
 
 const modes = [

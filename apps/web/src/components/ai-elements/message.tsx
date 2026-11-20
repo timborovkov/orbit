@@ -1,6 +1,7 @@
 'use client';
 
 import type { HTMLAttributes } from 'react';
+
 import type { UIMessage } from 'ai';
 
 import { cn } from '@/lib/utils';

@@ -38,8 +38,8 @@ Local browser testing and screenshots use `bun run db:seed:demo` (optional `--re
 
 ## Repository work
 
-- Use `@/*` for application imports. Prettier owns import ordering; run it after adding imports. Keep server actions grouped by feature and reusable authentication behaviour in `lib/auth.ts`.
-- Use Bun 1.4.4 for installation and scripts. The repository is a Bun workspace with a Next.js web app and a separate Bun worker.
+- Use `@/*` for application imports. `bun fmt` owns import ordering; run it after adding imports. Keep server actions grouped by feature and reusable authentication behaviour in `lib/auth.ts`.
+- Use Bun canary (1.4.6+, for `bun lint` / `bun check` / `bun fmt`) for installation and scripts. Runtime Docker images stay on Bun 1.4.4. The repository is a Bun workspace with a Next.js web app and a separate Bun worker.
 - Keep services aligned with the single web service, single worker service, and PostgreSQL deployment in the architecture. Do not add infrastructure for deferred capabilities prematurely.
 - Add environment variables, validation, schemas, and migrations when the feature that uses them is implemented. Do not create speculative examples or placeholders.
 - Optional `OPENROUTER_API_KEY` is a server-only OpenRouter default resolved at inference time after any per-agent encrypted override. Never send it to the browser, prompts, diagnostics or client props; do not copy it into `agent_credentials` on create.

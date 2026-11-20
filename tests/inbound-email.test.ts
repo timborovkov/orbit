@@ -1,5 +1,6 @@
-import { createHmac, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, spyOn, test } from 'bun:test';
+import { createHmac, randomUUID } from 'node:crypto';
+
 import postgres from 'postgres';
 
 import { POST } from '@/app/api/webhooks/resend/route';

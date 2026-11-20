@@ -2,7 +2,7 @@
 
 import { Plus, X } from 'lucide-react';
 
-import { newHeaderRow, type McpEditorState } from '@/components/mcp-editor-state';
+import { type McpEditorState, newHeaderRow } from '@/components/mcp-editor-state';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';

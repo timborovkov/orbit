@@ -1,4 +1,5 @@
 import Link from 'next/link';
+
 import { FlaskConical, GitCompareArrows } from 'lucide-react';
 
 import { formatUtcTimestamp } from '@/lib/format';

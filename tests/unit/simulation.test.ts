@@ -9,8 +9,8 @@ import {
 import { decryptCredential, encryptCredential } from '@/lib/runtime/secrets';
 import {
   hasSimulationProgress,
-  simulate,
   type ModelCall,
+  simulate,
   type SimulationResult,
 } from '@/lib/runtime/simulation';
 

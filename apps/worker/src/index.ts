@@ -1,4 +1,5 @@
 import { hostname } from 'node:os';
+
 import * as Sentry from '@sentry/bun';
 
 import { closeDb } from '@/lib/db';

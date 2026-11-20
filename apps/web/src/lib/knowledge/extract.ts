@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 
 import type { ExtractedSection } from '@/lib/knowledge/chunk';
 import {
+  type KnowledgeContentKind,
   maxKnowledgeBytes,
   maxKnowledgeUploadLabel,
-  type KnowledgeContentKind,
 } from '@/lib/knowledge/types';
 
 export interface ExtractedDocument {

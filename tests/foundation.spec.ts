@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
+
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import postgres from 'postgres';
 
 const sql = postgres('postgres://orbit:orbit_dev@localhost:5432/orbit_test');

@@ -1,6 +1,6 @@
 # Development and testing
 
-Use Bun 1.4.4. Follow the [README setup](../README.md) for the local PostgreSQL database and application.
+Use Bun canary (1.4.6+, see `.bun-version`). Follow the [README setup](../README.md) for the local PostgreSQL database and application.
 
 ## Local development without login
 
@@ -36,7 +36,7 @@ bun run build
 bun run test:unit
 ```
 
-Validation includes formatting/import order, types, strict lint, unused code and React Doctor 100. Application imports use `@/*`; Prettier sorts imports automatically. Fast unit tests need no database: auth/env, pure simulation helpers, pictures, budgets, lifecycle, policy gateway and in-memory queue state transitions.
+Validation includes `bun fmt --check`, `bun check`, `bun lint --max-warnings 0`, unused code and React Doctor 100. Application imports use `@/*`; `bun fmt` sorts imports. Fast unit tests live under `tests/unit` and need no database.
 
 Heavy suites (production PRs/pushes, or manual workflow dispatch): Docker image
 builds and smoke (`Full validation`), migrated `orbit_test` PostgreSQL suites

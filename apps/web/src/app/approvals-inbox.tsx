@@ -1,8 +1,10 @@
 'use client';
 
 import { useId, useMemo, useState, useTransition } from 'react';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+
 import { Inbox, Pencil } from 'lucide-react';
 
 import { reviewProposal, reviewProposalsBulk } from '@/actions/policy';

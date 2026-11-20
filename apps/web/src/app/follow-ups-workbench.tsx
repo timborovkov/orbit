@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useState, useTransition } from 'react';
+
 import { CalendarClock, ChevronDown } from 'lucide-react';
 
 import { cancelAgentFollowUp, scheduleAgentFollowUp } from '@/actions/follow-ups';
@@ -12,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { formatUtcTimestamp } from '@/lib/format';
 import { localDatetimeToOffsetIso } from '@/lib/runtime/follow-ups/due';
-import { followUpStatusLabels, type FollowUpStatus } from '@/lib/runtime/follow-ups/types';
+import { type FollowUpStatus, followUpStatusLabels } from '@/lib/runtime/follow-ups/types';
 
 export interface FollowUpRow {
   id: string;

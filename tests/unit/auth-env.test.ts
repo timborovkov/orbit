@@ -61,7 +61,8 @@ describe('local authentication configuration', () => {
 
 test('production boot rejects AUTH_DISABLED before serving', async () => {
   // Exercise the same instrumentation guard Next runs at boot, without needing `next build`.
-  const instrumentation = new URL('../apps/web/src/instrumentation.ts', import.meta.url).pathname;
+  const instrumentation = new URL('../../apps/web/src/instrumentation.ts', import.meta.url)
+    .pathname;
   const child = Bun.spawn(
     [
       process.execPath,
@@ -74,7 +75,7 @@ test('production boot rejects AUTH_DISABLED before serving', async () => {
       `,
     ],
     {
-      cwd: new URL('../', import.meta.url).pathname,
+      cwd: new URL('../../', import.meta.url).pathname,
       env: { ...process.env, ...local, NODE_ENV: 'production' },
       stdout: 'pipe',
       stderr: 'pipe',
