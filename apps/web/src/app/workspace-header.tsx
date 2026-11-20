@@ -17,6 +17,7 @@ import { env } from '@/lib/env';
 const navLinks = [
   { href: '/', label: 'Overview' },
   { href: '/approvals', label: 'Approvals' },
+  { href: '/evaluations', label: 'Evaluations' },
   { href: '/templates', label: 'Templates' },
   { href: '/skills', label: 'Skills' },
   { href: '/mcp', label: 'MCP' },

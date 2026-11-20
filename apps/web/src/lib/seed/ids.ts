@@ -126,6 +126,29 @@ export const DEMO_FOLLOW_UP_IDS = Object.values(DEMO_FOLLOW_UPS);
 export const DEMO_FOLLOW_UP_JOB_IDS = Object.values(DEMO_FOLLOW_UP_JOBS);
 export const DEMO_ACTIVITY_IDS = Object.values(DEMO_ACTIVITY);
 
+/**
+ * Evaluation cases and comparisons owned by the demo seed.
+ * Uses a950–a970 so they never collide with email (a800), discovery (a900/a910),
+ * or follow-ups (a920/a930/a940).
+ */
+export const DEMO_EVAL_CASES = {
+  johnPlayground: '00000000-0000-4000-a950-000000000001',
+  sarahEmail: '00000000-0000-4000-a950-000000000002',
+} as const;
+
+export const DEMO_EVAL_COMPARISONS = {
+  johnVersions: '00000000-0000-4000-a960-000000000001',
+} as const;
+
+export const DEMO_EVAL_REPLAY_RUNS = {
+  johnLeft: '00000000-0000-4000-a970-000000000001',
+  johnRight: '00000000-0000-4000-a970-000000000002',
+} as const;
+
+export const DEMO_EVAL_CASE_IDS = Object.values(DEMO_EVAL_CASES);
+export const DEMO_EVAL_COMPARISON_IDS = Object.values(DEMO_EVAL_COMPARISONS);
+export const DEMO_EVAL_REPLAY_RUN_IDS = Object.values(DEMO_EVAL_REPLAY_RUNS);
+
 export function isDemoAgentId(id: string): boolean {
   return (DEMO_AGENT_IDS as readonly string[]).includes(id);
 }

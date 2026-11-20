@@ -114,8 +114,9 @@ export async function enqueueJobInTransaction(
 export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
   const limit = options.limit ?? 1;
-  const now = new Date().toISOString();
-  const expiry = new Date(Date.now() + leaseMs).toISOString();
+  // Use Postgres now() for availability/lease checks so JS clock skew cannot miss
+  // rows that were just marked available_at=now() on another connection.
+  const expiryMs = leaseMs;
   const client = sqlClient();
 
   // Expired claims are only reclaimable while attempts remain; exhausted leases are dead-lettered by recovery.
@@ -124,11 +125,11 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
         WITH candidate AS (
           SELECT id FROM jobs
           WHERE (
-            (status = 'pending' AND available_at <= ${now}::timestamptz)
+            (status = 'pending' AND available_at <= now())
             OR (
               status = 'claimed'
               AND claim_expires_at IS NOT NULL
-              AND claim_expires_at < ${now}::timestamptz
+              AND claim_expires_at < now()
               AND attempts < max_attempts
             )
           )
@@ -141,10 +142,10 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
         SET
           status = 'claimed',
           attempts = j.attempts + 1,
-          claimed_at = ${now}::timestamptz,
-          claim_expires_at = ${expiry}::timestamptz,
+          claimed_at = now(),
+          claim_expires_at = now() + (${expiryMs}::text || ' milliseconds')::interval,
           claimed_by = ${options.workerId},
-          updated_at = ${now}::timestamptz
+          updated_at = now()
         FROM candidate
         WHERE j.id = candidate.id
         RETURNING j.*
@@ -153,11 +154,11 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
         WITH candidate AS (
           SELECT id FROM jobs
           WHERE (
-            (status = 'pending' AND available_at <= ${now}::timestamptz)
+            (status = 'pending' AND available_at <= now())
             OR (
               status = 'claimed'
               AND claim_expires_at IS NOT NULL
-              AND claim_expires_at < ${now}::timestamptz
+              AND claim_expires_at < now()
               AND attempts < max_attempts
             )
           )
@@ -169,10 +170,10 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
         SET
           status = 'claimed',
           attempts = j.attempts + 1,
-          claimed_at = ${now}::timestamptz,
-          claim_expires_at = ${expiry}::timestamptz,
+          claimed_at = now(),
+          claim_expires_at = now() + (${expiryMs}::text || ' milliseconds')::interval,
           claimed_by = ${options.workerId},
-          updated_at = ${now}::timestamptz
+          updated_at = now()
         FROM candidate
         WHERE j.id = candidate.id
         RETURNING j.*

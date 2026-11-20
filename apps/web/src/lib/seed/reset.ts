@@ -13,6 +13,8 @@ import {
   emailMailboxes,
   emailMessages,
   emailThreads,
+  evaluationCases,
+  evaluationComparisons,
   followUps,
   jobs,
   knowledgeChunks,
@@ -33,6 +35,9 @@ import {
   DEMO_AUDIT,
   DEMO_DISCOVERY_RUN_IDS,
   DEMO_EMAIL,
+  DEMO_EVAL_CASE_IDS,
+  DEMO_EVAL_COMPARISON_IDS,
+  DEMO_EVAL_REPLAY_RUN_IDS,
   DEMO_FOLLOW_UP_IDS,
   DEMO_FOLLOW_UP_JOB_IDS,
   DEMO_INTENTS,
@@ -46,7 +51,7 @@ import {
 import type { SeedContext } from '@/lib/seed/types';
 
 const demoJobIds = [...Object.values(DEMO_JOBS), ...DEMO_FOLLOW_UP_JOB_IDS];
-const demoRunIds = Object.values(DEMO_RUNS);
+const demoRunIds = [...Object.values(DEMO_RUNS), ...DEMO_EVAL_REPLAY_RUN_IDS];
 const demoIntentIds = Object.values(DEMO_INTENTS);
 const demoPolicyIds = Object.values(DEMO_POLICY);
 const demoAuditIds = Object.values(DEMO_AUDIT);
@@ -74,6 +79,11 @@ export function isDemoOwnedJob(job: {
   if (agentId && (demoAgentIds as readonly string[]).includes(agentId)) return true;
   if (documentId && (demoKnowledgeDocIds as readonly string[]).includes(documentId)) return true;
   if (followUpId && (demoFollowUpIds as readonly string[]).includes(followUpId)) return true;
+  const comparisonId =
+    typeof job.payload.comparisonId === 'string' ? job.payload.comparisonId : null;
+  if (comparisonId && (DEMO_EVAL_COMPARISON_IDS as readonly string[]).includes(comparisonId)) {
+    return true;
+  }
   return false;
 }
 
@@ -100,6 +110,15 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
   await tx.delete(actionIntents).where(inArray(actionIntents.id, demoIntentIds));
   await tx.delete(actionIntents).where(inArray(actionIntents.id, [DEMO_EMAIL.intentId]));
   await tx.delete(actionIntents).where(inArray(actionIntents.agentId, demoAgentIds));
+
+  await tx
+    .delete(evaluationComparisons)
+    .where(inArray(evaluationComparisons.id, [...DEMO_EVAL_COMPARISON_IDS]));
+  await tx
+    .delete(evaluationComparisons)
+    .where(inArray(evaluationComparisons.agentId, demoAgentIds));
+  await tx.delete(evaluationCases).where(inArray(evaluationCases.id, [...DEMO_EVAL_CASE_IDS]));
+  await tx.delete(evaluationCases).where(inArray(evaluationCases.agentId, demoAgentIds));
 
   await tx
     .delete(agentActivityEvents)
@@ -142,6 +161,7 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
         sqlTextInList(sql`${jobs.payload}->>'agentId'`, demoAgentIds),
         sqlTextInList(sql`${jobs.payload}->>'documentId'`, demoKnowledgeDocIds),
         sqlTextInList(sql`${jobs.payload}->>'followUpId'`, demoFollowUpIds),
+        sqlTextInList(sql`${jobs.payload}->>'comparisonId'`, [...DEMO_EVAL_COMPARISON_IDS]),
       ),
     );
   await tx

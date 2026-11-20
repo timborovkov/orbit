@@ -142,7 +142,7 @@ export const runs = pgTable('simulation_runs', {
     .notNull()
     .references(() => configurations.id),
   origin: text('origin')
-    .$type<'playground' | 'email' | 'discovery'>()
+    .$type<'playground' | 'email' | 'discovery' | 'replay'>()
     .notNull()
     .default('playground'),
   input: text('input').notNull(),
@@ -216,6 +216,50 @@ export const emailMessages = pgTable(
     }).onDelete('cascade'),
   ],
 );
+
+export type EvaluationCaseSource = 'playground' | 'email';
+export type EvaluationComparisonStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+export const evaluationCases = pgTable('evaluation_cases', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  agentId: uuid('agent_id')
+    .notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  sourceKind: text('source_kind').$type<EvaluationCaseSource>().notNull(),
+  sourceRunId: uuid('source_run_id').references(() => runs.id, { onDelete: 'set null' }),
+  sourceEmailMessageId: uuid('source_email_message_id').references(() => emailMessages.id, {
+    onDelete: 'set null',
+  }),
+  input: text('input').notNull(),
+  recipients: jsonb('recipients').$type<string[]>().notNull().default([]),
+  actor: text('actor').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const evaluationComparisons = pgTable('evaluation_comparisons', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  agentId: uuid('agent_id')
+    .notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  caseId: uuid('case_id')
+    .notNull()
+    .references(() => evaluationCases.id, { onDelete: 'cascade' }),
+  leftConfigurationId: uuid('left_configuration_id')
+    .notNull()
+    .references(() => configurations.id),
+  rightConfigurationId: uuid('right_configuration_id')
+    .notNull()
+    .references(() => configurations.id),
+  leftRunId: uuid('left_run_id').references(() => runs.id, { onDelete: 'set null' }),
+  rightRunId: uuid('right_run_id').references(() => runs.id, { onDelete: 'set null' }),
+  status: text('status').$type<EvaluationComparisonStatus>().notNull().default('queued'),
+  actor: text('actor').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+  error: text('error'),
+});
 
 export const actionIntents = pgTable('action_intents', {
   id: uuid('id').defaultRandom().primaryKey(),

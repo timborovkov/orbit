@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 
 import { budgetDefaults } from '@/lib/budgets';
 import { evaluateActionForTest } from '@/lib/policy/gateway';
+import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 
 const base = {
   lifecycle: 'shadow' as const,
@@ -155,4 +156,42 @@ test('spend threshold can require approval', () => {
     { type: 'reply', idempotencyKey: 'k13' },
   );
   expect(result.decision).toBe('needs-approval');
+});
+
+test('replay execution context suppresses writes before approval', () => {
+  const result = evaluateActionForTest(
+    {
+      ...base,
+      lifecycle: 'live',
+      executionContext: 'replay',
+      approvalTools: ['reply'],
+    },
+    { type: 'reply', idempotencyKey: 'replay-1' },
+  );
+  expect(result.decision).toBe('suppressed');
+  expect(result.reasons.join(' ')).toContain('Replay execution suppresses');
+});
+
+test('outbound dispatch gate refuses replay even when an adapter is available', () => {
+  const denied = authorizeOutboundDispatch({
+    executionContext: 'replay',
+    lifecycle: 'live',
+    adapterAvailable: true,
+  });
+  expect(denied.allowed).toBe(false);
+  if (!denied.allowed) expect(denied.reason).toContain('Replay');
+
+  const withoutAdapter = authorizeOutboundDispatch({
+    executionContext: 'standard',
+    lifecycle: 'live',
+    adapterAvailable: false,
+  });
+  expect(withoutAdapter.allowed).toBe(false);
+
+  const allowed = authorizeOutboundDispatch({
+    executionContext: 'standard',
+    lifecycle: 'live',
+    adapterAvailable: true,
+  });
+  expect(allowed.allowed).toBe(true);
 });

@@ -190,6 +190,7 @@ export default async function AgentWorkspace({
   );
   const historyPanel = (
     <HistoryWorkbench
+      agentId={id}
       history={history}
       versions={versions}
       activityEvents={activityEvents}

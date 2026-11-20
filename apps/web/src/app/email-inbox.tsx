@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { updateEmailMailbox } from '@/actions/email';
 import { EmailDraftReview } from '@/app/email-draft-review';
 import { KnowledgeCitations } from '@/app/knowledge-citations';
+import { SaveEmailCaseForm } from '@/app/save-evaluation-case-form';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { Button } from '@/components/ui/button';
 import { formatUtcTimestamp } from '@/lib/format';
@@ -166,6 +167,14 @@ function SelectedThread({
             </section>
           )}
           {message.sendOutcome && <SendOutcome outcome={message.sendOutcome} />}
+          {!!message.body && (
+            <SaveEmailCaseForm
+              agentId={agentId}
+              messageId={message.id}
+              input={message.body}
+              defaultTitle={message.subject || message.body.slice(0, 80)}
+            />
+          )}
         </article>
       ))}
     </section>

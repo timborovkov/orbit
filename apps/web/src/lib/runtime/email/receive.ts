@@ -92,7 +92,8 @@ async function storeMessage(tx: Tx, message: Message, received: Received) {
   }
 }
 
-async function draftInput(tx: Tx, message: Message) {
+/** Structured drafting snapshot used by production email runs and evaluation replay. */
+export async function buildEmailDraftInput(tx: Tx, message: Message) {
   const history = await tx
     .select({
       sender: emailMessages.sender,
@@ -234,7 +235,7 @@ export async function processEmailReceiveJob(
     const admitted = await admitRun(tx, agent, {
       actor: EMAIL_ACTOR,
       configurationId: message.configurationId,
-      input: await draftInput(tx, message),
+      input: await buildEmailDraftInput(tx, message),
       origin: 'email',
     });
     if (admitted.waitForCapacity) {

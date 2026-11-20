@@ -111,6 +111,8 @@ test('the admin can enable Sarah’s inbox and inspect a draft on mobile', async
       expect(audit.violations).toEqual([]);
     }
   } finally {
+    await sql`DELETE FROM evaluation_comparisons WHERE agent_id=${agentId}`;
+    await sql`DELETE FROM evaluation_cases WHERE agent_id=${agentId}`;
     await sql`DELETE FROM outbound_actions WHERE agent_id=${agentId}`;
     await sql`DELETE FROM action_intents WHERE agent_id=${agentId}`;
     await sql`DELETE FROM email_messages WHERE agent_id=${agentId}`;

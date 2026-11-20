@@ -16,6 +16,12 @@ import {
 } from '@/lib/runtime/email/send';
 import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB, EMAIL_SEND_JOB } from '@/lib/runtime/email/settings';
 import {
+  EVALUATION_REPLAY_JOB,
+  finalizeExhaustedEvaluationReplayJob,
+  processEvaluationReplayJob,
+  reconcileDeadEvaluationReplayJobs,
+} from '@/lib/runtime/evaluation';
+import {
   finalizeExhaustedSimulationJob,
   processEmailDraftJob,
   processSimulationJob,
@@ -113,6 +119,18 @@ const worker = startJobWorker({
         throw error;
       }
     },
+    [EVALUATION_REPLAY_JOB]: async (job, signal) => {
+      try {
+        await processEvaluationReplayJob(job.payload, undefined, signal, {
+          jobId: job.id,
+          workerId,
+          jobType: EVALUATION_REPLAY_JOB,
+        });
+      } catch (error) {
+        reportFailure('worker.queue', jobCorrelation(job), error);
+        throw error;
+      }
+    },
     [X_DISCOVERY_POLL_JOB]: async (job, signal) => {
       try {
         const result = await processDiscoveryPoll(job, signal, {
@@ -158,6 +176,10 @@ const worker = startJobWorker({
       await finalizeExhaustedSimulationJob(job.payload, error);
       return;
     }
+    if (job.type === EVALUATION_REPLAY_JOB) {
+      await finalizeExhaustedEvaluationReplayJob(job.payload, error);
+      return;
+    }
     if (job.type === EMAIL_SEND_JOB) {
       await finalizeExhaustedOutboundJob(job.payload, error);
       return;
@@ -173,6 +195,7 @@ const worker = startJobWorker({
   reconcileDeadLetters: async () => {
     await Promise.all([
       reconcileOrphanedSimulationRuns(),
+      reconcileDeadEvaluationReplayJobs(),
       reconcileDeadKnowledgeJobs(),
       reconcileDeadFollowUpJobs(),
       reconcileDeadOutboundJobs(),

@@ -2,6 +2,7 @@ import { ChevronDown, History } from 'lucide-react';
 
 import { ActivityTimeline, type ActivityEventRow } from '@/app/activity-timeline';
 import { RunContent } from '@/app/run-content';
+import { SavePlaygroundCaseForm } from '@/app/save-evaluation-case-form';
 import { formatUtcTimestamp } from '@/lib/format';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
@@ -9,12 +10,14 @@ type WorkspaceHistory = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>
 type WorkspaceVersions = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>['versions'];
 
 export function HistoryWorkbench({
+  agentId,
   history,
   versions,
   activityEvents,
   focusRunId,
   versionFor,
 }: {
+  agentId: string;
   history: WorkspaceHistory;
   versions: WorkspaceVersions;
   activityEvents: ActivityEventRow[];
@@ -68,6 +71,15 @@ export function HistoryWorkbench({
                 <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
               </summary>
               <RunContent run={run} interrupted={run.interrupted} />
+              {run.origin === 'playground' && (
+                <SavePlaygroundCaseForm
+                  agentId={agentId}
+                  runId={run.id}
+                  input={run.input}
+                  recipients={run.recipients}
+                  defaultTitle={run.input.slice(0, 80)}
+                />
+              )}
             </details>
           ))}
         </section>

@@ -159,6 +159,8 @@ describe('demo seed idempotency and markers', () => {
     expect(names).toContain('consents');
     expect(names).toContain('approvals');
     expect(names).toContain('knowledge');
+    expect(names).toContain('email');
+    expect(names).toContain('evaluations');
     expect(names).toContain('follow-ups');
     expect(names).toContain('usage');
     expect(names).toContain('credentials');

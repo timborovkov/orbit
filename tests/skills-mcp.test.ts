@@ -27,6 +27,7 @@ const policy = {
   agentId: '00000000-0000-4000-8000-000000000001',
   runId: '00000000-0000-4000-8000-000000000002',
   lifecycle: 'shadow' as const,
+  executionContext: 'standard' as const,
   enabledTools: [] as string[],
   approvalTools: [] as string[],
   consentRequiredTools: [],
@@ -155,6 +156,7 @@ test('load_skill refuses unattached skills and policy denials', async () => {
 test('policy requires a separate MCP tool grant when a proposal allowlist is set', () => {
   const base = {
     lifecycle: 'shadow' as const,
+    executionContext: 'standard' as const,
     enabledTools: ['like'],
     consentRequiredTools: [],
     budgets: budgetDefaults,
@@ -656,6 +658,7 @@ test('MCP model-facing aliases are OpenAI-compatible while policy keeps canonica
 test('load_skill and read-only MCP do not require spare inference quota', () => {
   const saturated = {
     lifecycle: 'shadow' as const,
+    executionContext: 'standard' as const,
     enabledTools: [] as string[],
     approvalTools: [] as string[],
     consentRequiredTools: [],

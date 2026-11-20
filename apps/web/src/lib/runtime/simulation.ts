@@ -125,7 +125,7 @@ export interface SimulationResult {
 }
 
 export interface SimulateOptions {
-  origin?: 'playground' | 'email' | 'discovery';
+  origin?: 'playground' | 'email' | 'discovery' | 'replay';
   maxToolSteps?: number;
   /** Combined with the 120s provider timeout so configured run deadlines abort in-flight calls. */
   signal?: AbortSignal;

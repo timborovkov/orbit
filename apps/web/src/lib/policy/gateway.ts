@@ -14,13 +14,11 @@ import {
 } from '@/lib/budgets';
 import { db, type Db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
-import {
-  canAcceptBackgroundWork,
-  externalWritesPermitted,
-  type LifecycleState,
-} from '@/lib/lifecycle';
+import { canAcceptBackgroundWork, type LifecycleState } from '@/lib/lifecycle';
 import { mcpToolId, mcpToolIsReadOnly, normalizeMcpAllowlist } from '@/lib/mcp-allowlist';
 import { recipientConsentFailure } from '@/lib/policy/consent';
+import { executionContextForOrigin, type ExecutionContext } from '@/lib/policy/execution-context';
+import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
 import { hasWriteAdapter } from '@/lib/runtime/outbound/types';
@@ -55,6 +53,8 @@ export interface PolicyContext {
   actor: string;
   agentId: string;
   runId?: string | null;
+  /** Derived from the run origin; replay always suppresses external writes. */
+  executionContext: ExecutionContext;
   lifecycle: LifecycleState;
   enabledTools: string[];
   approvalTools: string[];
@@ -92,16 +92,20 @@ export async function loadPolicyContext(
 ): Promise<PolicyContext | null> {
   const agent = (await store.select().from(agents).where(eq(agents.id, agentId))).at(0);
   if (!agent) return null;
-  const snapshot = runId
+  const runRow = runId
     ? (
         await store
-          .select({ settings: configurations.approvalSettings })
+          .select({
+            settings: configurations.approvalSettings,
+            origin: runs.origin,
+          })
           .from(runs)
           .innerJoin(configurations, eq(configurations.id, runs.configurationId))
           .where(and(eq(runs.id, runId), eq(runs.agentId, agentId)))
-      ).at(0)?.settings
+      ).at(0)
     : undefined;
-  const approval = snapshot ?? agent;
+  const approval = runRow?.settings ?? agent;
+  const executionContext = executionContextForOrigin(runRow?.origin);
   const global = (await store.select().from(controls).where(eq(controls.id, 1))).at(0);
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -133,6 +137,7 @@ export async function loadPolicyContext(
     actor,
     agentId,
     runId: runId ?? null,
+    executionContext,
     lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
     approvalTools: mergeApprovalTools(approval.approvalTools, global?.approvalTools),
@@ -224,6 +229,13 @@ export function evaluateCandidate(
     }
 
     if (consentFailure) return { decision: 'deny', reasons: [consentFailure] };
+
+    // Replay suppresses before approval so comparisons never suspend for review.
+    if (ctx.executionContext === 'replay') {
+      reasons.push('Replay execution suppresses all external writes.');
+      return { decision: 'suppressed', reasons };
+    }
+
     // Record approval proposals even while the global pause is on; pause still
     // blocks approve-time rechecks and dispatch (skipApproval path below).
     if (
@@ -247,15 +259,17 @@ export function evaluateCandidate(
       return { decision: 'deny', reasons };
     }
 
-    // Shadow (and non-live) suppresses external writes. Live dispatches only when
-    // a write adapter is registered for the action type.
-    if (!externalWritesPermitted(ctx.lifecycle)) {
-      reasons.push('Shadow mode suppresses external writes. Proposal logged only.');
-      return { decision: 'suppressed', reasons };
-    }
-    if (!hasWriteAdapter(action.type)) {
+    // Structural outbound gate — replay refuses; live needs a write adapter.
+    const dispatch = authorizeOutboundDispatch({
+      executionContext: ctx.executionContext,
+      lifecycle: ctx.lifecycle,
+      adapterAvailable: hasWriteAdapter(action.type),
+    });
+    if (!dispatch.allowed) {
       reasons.push(
-        'Live mode is active, but no external action adapter is configured for this action. Proposal suppressed.',
+        ctx.lifecycle === 'live'
+          ? 'Live mode is active, but no external action adapter is configured for this action. Proposal suppressed.'
+          : 'Shadow mode suppresses external writes. Proposal logged only.',
       );
       return { decision: 'suppressed', reasons };
     }
@@ -741,12 +755,14 @@ export function evaluateActionForTest(
     | 'approvalSpendCents'
     | 'approvalExpiresAfterHours'
     | 'consentRequiredTools'
+    | 'executionContext'
   > & {
     usage?: PolicyContext['usage'];
     approvalTools?: string[];
     approvalSpendCents?: number | null;
     approvalExpiresAfterHours?: number | null;
     consentRequiredTools?: ConsentScope[];
+    executionContext?: ExecutionContext;
   },
   action: CandidateAction,
   options?: { skipApproval?: boolean },
@@ -756,6 +772,7 @@ export function evaluateActionForTest(
       actor: 'test',
       agentId: '00000000-0000-0000-0000-000000000000',
       runId: null,
+      executionContext: ctx.executionContext ?? 'standard',
       approvalTools: ctx.approvalTools ?? [],
       approvalSpendCents: ctx.approvalSpendCents ?? null,
       approvalExpiresAfterHours: ctx.approvalExpiresAfterHours ?? null,
