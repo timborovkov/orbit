@@ -296,7 +296,7 @@ async function loadOneConnection(
           });
           return error ? { error } : result;
         },
-      } as Tool;
+      };
     }
 
     return {
