@@ -23,6 +23,7 @@ import { mcpToolId, mcpToolIsReadOnly, normalizeMcpAllowlist } from '@/lib/mcp-a
 import { recipientConsentFailure } from '@/lib/policy/consent';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
+import { hasWriteAdapter } from '@/lib/runtime/outbound/types';
 import {
   actionIntents,
   agentMcpConnections,
@@ -165,17 +166,13 @@ export function evaluateCandidate(
   action: CandidateAction,
   consentFailure: string | null = null,
   mcpGranted = false,
+  options: { skipApproval?: boolean } = {},
 ): {
   decision: PolicyDecision;
   reasons: string[];
   violation?: BudgetViolation;
 } {
   const reasons: string[] = [];
-
-  if (ctx.globalPaused && !action.readOnly) {
-    reasons.push('Global outbound pause is enabled.');
-    return { decision: 'deny', reasons };
-  }
 
   if (ctx.lifecycle === 'stopped') {
     reasons.push('Agent is stopped; external writes are blocked.');
@@ -227,7 +224,10 @@ export function evaluateCandidate(
     }
 
     if (consentFailure) return { decision: 'deny', reasons: [consentFailure] };
+    // Record approval proposals even while the global pause is on; pause still
+    // blocks approve-time rechecks and dispatch (skipApproval path below).
     if (
+      !options.skipApproval &&
       actionNeedsApproval({
         actionType: action.type,
         preliminary: action.preliminary,
@@ -242,16 +242,25 @@ export function evaluateCandidate(
       };
     }
 
-    // No external write adapters exist yet. Persist the intent and suppress dispatch.
-    // Live remains a first-class state so activation can unlock adapters later.
+    if (ctx.globalPaused) {
+      reasons.push('Global outbound pause is enabled.');
+      return { decision: 'deny', reasons };
+    }
+
+    // Shadow (and non-live) suppresses external writes. Live dispatches only when
+    // a write adapter is registered for the action type.
     if (!externalWritesPermitted(ctx.lifecycle)) {
       reasons.push('Shadow mode suppresses external writes. Proposal logged only.');
       return { decision: 'suppressed', reasons };
     }
-    reasons.push(
-      'Live mode is active, but no external action adapters are configured yet. Proposal suppressed.',
-    );
-    return { decision: 'suppressed', reasons };
+    if (!hasWriteAdapter(action.type)) {
+      reasons.push(
+        'Live mode is active, but no external action adapter is configured for this action. Proposal suppressed.',
+      );
+      return { decision: 'suppressed', reasons };
+    }
+    reasons.push('Authorized for outbound dispatch.');
+    return { decision: 'allow', reasons };
   }
 
   // load_skill and authorized MCP tools add neither inference requests nor spend —
@@ -740,6 +749,7 @@ export function evaluateActionForTest(
     consentRequiredTools?: ConsentScope[];
   },
   action: CandidateAction,
+  options?: { skipApproval?: boolean },
 ) {
   return evaluateCandidate(
     {
@@ -758,5 +768,8 @@ export function evaluateActionForTest(
       ...ctx,
     },
     action,
+    null,
+    false,
+    options,
   );
 }

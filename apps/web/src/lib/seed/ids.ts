@@ -83,6 +83,16 @@ export const DEMO_KNOWLEDGE_CHUNKS = {
 export const DEMO_KNOWLEDGE_DOC_IDS = Object.values(DEMO_KNOWLEDGE_DOCS);
 export const DEMO_KNOWLEDGE_CHUNK_IDS = Object.values(DEMO_KNOWLEDGE_CHUNKS);
 
+/** Inbound email + approved-reply demo rows (email seed module). */
+export const DEMO_EMAIL = {
+  threadId: '00000000-0000-4000-a800-000000000001',
+  messageId: '00000000-0000-4000-a800-000000000002',
+  runId: '00000000-0000-4000-a800-000000000003',
+  intentId: '00000000-0000-4000-a800-000000000004',
+  policyId: '00000000-0000-4000-a800-000000000005',
+  outboundId: '00000000-0000-4000-a800-000000000006',
+} as const;
+
 export function isDemoAgentId(id: string): boolean {
   return (DEMO_AGENT_IDS as readonly string[]).includes(id);
 }

@@ -4070,3 +4070,40 @@ textarea.library-field-control {
 .email-draft h4 {
   margin-bottom: 0.5rem;
 }
+
+.email-draft-review {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.email-draft-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.email-draft-editor {
+  min-height: 8rem;
+}
+
+.email-draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.email-send-outcome {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.email-send-outcome h4 {
+  margin: 0;
+}
+
+.email-provider-id {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+}

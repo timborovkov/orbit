@@ -1,11 +1,21 @@
 import 'server-only';
 
-import { and, asc, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { recoverEmailReplyProposalIfNeeded } from '@/lib/runtime/email/propose';
+import { EMAIL_SEND_ACTION } from '@/lib/runtime/outbound/types';
 import { draftAnswerFromResult } from '@/lib/runtime/simulation';
-import { emailMailboxes, emailMessages, emailThreads, jobs, runs } from '@/lib/schema';
+import {
+  actionIntents,
+  emailMailboxes,
+  emailMessages,
+  emailThreads,
+  jobs,
+  outboundActions,
+  runs,
+} from '@/lib/schema';
 import { inboundEmailConfigured } from '@/lib/server/email-mutations';
 
 const THREADS_PER_PAGE = 25;
@@ -19,6 +29,14 @@ const draftStatuses = {
   failed: 'Failed',
   interrupted: 'Interrupted',
 } satisfies Record<typeof runs.$inferSelect.status, string>;
+
+const outboundLabels = {
+  queued: 'Queued',
+  sending: 'Sending',
+  sent: 'Sent',
+  failed: 'Failed',
+  blocked: 'Blocked',
+} as const;
 
 function receiveStatus(jobStatus: string | null, skipReason: string | null, waiting: boolean) {
   if (jobStatus === 'dead' || jobStatus === 'failed') return 'Failed';
@@ -48,7 +66,7 @@ export async function getEmailInbox(
     .orderBy(asc(emailMessages.threadId), desc(emailMessages.receivedAt), desc(emailMessages.id))
     .as('latest_email');
 
-  const [mailboxes, threadPage, selected, pending] = await Promise.all([
+  const [mailboxes, threadPage, selected, pendingReceive, pendingOutbound] = await Promise.all([
     store
       .select({ enabled: emailMailboxes.enabled, address: emailMailboxes.address })
       .from(emailMailboxes)
@@ -80,7 +98,18 @@ export async function getEmailInbox(
         ),
       )
       .limit(1),
+    store
+      .select({ id: outboundActions.id })
+      .from(outboundActions)
+      .where(
+        and(
+          eq(outboundActions.agentId, agentId),
+          inArray(outboundActions.status, ['queued', 'sending']),
+        ),
+      )
+      .limit(1),
   ]);
+  const pending = [...pendingReceive, ...pendingOutbound];
   const threads = threadPage.slice(0, THREADS_PER_PAGE);
   const selectedId = selected.at(0)?.id ?? threads.at(0)?.id;
   const messages = selectedId
@@ -97,6 +126,7 @@ export async function getEmailInbox(
           runStatus: runs.status,
           result: runs.result,
           deferReason: runs.deferReason,
+          runId: emailMessages.runId,
         })
         .from(emailMessages)
         .leftJoin(jobs, eq(jobs.id, emailMessages.receiveJobId))
@@ -106,6 +136,82 @@ export async function getEmailInbox(
         .offset((messagePage - 1) * MESSAGES_PER_PAGE)
         .limit(MESSAGES_PER_PAGE + 1)
     : [];
+
+  const visible = messages.slice(0, MESSAGES_PER_PAGE);
+  // Email-tab recovery: completed drafts stranded without an approval intent
+  // (e.g. proposal failed after an older completion path) get an idempotent backfill.
+  await Promise.all(
+    visible.flatMap((message) => {
+      if (
+        message.runStatus !== 'completed' ||
+        !message.runId ||
+        !message.result ||
+        message.result.error
+      ) {
+        return [];
+      }
+      if (!draftAnswerFromResult(message.result)?.answer.trim()) return [];
+      return [
+        recoverEmailReplyProposalIfNeeded({
+          agentId,
+          runId: message.runId,
+          actor: 'system:email-recovery',
+          result: message.result,
+        }),
+      ];
+    }),
+  );
+
+  const messageIds = visible.map((message) => message.id);
+  const [intents, outbounds] = messageIds.length
+    ? await Promise.all([
+        store
+          .select({
+            id: actionIntents.id,
+            reviewStatus: actionIntents.reviewStatus,
+            decision: actionIntents.decision,
+            draft: sql<string | null>`${actionIntents.payload}->>'draft'`,
+            emailMessageId: sql<string | null>`${actionIntents.payload}->>'emailMessageId'`,
+            reasons: actionIntents.reasons,
+          })
+          .from(actionIntents)
+          .where(
+            and(
+              eq(actionIntents.agentId, agentId),
+              eq(actionIntents.actionType, EMAIL_SEND_ACTION),
+              sql`${actionIntents.payload}->>'emailMessageId' IN (${sql.join(
+                messageIds.map((id) => sql`${id}`),
+                sql`, `,
+              )})`,
+            ),
+          ),
+        store
+          .select({
+            id: outboundActions.id,
+            status: outboundActions.status,
+            reason: outboundActions.reason,
+            emailMessageId: outboundActions.emailMessageId,
+            providerMessageId: outboundActions.providerMessageId,
+            updatedAt: outboundActions.updatedAt,
+          })
+          .from(outboundActions)
+          .where(
+            and(
+              eq(outboundActions.agentId, agentId),
+              inArray(outboundActions.emailMessageId, messageIds),
+            ),
+          ),
+      ])
+    : [[], []];
+
+  const intentByMessage = new Map(
+    intents.flatMap((intent) =>
+      intent.emailMessageId ? [[intent.emailMessageId, intent] as const] : [],
+    ),
+  );
+  const outboundByMessage = new Map(
+    outbounds.flatMap((row) => (row.emailMessageId ? [[row.emailMessageId, row] as const] : [])),
+  );
 
   return {
     configured: inboundEmailConfigured(),
@@ -126,6 +232,7 @@ export async function getEmailInbox(
           deferReason,
           result,
           skipReason,
+          runId: _runId,
           ...view
         } = message;
         const draft =
@@ -133,20 +240,60 @@ export async function getEmailInbox(
           result?.steps.some((step) => step.stage === 'main' && step.decision.relevant)
             ? draftAnswerFromResult(result)
             : null;
-        const status = draft
-          ? 'Draft ready'
-          : runStatus
-            ? draftStatuses[runStatus]
-            : receiveStatus(jobStatus, skipReason, waitingForCapacity);
+        const intent = intentByMessage.get(message.id);
+        const outbound = outboundByMessage.get(message.id);
+        const review =
+          intent &&
+          ({
+            intentId: intent.id,
+            status: intent.reviewStatus,
+            draft: intent.draft ?? draft?.answer ?? null,
+            decision: intent.decision,
+            reasons: Array.isArray(intent.reasons) ? intent.reasons : [],
+          } as const);
+        const sendOutcome = outbound
+          ? {
+              status: outbound.status,
+              label: outboundLabels[outbound.status],
+              reason: outbound.reason,
+              providerMessageId: outbound.providerMessageId,
+            }
+          : intent?.reviewStatus === 'approved' && intent.decision === 'allow'
+            ? {
+                status: 'queued' as const,
+                label: outboundLabels.queued,
+                reason: null as string | null,
+                providerMessageId: null as string | null,
+              }
+            : intent?.reviewStatus === 'rejected'
+              ? {
+                  status: 'blocked' as const,
+                  label: 'Rejected',
+                  reason: 'Administrator rejected this reply.',
+                  providerMessageId: null as string | null,
+                }
+              : null;
+        const status = sendOutcome
+          ? sendOutcome.label
+          : intent?.reviewStatus === 'pending'
+            ? 'Awaiting approval'
+            : draft
+              ? 'Draft ready'
+              : runStatus
+                ? draftStatuses[runStatus]
+                : receiveStatus(jobStatus, skipReason, waitingForCapacity);
         return {
           ...view,
           status,
           detail:
+            sendOutcome?.reason ??
             skipReason ??
             result?.error ??
             deferReason ??
             (status === 'Failed' ? 'Orbit could not process this inbound message.' : null),
           draft,
+          review: review?.status === 'pending' ? review : review?.status ? review : null,
+          sendOutcome,
         };
       }),
   };
