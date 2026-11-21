@@ -90,9 +90,20 @@ jobs:
       - name: Check Compose configuration
         run: docker compose config --quiet
       - name: Smoke test web container
+        env:
+          DATABASE_URL: postgres://orbit:orbit_dev@host.docker.internal:5432/orbit_smoke
         run: |
-          docker run -d --rm --name orbit-web-ci -p 127.0.0.1:3000:3000 orbit-web:ci
-          trap 'docker stop orbit-web-ci' EXIT
+          docker run -d --rm --name orbit-web-ci \
+            --add-host=host.docker.internal:host-gateway \
+            -p 127.0.0.1:3000:3000 \
+            -e DATABASE_URL \
+            -e NODE_ENV=production \
+            -e APP_URL=http://127.0.0.1:3000 \
+            -e AUTH_DISABLED=false \
+            -e ORBIT_ADMIN_EMAIL=admin@example.com \
+            -e ORBIT_ADMIN_PASSWORD=ci-smoke-password-16 \
+            orbit-web:ci
+          trap 'docker logs orbit-web-ci; docker stop orbit-web-ci' EXIT
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:3000/health; then
               curl --fail --silent http://127.0.0.1:3000/icon.svg > /dev/null

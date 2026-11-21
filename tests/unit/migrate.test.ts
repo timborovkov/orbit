@@ -164,17 +164,45 @@ describe('startWeb', () => {
   });
 
   test('starts the server after a successful migration', async () => {
-    const calls: string[][] = [];
+    const calls: { args: string[]; cwd?: string }[] = [];
     const code = await startWeb({
       migrate: async () => {},
-      spawnServer: async (_command, args) => {
-        calls.push(args);
+      spawnServer: async (_command, args, options) => {
+        calls.push({ args, cwd: options?.cwd });
         return 0;
       },
       serverPath: '/tmp/orbit-server.js',
     });
 
     expect(code).toBe(0);
-    expect(calls).toEqual([['--bun', '--no-env-file', '/tmp/orbit-server.js']]);
+    expect(calls).toEqual([
+      { args: ['--bun', '--no-env-file', '/tmp/orbit-server.js'], cwd: undefined },
+    ]);
+  });
+
+  test('copies standalone assets for a source-checkout build before spawning', async () => {
+    const prepared: string[] = [];
+    const calls: { args: string[]; cwd?: string }[] = [];
+    const serverPath = '/repo/apps/web/.next/standalone/apps/web/server.js';
+    const code = await startWeb({
+      migrate: async () => {},
+      prepareStandalone: (standaloneRoot, webRoot) => {
+        prepared.push(standaloneRoot, webRoot);
+      },
+      spawnServer: async (_command, args, options) => {
+        calls.push({ args, cwd: options?.cwd });
+        return 0;
+      },
+      serverPath,
+    });
+
+    expect(code).toBe(0);
+    expect(prepared).toEqual(['/repo/apps/web/.next/standalone', '/repo/apps/web']);
+    expect(calls).toEqual([
+      {
+        args: ['--bun', '--no-env-file', 'apps/web/server.js'],
+        cwd: '/repo/apps/web/.next/standalone',
+      },
+    ]);
   });
 });

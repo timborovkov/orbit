@@ -46,4 +46,12 @@ describe('Railway deploy migration config', () => {
     );
     expect(workerDockerfile).toContain('COPY --chown=bun:bun apps/web/drizzle ./apps/web/drizzle');
   });
+
+  test('Full validation web smoke supplies DATABASE_URL for startup migrations', () => {
+    const ci = readFileSync('.github/workflows/ci.yml', 'utf8');
+    expect(ci).toContain('Smoke test web container');
+    expect(ci).toContain('host.docker.internal:5432/orbit_smoke');
+    expect(ci).toContain('--add-host=host.docker.internal:host-gateway');
+    expect(ci).toContain('-e DATABASE_URL');
+  });
 });

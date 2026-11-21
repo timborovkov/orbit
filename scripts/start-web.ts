@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { migrateDatabase } from './migrate';
@@ -9,9 +9,11 @@ const SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143 } as const;
 
 export type StartWebOptions = {
   migrate?: () => Promise<void>;
-  spawnServer?: (command: string, args: string[]) => Promise<number>;
+  spawnServer?: (command: string, args: string[], options?: { cwd?: string }) => Promise<number>;
   serverPath?: string;
   argv?: string[];
+  /** Injected in tests; defaults to copying static/public into a source-checkout standalone tree. */
+  prepareStandalone?: (standaloneRoot: string, webRoot: string) => void;
 };
 
 function resolveServerPath(explicit?: string): string {
@@ -28,9 +30,33 @@ function resolveServerPath(explicit?: string): string {
   return match;
 }
 
-async function defaultSpawnServer(command: string, args: string[]): Promise<number> {
+/** Copy Next standalone static assets for source-checkout starts. Docker images already ship them. */
+export function prepareStandaloneAssets(standaloneRoot: string, webRoot: string): void {
+  const staticSrc = join(webRoot, '.next/static');
+  const staticDest = join(standaloneRoot, 'apps/web/.next/static');
+  const publicSrc = join(webRoot, 'public');
+  const publicDest = join(standaloneRoot, 'apps/web/public');
+
+  if (existsSync(staticSrc)) {
+    mkdirSync(join(standaloneRoot, 'apps/web/.next'), { recursive: true });
+    cpSync(staticSrc, staticDest, { recursive: true });
+  }
+  if (existsSync(publicSrc)) {
+    cpSync(publicSrc, publicDest, { recursive: true });
+  }
+}
+
+function isSourceCheckoutStandalone(serverPath: string): boolean {
+  return serverPath.replaceAll('\\', '/').includes('/.next/standalone/apps/web/server.js');
+}
+
+async function defaultSpawnServer(
+  command: string,
+  args: string[],
+  options: { cwd?: string } = {},
+): Promise<number> {
   return await new Promise<number>((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit' });
+    const child = spawn(command, args, { stdio: 'inherit', cwd: options.cwd });
     const onSignal = (signal: keyof typeof SIGNAL_EXIT_CODES) => {
       if (!child.killed) child.kill(signal);
     };
@@ -65,6 +91,18 @@ export async function startWeb(options: StartWebOptions = {}): Promise<number> {
   }
 
   const spawnServer = options.spawnServer ?? defaultSpawnServer;
+
+  if (isSourceCheckoutStandalone(serverPath)) {
+    // .../apps/web/.next/standalone/apps/web/server.js → standalone root + apps/web
+    const standaloneAppDir = dirname(serverPath);
+    const standaloneRoot = resolve(standaloneAppDir, '../..');
+    const webRoot = resolve(standaloneRoot, '../..');
+    (options.prepareStandalone ?? prepareStandaloneAssets)(standaloneRoot, webRoot);
+    return await spawnServer(process.execPath, ['--bun', '--no-env-file', 'apps/web/server.js'], {
+      cwd: standaloneRoot,
+    });
+  }
+
   return await spawnServer(process.execPath, ['--bun', '--no-env-file', serverPath]);
 }
 
