@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests',
   outputDir: './test-results/openrouter-env',
-  testMatch: 'access-env.spec.ts',
+  testMatch: ['access-env.spec.ts', 'shared-knowledge.spec.ts'],
   workers: 1,
   use: {
     baseURL: 'http://localhost:3003',
@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'bun run --filter @orbit/web start --port 3003',
+    command: 'bun scripts/playwright-stack.ts',
     url: 'http://localhost:3003/login',
     reuseExistingServer: false,
     env: {
@@ -27,6 +27,7 @@ export default defineConfig({
       S3_SECRET_ACCESS_KEY: 'orbit_local_storage_only',
       ORBIT_ENCRYPTION_KEY: 'a'.repeat(64),
       OPENROUTER_API_KEY: 'test-only-env-default-never-use',
+      KNOWLEDGE_EMBEDDING_STUB: 'true',
       ORBIT_ADMIN_EMAIL: 'admin@example.com',
       ORBIT_ADMIN_PASSWORD: 'test-only-password-123456',
     },

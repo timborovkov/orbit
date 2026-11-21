@@ -1,9 +1,11 @@
 export function LibraryTable({
   columns,
   children,
+  hasActions = true,
 }: {
   columns: string[];
   children: React.ReactNode;
+  hasActions?: boolean;
 }) {
   return (
     <div className="library-table-wrap">
@@ -15,9 +17,11 @@ export function LibraryTable({
                 {column}
               </th>
             ))}
-            <th scope="col">
-              <span className="sr-only">Actions</span>
-            </th>
+            {hasActions && (
+              <th scope="col">
+                <span className="sr-only">Actions</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>{children}</tbody>

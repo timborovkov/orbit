@@ -79,7 +79,7 @@ export function RunContent({
         <section>
           <h3>Answer from knowledge</h3>
           <p className="preserve-text">{grounded.answer}</p>
-          <KnowledgeCitations sources={grounded.sources} />
+          <KnowledgeCitations agentId={run.agentId} sources={grounded.sources} />
         </section>
       )}
       {draft && (

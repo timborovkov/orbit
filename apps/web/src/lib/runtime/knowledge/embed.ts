@@ -105,7 +105,7 @@ async function quoteEmbedding(model: string, signal: AbortSignal) {
 
 export function openRouterEmbedders(
   apiKey: string,
-  agentId: string,
+  agentId: string | null,
   execution?: Omit<NonNullable<Parameters<typeof reserveRequestQuota>[2]>, 'stage'>,
 ): {
   embedMany: EmbedManyFn;
@@ -139,9 +139,9 @@ export function openRouterEmbedders(
           }
         : undefined,
     });
-    const settle = await reserveRequestQuota(agentId, limit, execution);
+    const settle = agentId ? await reserveRequestQuota(agentId, limit, execution) : undefined;
     if (abortSignal.aborted) {
-      await settle(0);
+      await settle?.(0);
       abortSignal.throwIfAborted();
     }
     return { model, abortSignal, settle };
@@ -155,7 +155,8 @@ export function openRouterEmbedders(
         .max(Number.MAX_SAFE_INTEGER / microsPerDollar),
     }),
   });
-  async function settleResponse(metadata: unknown, settle: (costMicros: number) => Promise<void>) {
+  async function settleResponse(metadata: unknown, settle?: (costMicros: number) => Promise<void>) {
+    if (!settle) return;
     const actual = billedUsage.safeParse(metadata);
     if (actual.success) {
       try {

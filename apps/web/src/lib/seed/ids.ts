@@ -61,6 +61,8 @@ export const DEMO_AUDIT = {
 } as const;
 
 /** Knowledge documents and chunks owned by the demo seed. */
+export const DEMO_KNOWLEDGE_LIBRARY_ID = '00000000-0000-4000-8000-00000000d190';
+
 export const DEMO_KNOWLEDGE_DOCS = {
   sarahFaq: '00000000-0000-4000-a700-000000000001',
   sarahFailed: '00000000-0000-4000-a700-000000000002',

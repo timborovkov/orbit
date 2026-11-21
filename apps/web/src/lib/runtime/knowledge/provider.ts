@@ -6,7 +6,7 @@ import {
   openRouterEmbedders,
   stubEmbedders,
 } from '@/lib/runtime/knowledge/embed';
-import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
+import { environmentOpenRouterKey, resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { credentials } from '@/lib/schema';
 
 export async function resolveKnowledgeEmbedders(
@@ -23,4 +23,15 @@ export async function resolveKnowledgeEmbedders(
   ).at(0);
   const { apiKey } = resolveOpenRouterApiKey(agentId, credential?.encryptedKey);
   return openRouterEmbedders(apiKey, agentId, execution);
+}
+
+export function workspaceKnowledgeIndexingConfigured() {
+  return knowledgeUsesStub() || Boolean(environmentOpenRouterKey());
+}
+
+export function resolveWorkspaceKnowledgeEmbedders() {
+  if (knowledgeUsesStub()) return stubEmbedders();
+  const apiKey = environmentOpenRouterKey();
+  if (!apiKey) throw new Error('Shared knowledge indexing requires the workspace OpenRouter key.');
+  return openRouterEmbedders(apiKey, null);
 }

@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
 import { and, eq, inArray, sql } from 'drizzle-orm';
+import { z } from 'zod';
 
 import { isBudgetError } from '@/lib/budgets';
 import { db, type Tx } from '@/lib/db';
 import { chunkExtractedText } from '@/lib/knowledge/chunk';
 import { extractKnowledgeDocument } from '@/lib/knowledge/extract';
-import { KNOWLEDGE_CHUNK_INSERT_BATCH, KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
+import {
+  KNOWLEDGE_CHUNK_INSERT_BATCH,
+  KNOWLEDGE_JOB_TYPE,
+  SHARED_KNOWLEDGE_JOB_TYPE,
+} from '@/lib/knowledge/types';
 import {
   type EmbedManyFn,
   knowledgeEmbeddingDimensions,
@@ -17,13 +22,30 @@ import {
 import { knowledgeChunks, knowledgeDocuments } from '@/lib/schema';
 import { getObject } from '@/lib/storage/objects';
 
+const jobPayload = z.union([
+  z.object({
+    documentId: z.uuid(),
+    agentId: z.uuid(),
+    libraryId: z.never().optional(),
+    revision: z.uuid(),
+  }),
+  z.object({
+    documentId: z.uuid(),
+    agentId: z.never().optional(),
+    libraryId: z.uuid(),
+    revision: z.uuid(),
+  }),
+]);
+
 function jobDocument(payload: Record<string, unknown>) {
-  const { documentId, agentId, revision } = payload;
-  if (typeof documentId !== 'string' || typeof agentId !== 'string' || typeof revision !== 'string')
-    return;
+  const parsed = jobPayload.safeParse(payload);
+  if (!parsed.success) return;
+  const { documentId, agentId, libraryId, revision } = parsed.data;
   return and(
     eq(knowledgeDocuments.id, documentId),
-    eq(knowledgeDocuments.agentId, agentId),
+    agentId !== undefined
+      ? eq(knowledgeDocuments.agentId, agentId)
+      : eq(knowledgeDocuments.libraryId, libraryId),
     eq(knowledgeDocuments.revision, revision),
   );
 }
@@ -225,7 +247,9 @@ export async function processKnowledgeDocument(
     if (!signal?.aborted) {
       const message = isBudgetError(error)
         ? error.message
-        : 'Unable to process the document. Check the file and the agent’s OpenRouter connection.';
+        : document.libraryId
+          ? 'Unable to process the document. Check the file and the workspace OpenRouter key.'
+          : 'Unable to process the document. Check the file and the agent’s OpenRouter connection.';
       await db()
         .update(knowledgeDocuments)
         .set({
@@ -266,10 +290,13 @@ export async function reconcileDeadKnowledgeJobs() {
     WHERE document.status IN ('pending', 'processing')
       AND EXISTS (
         SELECT 1 FROM jobs
-        WHERE type = ${KNOWLEDGE_JOB_TYPE} AND status = 'dead'
+        WHERE status = 'dead'
           AND payload->>'documentId' = document.id::text
-          AND payload->>'agentId' = document.agent_id::text
           AND payload->>'revision' = document.revision::text
+          AND (
+            (type = ${KNOWLEDGE_JOB_TYPE} AND payload->>'agentId' = document.agent_id::text)
+            OR (type = ${SHARED_KNOWLEDGE_JOB_TYPE} AND payload->>'libraryId' = document.library_id::text)
+          )
       )
   `);
 }

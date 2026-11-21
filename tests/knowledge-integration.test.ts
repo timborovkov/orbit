@@ -1,13 +1,21 @@
 import { afterAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 
+import { listMigrationFiles } from '@orbit/migrate';
 import postgres from 'postgres';
 
+import { knowledgeSourceSchema } from '@/app/knowledge-shared';
 import { type AgentBudgets, budgetDefaults } from '@/lib/budgets';
+import { closeDb } from '@/lib/db';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { createPlaygroundStreamProgress, playgroundChunksFromResult } from '@/lib/runtime/chat-ui';
 import { enqueueSimulation, processSimulationJob } from '@/lib/runtime/execute';
-import { openRouterEmbedders, stubEmbedders } from '@/lib/runtime/knowledge/embed';
+import {
+  knowledgeEmbeddingModelId,
+  openRouterEmbedders,
+  stubEmbedders,
+} from '@/lib/runtime/knowledge/embed';
 import {
   finalizeFailedKnowledgeJob,
   processKnowledgeDocument,
@@ -16,6 +24,9 @@ import { searchKnowledge } from '@/lib/runtime/knowledge/search';
 import { groundedAnswerFromResult, type SimulationResult } from '@/lib/runtime/simulation';
 import { executeKnowledgeSearchTool } from '@/lib/runtime/tools/knowledge-search';
 import { deleteObject, putObject } from '@/lib/storage/objects';
+
+import './shim-server-only';
+import { insertKnowledgeLibrary, setKnowledgeLibraryGrant } from '@/lib/server/knowledge-mutations';
 
 const databaseUrl =
   process.env.TEST_DATABASE_URL ?? 'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
@@ -26,14 +37,21 @@ process.env.S3_BUCKET ??= 'orbit-test';
 process.env.S3_ACCESS_KEY_ID ??= 'orbit_local';
 process.env.S3_SECRET_ACCESS_KEY ??= 'orbit_local_storage_only';
 
-const sql = postgres(databaseUrl);
+const sql = postgres(databaseUrl, { onnotice: () => {} });
 const ids: string[] = [];
 const objectKeys: string[] = [];
+const libraryIds: string[] = [];
 const stub = stubEmbedders();
 
 afterAll(async () => {
   try {
     await Promise.all(objectKeys.map(deleteObject));
+    for (const id of libraryIds) {
+      await sql`DELETE FROM jobs WHERE payload->>'libraryId'=${id}`;
+      await sql`DELETE FROM knowledge_documents WHERE library_id=${id}`;
+      await sql`DELETE FROM knowledge_libraries WHERE id=${id}`;
+      await sql`DELETE FROM audit WHERE action LIKE ${`%${id}%`}`;
+    }
     for (const id of ids) {
       await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
       await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
@@ -349,5 +367,260 @@ test('a queued Playground run answers from a policy-checked source and streams i
     } finally {
       if (oldKey === undefined) delete process.env.OPENROUTER_API_KEY;
       else process.env.OPENROUTER_API_KEY = oldKey;
+    }
+  }));
+
+test('shared grants scope both rankings and citations, including a revoke during embedding', () =>
+  withStub(async () => {
+    const budgets = { ...budgetDefaults, dailySpendCents: null, monthlySpendCents: null };
+    const sarah = await agent(budgets);
+    const john = await agent(budgets);
+    const maya = await agent();
+    const actor = 'knowledge-test@example.com';
+    const { libraryId } = await insertKnowledgeLibrary(actor, `Handbook ${randomUUID()}`);
+    const { libraryId: isolatedLibrary } = await insertKnowledgeLibrary(
+      actor,
+      `Isolated ${randomUUID()}`,
+    );
+    if (!libraryId || !isolatedLibrary) throw new Error('Expected two libraries');
+    libraryIds.push(libraryId, isolatedLibrary);
+
+    const query = 'handbook travel policy';
+    const passage = 'The handbook travel policy requires advance approval.';
+    const documentId = randomUUID();
+    const revision = randomUUID();
+    const key = `knowledge-libraries/${libraryId}/knowledge/${documentId}/handbook.txt`;
+    await putObject(key, Buffer.from(passage), 'text/plain');
+    objectKeys.push(key);
+    await sql`
+      INSERT INTO knowledge_documents(id,library_id,revision,filename,title,content_kind,mime_type,byte_size,object_key)
+      VALUES (${documentId},${libraryId},${revision},'handbook.txt','Handbook','plain','text/plain',
+        ${Buffer.byteLength(passage)},${key})
+    `;
+    let indexingCalls = 0;
+    await processKnowledgeDocument({ documentId, libraryId, revision }, (values) => {
+      indexingCalls += 1;
+      return stub.embedMany(values);
+    });
+    const [chunk] = await sql`SELECT id FROM knowledge_chunks WHERE document_id=${documentId}`;
+    expect(chunk?.id).toBeDefined();
+
+    // Populate a full candidate window of unauthorized, stronger matches in each ranker.
+    const [isolated] = await sql`
+      INSERT INTO knowledge_documents(library_id,filename,title,content_kind,mime_type,byte_size,object_key,status)
+      VALUES (${isolatedLibrary},'isolated.txt','Isolated','plain','text/plain',1,'test-only','ready')
+      RETURNING id
+    `;
+    const exactVector = `[${(await stub.embedOne(query)).join(',')}]`;
+    await sql`
+      INSERT INTO knowledge_chunks(document_id,chunk_index,content,content_hash,source_filename,source_title,
+        start_offset,end_offset,embedding,embedding_model,embedding_dimensions)
+      SELECT ${isolated.id}, i, repeat(${query} || ' ', 10), i::text, 'isolated.txt', 'Isolated',
+        0, 220, ${exactVector}::vector, ${knowledgeEmbeddingModelId()}, 1536
+      FROM generate_series(1, 30) AS i
+    `;
+
+    await setKnowledgeLibraryGrant(actor, libraryId, sarah, true);
+    await setKnowledgeLibraryGrant(actor, libraryId, sarah, true);
+    await setKnowledgeLibraryGrant(actor, libraryId, john, true);
+    const [grants] =
+      await sql`SELECT count(*)::int AS count FROM knowledge_library_grants WHERE library_id=${libraryId}`;
+    expect(grants.count).toBe(2);
+
+    const search = (agentId: string) =>
+      executeKnowledgeSearchTool({ actor, agentId, query, limit: 1, idempotencyKey: randomUUID() });
+    for (const agentId of [sarah, john]) {
+      const found = await search(agentId);
+      expect(found.policy.decision).toBe('allow');
+      expect(found.result?.hits).toHaveLength(1);
+      expect(found.result?.hits[0]).toMatchObject({
+        documentId,
+        chunkId: chunk.id,
+        content: passage,
+        vectorScore: expect.any(Number),
+        textScore: expect.any(Number),
+      });
+      await expectSharedCitation(agentId, query, passage, documentId, chunk.id);
+    }
+    expect(indexingCalls).toBe(1);
+    expect((await search(maya)).result?.hits).toEqual([]);
+
+    const inFlight = await searchKnowledge({
+      agentId: john,
+      query,
+      embedQuery: async (value) => {
+        await setKnowledgeLibraryGrant(actor, libraryId, john, false);
+        return stub.embedOne(value);
+      },
+    });
+    expect(inFlight.hits).toEqual([]);
+    await setKnowledgeLibraryGrant(actor, libraryId, john, false);
+    expect((await search(john)).result?.hits).toEqual([]);
+    expect((await search(sarah)).result?.hits[0]?.documentId).toBe(documentId);
+    const [auditCount] = await sql`
+      SELECT count(*)::int AS count FROM audit
+      WHERE action LIKE ${`%knowledge library ${libraryId} access for agent %`}
+    `;
+    expect(auditCount.count).toBe(3);
+
+    await sql`UPDATE agents SET enabled_tools='[]'::jsonb WHERE id=${sarah}`;
+    expect((await search(sarah)).policy.decision).toBe('deny');
+  }));
+
+async function expectSharedCitation(
+  agentId: string,
+  query: string,
+  passage: string,
+  documentId: string,
+  chunkId: string,
+) {
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const [version] = await sql`
+    INSERT INTO agent_configurations(agent_id,version,config,actor)
+    VALUES (${agentId},1,${sql.json(preset.config)},'test') RETURNING id
+  `;
+  const oldKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = 'test-only-simulation-key';
+  try {
+    const { runId } = await enqueueSimulation({
+      actor: 'knowledge-test@example.com',
+      agentId,
+      configurationId: version.id,
+      input: query,
+    });
+    if (!runId) throw new Error('Expected a queued simulation');
+    await processSimulationJob({ runId, agentId }, () => async (request) => {
+      const main = request.stage === 'main';
+      if (main) {
+        expect(JSON.parse(request.input).untrustedSources).toEqual([{ id: 1, passage }]);
+      }
+      return {
+        decision: {
+          relevant: true,
+          priority: 1,
+          reason: 'Check the handbook.',
+          actions: [],
+          ...(main ? { answer: 'Get advance approval [1].', citations: [1] } : {}),
+        },
+        inputTokens: 1,
+        outputTokens: 1,
+      };
+    });
+    const [run] = await sql<
+      { result: SimulationResult }[]
+    >`SELECT result FROM simulation_runs WHERE id=${runId}`;
+    expect(groundedAnswerFromResult(run.result)?.sources).toEqual([
+      expect.objectContaining({ documentId, chunkId, id: 1, content: passage }),
+    ]);
+  } finally {
+    if (oldKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = oldKey;
+  }
+}
+
+test('upgrading a private library preserves ready documents, queued jobs, and saved citations', () =>
+  withStub(async () => {
+    const schema = `knowledge_upgrade_${randomUUID().replaceAll('-', '')}`;
+    const scopedUrl = new URL(databaseUrl);
+    scopedUrl.searchParams.set('search_path', `${schema},public`);
+    await sql`CREATE SCHEMA ${sql(schema)}`;
+    const upgrade = postgres(scopedUrl.toString(), { max: 1, onnotice: () => {} });
+    const oldUrl = process.env.DATABASE_URL;
+    await closeDb();
+    process.env.DATABASE_URL = scopedUrl.toString();
+    try {
+      const migrationsDir = new URL('../apps/web/drizzle/', import.meta.url);
+      const nextMigration = '0019_shared_knowledge_libraries.sql';
+      for (const name of (await listMigrationFiles()).filter((name) => name < nextMigration)) {
+        await upgrade.unsafe(await readFile(new URL(name, migrationsDir), 'utf8'));
+      }
+
+      const [owner] =
+        await upgrade`INSERT INTO agents (name,mission) VALUES ('Owner','Answer') RETURNING id`;
+      const [other] =
+        await upgrade`INSERT INTO agents (name,mission) VALUES ('Other','Answer') RETURNING id`;
+      const [version] = await upgrade`
+        INSERT INTO agent_configurations (agent_id,version,config,actor)
+        SELECT ${owner.id},1,config,'test' FROM templates WHERE id='support' RETURNING id
+      `;
+      const documentId = randomUUID();
+      const queuedId = randomUUID();
+      const revision = randomUUID();
+      const passage = 'Private migration reference.';
+      const pending = await original(owner.id, queuedId, revision, 'Private queued reference.');
+      await upgrade`
+        INSERT INTO knowledge_documents(id,agent_id,revision,filename,title,content_kind,mime_type,byte_size,object_key,status)
+        VALUES
+          (${documentId},${owner.id},${revision},'private.txt','Private','plain','text/plain',1,'existing-object','ready'),
+          (${queuedId},${owner.id},${revision},'queued.md','Queued','markdown','text/markdown',${pending.size},${pending.key},'pending')
+      `;
+      const [chunk] = await upgrade`
+        INSERT INTO knowledge_chunks(document_id,agent_id,chunk_index,content,content_hash,source_filename,source_title,start_offset,end_offset)
+        VALUES (${documentId},${owner.id},0,${passage},'hash','private.txt','Private',0,${passage.length})
+        RETURNING id
+      `;
+      const payload = { agentId: owner.id, documentId: queuedId, revision };
+      await upgrade`
+        INSERT INTO jobs(type,payload) VALUES ('knowledge.process',${upgrade.json(payload)})
+      `;
+      const snapshot = {
+        actions: [],
+        steps: [{ stage: 'main', decision: { answer: 'Private reference [1].', citations: [1] } }],
+        knowledge: {
+          status: 'allow',
+          hits: [
+            {
+              chunkId: chunk.id,
+              documentId,
+              sourceFilename: 'private.txt',
+              page: null,
+              section: null,
+              content: passage,
+            },
+          ],
+        },
+      };
+      const [saved] = await upgrade`
+        INSERT INTO simulation_runs(agent_id,configuration_id,input,status,result,actor,expires_at)
+        VALUES (${owner.id},${version.id},'private migration','completed',${upgrade.json(snapshot)},'test',now())
+        RETURNING id
+      `;
+
+      await upgrade.unsafe(await readFile(new URL(nextMigration, migrationsDir), 'utf8'));
+      const [preserved] =
+        await upgrade`SELECT agent_id, library_id, object_key FROM knowledge_documents WHERE id=${documentId}`;
+      expect(preserved).toEqual({
+        agent_id: owner.id,
+        library_id: null,
+        object_key: 'existing-object',
+      });
+      const retrieve = (agentId: string, query: string) =>
+        searchKnowledge({ agentId, query, embedQuery: stub.embedOne });
+      expect((await retrieve(owner.id, 'private migration')).hits[0]?.chunkId).toBe(chunk.id);
+      expect((await retrieve(other.id, 'private migration')).hits).toEqual([]);
+
+      const [queued] = await upgrade`SELECT payload FROM jobs WHERE type='knowledge.process'`;
+      expect(queued.payload).toEqual(payload);
+      await processKnowledgeDocument(queued.payload, stub.embedMany);
+      expect((await retrieve(owner.id, 'private queued')).hits[0]?.documentId).toBe(queuedId);
+
+      const [run] = await upgrade<
+        { result: SimulationResult }[]
+      >`SELECT result FROM simulation_runs WHERE id=${saved.id}`;
+      const citation = groundedAnswerFromResult(run.result)?.sources[0];
+      expect(knowledgeSourceSchema.parse(citation)).toMatchObject({
+        id: 1,
+        documentId,
+        content: passage,
+      });
+      if (!citation) throw new Error('Expected a saved citation');
+      expect(knowledgeSourceSchema.parse({ ...citation, documentId: undefined }).content).toBe(
+        passage,
+      );
+    } finally {
+      await closeDb();
+      process.env.DATABASE_URL = oldUrl;
+      await upgrade.end();
+      await sql`DROP SCHEMA ${sql(schema)} CASCADE`;
     }
   }));

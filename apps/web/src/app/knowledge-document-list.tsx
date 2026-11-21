@@ -64,20 +64,20 @@ export function KnowledgeDropzone({
 }
 
 export function KnowledgeDocumentList({
-  agentId,
   documents,
   pending,
   busyId,
   storageReady,
+  indexingReady,
   onReprocess,
   onReplace,
   onRequestDelete,
 }: {
-  agentId: string;
   documents: KnowledgeDoc[];
   pending: boolean;
   busyId: string | null;
   storageReady: boolean;
+  indexingReady: boolean;
   onReprocess: (documentId: string) => void;
   onReplace: (documentId: string, file: File) => void;
   onRequestDelete: (document: KnowledgeDoc) => void;
@@ -137,7 +137,7 @@ export function KnowledgeDocumentList({
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={pending}
+                      disabled={pending || !indexingReady}
                       onClick={() => {
                         onReprocess(doc.id);
                       }}
@@ -174,7 +174,7 @@ export function KnowledgeDocumentList({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
-                    disabled={pending}
+                    disabled={pending || !indexingReady}
                     onSelect={() => {
                       onReprocess(doc.id);
                     }}
@@ -207,7 +207,6 @@ export function KnowledgeDocumentList({
                 hidden
                 accept={KNOWLEDGE_ACCEPT}
                 disabled={pending || !storageReady}
-                data-agent-id={agentId}
                 onChange={(event) => {
                   const file = event.currentTarget.files?.[0];
                   event.currentTarget.value = '';

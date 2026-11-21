@@ -30,7 +30,10 @@ import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { latestPersistedRun } from '@/lib/runtime/playground-ui';
 import { getEmailInbox } from '@/lib/server/email-queries';
 import { listActivityEventsForAgent, listFollowUpsForAgent } from '@/lib/server/follow-up-queries';
-import { listKnowledgeDocuments } from '@/lib/server/knowledge-queries';
+import {
+  listGrantedKnowledgeLibraries,
+  listKnowledgeDocuments,
+} from '@/lib/server/knowledge-queries';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
@@ -87,6 +90,7 @@ export default async function AgentWorkspace({
   } = workspace;
   const [
     knowledgeDocuments,
+    sharedLibraries,
     { items: librarySkills },
     { items: libraryMcp },
     inbox,
@@ -94,6 +98,7 @@ export default async function AgentWorkspace({
     activityEvents,
   ] = await Promise.all([
     listKnowledgeDocuments(id),
+    listGrantedKnowledgeLibraries(id),
     listSkillSummaries(),
     listMcpConnections(),
     getEmailInbox(id, selectedThread, emailPage, messagePage),
@@ -116,9 +121,12 @@ export default async function AgentWorkspace({
       run.displayStatus === 'running' ||
       run.displayStatus === 'awaiting_approval',
   );
-  const hasPendingKnowledge = knowledgeDocuments.some(
-    (doc) => doc.status === 'pending' || doc.status === 'processing',
-  );
+  const hasPendingKnowledge =
+    knowledgeDocuments.some((doc) => doc.status === 'pending' || doc.status === 'processing') ||
+    sharedLibraries.some((library) => library.pendingCount > 0);
+  const knowledgeDocumentCount =
+    knowledgeDocuments.length +
+    sharedLibraries.reduce((sum, library) => sum + library.documentCount, 0);
   const versionFor = (configurationId: string) =>
     versions.find((version) => version.id === configurationId)?.version ?? '—';
   const configuration = (
@@ -255,11 +263,12 @@ export default async function AgentWorkspace({
               {
                 id: 'knowledge',
                 label: 'Knowledge',
-                count: knowledgeDocuments.length,
+                count: knowledgeDocumentCount,
                 content: (
                   <KnowledgeWorkbench
                     agentId={id}
                     documents={knowledgeDocuments}
+                    sharedLibraries={sharedLibraries}
                     storageReady={storageConfigured()}
                     searchEnabled={agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)}
                   />

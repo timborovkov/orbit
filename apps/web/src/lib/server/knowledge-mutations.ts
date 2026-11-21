@@ -10,19 +10,119 @@ import { validateKnowledgeUpload } from '@/lib/knowledge/extract';
 import {
   KNOWLEDGE_JOB_TYPE,
   KNOWLEDGE_SEARCH_TOOL,
+  type KnowledgeScope,
   maxKnowledgeBytes,
   maxKnowledgeUploadLabel,
+  SHARED_KNOWLEDGE_JOB_TYPE,
 } from '@/lib/knowledge/types';
 import { enqueueJob } from '@/lib/queue/jobs';
-import { agents, audit, knowledgeDocuments } from '@/lib/schema';
+import { workspaceKnowledgeIndexingConfigured } from '@/lib/runtime/knowledge/provider';
+import {
+  agents,
+  audit,
+  knowledgeDocuments,
+  knowledgeLibraries,
+  knowledgeLibraryGrants,
+} from '@/lib/schema';
 import { deleteObject, putObject, storageConfigured } from '@/lib/storage/objects';
 
 async function requireAgent(agentId: string) {
   return (await db().select({ id: agents.id }).from(agents).where(eq(agents.id, agentId))).at(0);
 }
 
-async function requireKnowledgeAdmin() {
-  return requireAdmin();
+function documentOwner(scope: KnowledgeScope) {
+  return scope.kind === 'agent'
+    ? eq(knowledgeDocuments.agentId, scope.id)
+    : eq(knowledgeDocuments.libraryId, scope.id);
+}
+
+function scopeIds(scope: KnowledgeScope) {
+  return scope.kind === 'agent' ? { agentId: scope.id } : { libraryId: scope.id };
+}
+
+function knowledgeJob(scope: KnowledgeScope, documentId: string, revision: string) {
+  return {
+    type: scope.kind === 'agent' ? KNOWLEDGE_JOB_TYPE : SHARED_KNOWLEDGE_JOB_TYPE,
+    payload: { ...scopeIds(scope), documentId, revision },
+  };
+}
+
+function documentStoragePrefix(scope: KnowledgeScope, documentId: string) {
+  const directory = scope.kind === 'agent' ? 'agents' : 'knowledge-libraries';
+  return `${directory}/${scope.id}/knowledge/${documentId}`;
+}
+
+async function scopeExists(scope: KnowledgeScope) {
+  if (scope.kind === 'agent') return Boolean(await requireAgent(scope.id));
+  const [library] = await db()
+    .select({ id: knowledgeLibraries.id })
+    .from(knowledgeLibraries)
+    .where(eq(knowledgeLibraries.id, scope.id));
+  return Boolean(library);
+}
+
+function indexingError(scope: KnowledgeScope) {
+  if (scope.kind === 'library' && !workspaceKnowledgeIndexingConfigured()) {
+    return { error: 'Shared knowledge indexing requires the workspace OpenRouter key.' };
+  }
+}
+
+export async function insertKnowledgeLibrary(actor: string, name: string) {
+  return db().transaction(async (tx) => {
+    const [library] = await tx
+      .insert(knowledgeLibraries)
+      .values({ name })
+      .onConflictDoNothing()
+      .returning({ id: knowledgeLibraries.id });
+    if (!library) return { error: 'A library with that name already exists.' };
+    await tx.insert(audit).values({ actor, action: `Created knowledge library ${library.id}` });
+    return { libraryId: library.id };
+  });
+}
+
+export async function setKnowledgeLibraryGrant(
+  actor: string,
+  libraryId: string,
+  agentId: string,
+  granted: boolean,
+) {
+  return db().transaction(async (tx) => {
+    const [library] = await tx
+      .select({ id: knowledgeLibraries.id })
+      .from(knowledgeLibraries)
+      .where(eq(knowledgeLibraries.id, libraryId))
+      .for('key share');
+    if (!library) return { error: 'Knowledge library not found.' };
+    const [agent] = await tx
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .for('key share');
+    if (!agent) return { error: 'Agent not found.' };
+
+    const changed = granted
+      ? await tx
+          .insert(knowledgeLibraryGrants)
+          .values({ libraryId, agentId })
+          .onConflictDoNothing()
+          .returning({ agentId: knowledgeLibraryGrants.agentId })
+      : await tx
+          .delete(knowledgeLibraryGrants)
+          .where(
+            and(
+              eq(knowledgeLibraryGrants.libraryId, libraryId),
+              eq(knowledgeLibraryGrants.agentId, agentId),
+            ),
+          )
+          .returning({ agentId: knowledgeLibraryGrants.agentId });
+    if (changed.length) {
+      await tx.insert(audit).values({
+        actor,
+        action: `${granted ? 'Granted' : 'Revoked'} knowledge library ${libraryId} access for agent ${agentId}`,
+      });
+    }
+    return { message: granted ? 'Access granted.' : 'Access revoked.' };
+  });
 }
 
 async function cleanupObject(key: string, actor: string) {
@@ -43,11 +143,13 @@ function titleFromFilename(filename: string) {
 
 export async function uploadKnowledgeDocument(
   actor: string,
-  agentId: string,
+  scope: KnowledgeScope,
   file: { name: string; type: string; size: number; bytes: Uint8Array },
 ) {
-  await requireKnowledgeAdmin();
-  if (!(await requireAgent(agentId))) return { error: 'Agent not found.' };
+  await requireAdmin();
+  if (!(await scopeExists(scope))) return { error: 'Knowledge library or agent not found.' };
+  const setupError = indexingError(scope);
+  if (setupError) return setupError;
   if (!storageConfigured()) {
     return {
       error: 'Document storage is not configured. Ask your administrator to connect RustFS.',
@@ -61,7 +163,7 @@ export async function uploadKnowledgeDocument(
 
   const documentId = randomUUID();
   const revision = randomUUID();
-  const objectKey = `agents/${agentId}/knowledge/${documentId}/${file.name}`;
+  const objectKey = `${documentStoragePrefix(scope, documentId)}/${file.name}`;
   try {
     await putObject(objectKey, file.bytes, validated.mimeType);
   } catch {
@@ -72,7 +174,7 @@ export async function uploadKnowledgeDocument(
     await db().transaction(async (tx) => {
       await tx.insert(knowledgeDocuments).values({
         id: documentId,
-        agentId,
+        ...scopeIds(scope),
         filename: file.name,
         title: titleFromFilename(file.name),
         contentKind: validated.kind,
@@ -83,13 +185,12 @@ export async function uploadKnowledgeDocument(
         status: 'pending',
       });
       await enqueueJob(tx, {
-        type: KNOWLEDGE_JOB_TYPE,
-        payload: { documentId, agentId, revision },
+        ...knowledgeJob(scope, documentId, revision),
         idempotencyKey: `knowledge:${documentId}:upload`,
       });
       await tx.insert(audit).values({
         actor,
-        action: `Uploaded knowledge document ${documentId} for agent ${agentId}`,
+        action: `Uploaded knowledge document ${documentId} for ${scope.kind} ${scope.id}`,
       });
     });
   } catch {
@@ -102,12 +203,14 @@ export async function uploadKnowledgeDocument(
 
 export async function replaceKnowledgeDocument(
   actor: string,
-  agentId: string,
+  scope: KnowledgeScope,
   documentId: string,
   file: { name: string; type: string; size: number; bytes: Uint8Array },
 ) {
-  await requireKnowledgeAdmin();
-  if (!(await requireAgent(agentId))) return { error: 'Agent not found.' };
+  await requireAdmin();
+  if (!(await scopeExists(scope))) return { error: 'Knowledge library or agent not found.' };
+  const setupError = indexingError(scope);
+  if (setupError) return setupError;
   if (!storageConfigured()) {
     return {
       error: 'Document storage is not configured. Ask your administrator to connect RustFS.',
@@ -123,14 +226,14 @@ export async function replaceKnowledgeDocument(
     await db()
       .select()
       .from(knowledgeDocuments)
-      .where(and(eq(knowledgeDocuments.id, documentId), eq(knowledgeDocuments.agentId, agentId)))
+      .where(and(eq(knowledgeDocuments.id, documentId), documentOwner(scope)))
       .limit(1)
   ).at(0);
   if (!current) return { error: 'Document not found.' };
 
   const revision = randomUUID();
   // Always write under a unique key so a failed DB commit cannot delete the live object.
-  const objectKey = `agents/${agentId}/knowledge/${documentId}/${revision}/${file.name}`;
+  const objectKey = `${documentStoragePrefix(scope, documentId)}/${revision}/${file.name}`;
   try {
     await putObject(objectKey, file.bytes, validated.mimeType);
   } catch {
@@ -163,6 +266,7 @@ export async function replaceKnowledgeDocument(
           .where(
             and(
               eq(knowledgeDocuments.id, documentId),
+              documentOwner(scope),
               eq(knowledgeDocuments.revision, current.revision),
             ),
           )
@@ -170,13 +274,12 @@ export async function replaceKnowledgeDocument(
       ).at(0);
       if (!updated) throw new Error('Document changed during replacement');
       await enqueueJob(tx, {
-        type: KNOWLEDGE_JOB_TYPE,
-        payload: { documentId, agentId, revision },
+        ...knowledgeJob(scope, documentId, revision),
         idempotencyKey: `knowledge:${documentId}:replace:${revision}`,
       });
       await tx.insert(audit).values({
         actor,
-        action: `Replaced knowledge document ${documentId} for agent ${agentId}`,
+        action: `Replaced knowledge document ${documentId} for ${scope.kind} ${scope.id}`,
       });
     });
   } catch {
@@ -190,10 +293,12 @@ export async function replaceKnowledgeDocument(
 
 export async function reprocessKnowledgeDocument(
   actor: string,
-  agentId: string,
+  scope: KnowledgeScope,
   documentId: string,
 ) {
-  await requireKnowledgeAdmin();
+  await requireAdmin();
+  const setupError = indexingError(scope);
+  if (setupError) return setupError;
   const revision = randomUUID();
   const updated = await db().transaction(async (tx) => {
     const document = (
@@ -206,18 +311,17 @@ export async function reprocessKnowledgeDocument(
           error: null,
           updatedAt: new Date(),
         })
-        .where(and(eq(knowledgeDocuments.id, documentId), eq(knowledgeDocuments.agentId, agentId)))
+        .where(and(eq(knowledgeDocuments.id, documentId), documentOwner(scope)))
         .returning({ id: knowledgeDocuments.id })
     ).at(0);
     if (!document) return false;
     await enqueueJob(tx, {
-      type: KNOWLEDGE_JOB_TYPE,
-      payload: { documentId, agentId, revision },
+      ...knowledgeJob(scope, documentId, revision),
       idempotencyKey: `knowledge:${documentId}:reprocess:${revision}`,
     });
     await tx.insert(audit).values({
       actor,
-      action: `Reprocessed knowledge document ${documentId} for agent ${agentId}`,
+      action: `Reprocessed knowledge document ${documentId} for ${scope.kind} ${scope.id}`,
     });
     return true;
   });
@@ -226,19 +330,23 @@ export async function reprocessKnowledgeDocument(
   return { message: 'Document queued for reprocessing.' };
 }
 
-export async function deleteKnowledgeDocument(actor: string, agentId: string, documentId: string) {
-  await requireKnowledgeAdmin();
+export async function deleteKnowledgeDocument(
+  actor: string,
+  scope: KnowledgeScope,
+  documentId: string,
+) {
+  await requireAdmin();
   const removed = await db().transaction(async (tx) => {
     const document = (
       await tx
         .delete(knowledgeDocuments)
-        .where(and(eq(knowledgeDocuments.id, documentId), eq(knowledgeDocuments.agentId, agentId)))
+        .where(and(eq(knowledgeDocuments.id, documentId), documentOwner(scope)))
         .returning({ objectKey: knowledgeDocuments.objectKey })
     ).at(0);
     if (!document) return;
     await tx.insert(audit).values({
       actor,
-      action: `Deleted knowledge document ${documentId} for agent ${agentId}`,
+      action: `Deleted knowledge document ${documentId} for ${scope.kind} ${scope.id}`,
     });
     return document;
   });
@@ -256,7 +364,7 @@ export async function inspectKnowledgeRetrieval(
     limit?: number;
   },
 ) {
-  await requireKnowledgeAdmin();
+  await requireAdmin();
   if (!(await requireAgent(agentId))) return { error: 'Agent not found.' as const };
   const trimmed = query.trim();
   if (!trimmed) return { error: 'Enter a retrieval query.' as const };
