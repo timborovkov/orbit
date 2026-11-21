@@ -25,7 +25,7 @@ import {
   recordApprovalReviews,
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
-import { emailKnowledgeQuery } from '@/lib/runtime/email/input';
+import { emailKnowledgeQuery, emailMemoryQuery } from '@/lib/runtime/email/input';
 import {
   proposeEmailReplyFromDraft,
   recoverEmailReplyProposalIfNeeded,
@@ -45,6 +45,13 @@ import {
   consumeKnowledgeToolStep,
   recordKnowledgeToolCall,
 } from '@/lib/runtime/knowledge/tool-step';
+import { recallRunMemories } from '@/lib/runtime/memory/recall';
+import {
+  captureRunMemories,
+  memoryRunSource,
+  verifiedMemoryCandidates,
+} from '@/lib/runtime/memory/store';
+import { type MemoryCandidate, memoryCaptureOrigin } from '@/lib/runtime/memory/types';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { prepareRunTools } from '@/lib/runtime/resources';
@@ -692,7 +699,7 @@ async function processSimulationRun(
             updateIfOwned(run.id, executionToken, {
               status: 'failed',
               finishedAt: new Date(),
-              result: { ...checkpointed, traceId: telemetry.traceId },
+              result: { ...checkpointed, pendingMemories: undefined, traceId: telemetry.traceId },
             }),
           );
         },
@@ -714,6 +721,11 @@ async function processSimulationRun(
       return;
     }
 
+    const captureSource =
+      memoryCaptureOrigin(run.origin) &&
+      !checkpointed?.steps.some((step) => step.stage === 'evaluator')
+        ? await retryableStore(() => memoryRunSource(run))
+        : null;
     const resources = await prepareRunTools({
       agentId: run.agentId,
       policy: basePolicy,
@@ -800,7 +812,30 @@ async function processSimulationRun(
             if (!updated.length) throw new BudgetError('cancelled');
           },
           {
-            origin: simulationBehavior,
+            origin: origin === 'discovery' ? 'discovery' : simulationBehavior,
+            verifyMemories: captureSource
+              ? (candidates) => verifiedMemoryCandidates(candidates, captureSource.text)
+              : undefined,
+            recallMemory: async (requestSignal) => {
+              try {
+                return await retryableStore(() =>
+                  recallRunMemories({
+                    agentId: run.agentId,
+                    runId: run.id,
+                    actor: run.actor,
+                    executionToken,
+                    query: simulationBehavior === 'email' ? emailMemoryQuery(run.input) : run.input,
+                    replay: origin === 'replay',
+                    signal: requestSignal,
+                  }),
+                );
+              } catch (error) {
+                if (isBudgetError(error) || requestSignal.aborted || origin === 'replay')
+                  throw error;
+                reportFailure('worker.runtime', failureCorrelation(), error);
+                return [];
+              }
+            },
             maxToolSteps: budgets.maxToolStepsPerRun,
             signal,
             initial: checkpointed,
@@ -1045,7 +1080,8 @@ async function processSimulationRun(
       if (result.error && isTrustedBudgetMessage(result.error)) statusMessage = result.error;
       else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
       try {
-        const traceResult = { ...result, traceId: telemetry.traceId };
+        const { pendingMemories, ...completedResult } = result;
+        const traceResult = { ...completedResult, traceId: telemetry.traceId };
         // Propose before flipping the run to completed so a transient failure
         // leaves the run running and the job can retry. Wrap with retryableStore so
         // ordinary DB errors become RetryableInfrastructureError (outer catch rethrows)
@@ -1070,17 +1106,13 @@ async function processSimulationRun(
                 deferReason: isTrustedBudgetMessage(result.error) ? result.error : null,
               })
             : simulationBehavior === 'email'
-              ? updateIfOwned(run.id, executionToken, {
-                  status: 'completed',
-                  finishedAt: new Date(),
-                  result: traceResult,
-                  deferReason: null,
-                })
+              ? completeSimulation(run, executionToken, traceResult, pendingMemories)
               : finishSimulationWithApprovals(
                   run,
                   executionToken,
                   traceResult,
                   config.approvalSettings?.approvalOnReject,
+                  pendingMemories,
                   claim,
                 ),
         );
@@ -1092,6 +1124,7 @@ async function processSimulationRun(
         if (isRetryableInfrastructureError(error) && result.error === PAID_STEP_BURN_MESSAGE) {
           const burned: SimulationResult = {
             ...result,
+            pendingMemories: undefined,
             traceId: telemetry.traceId,
             error: PAID_STEP_BURN_MESSAGE,
           };
@@ -1252,11 +1285,37 @@ async function processSimulationRun(
   }
 }
 
+async function completeSimulation(
+  run: typeof runs.$inferSelect,
+  executionToken: string,
+  result: SimulationResult,
+  candidates?: MemoryCandidate[],
+  transaction?: Tx,
+) {
+  const values = {
+    status: 'completed' as const,
+    finishedAt: new Date(),
+    result,
+    deferReason: null,
+  };
+  if (!candidates?.length) return updateIfOwned(run.id, executionToken, values, transaction);
+  const complete = async (tx: Tx) => {
+    await captureRunMemories(tx, run, executionToken, candidates);
+    return updateIfOwned(run.id, executionToken, values, tx);
+  };
+  if (transaction) return complete(transaction);
+  return db().transaction(async (tx) => {
+    if (!(await lockApprovalAgent(tx, run.agentId))) return [];
+    return complete(tx);
+  });
+}
+
 async function finishSimulationWithApprovals(
   run: typeof runs.$inferSelect,
   executionToken: string,
   result: SimulationResult,
   onReject: ApprovalOnReject | undefined,
+  candidates: MemoryCandidate[] | undefined,
   claim?: SimulationJobClaim,
 ) {
   return db().transaction(async (tx) => {
@@ -1280,17 +1339,7 @@ async function finishSimulationWithApprovals(
     ).at(0);
 
     if (!review && !result.actions.some((action) => action.policy === 'needs-approval')) {
-      return updateIfOwned(
-        run.id,
-        executionToken,
-        {
-          status: 'completed',
-          finishedAt: new Date(),
-          result,
-          deferReason: null,
-        },
-        tx,
-      );
+      return completeSimulation(run, executionToken, result, candidates, tx);
     }
 
     if (run.jobId) {
@@ -1306,6 +1355,7 @@ async function finishSimulationWithApprovals(
         : job?.status === 'pending';
       if (!ownsJob) return [];
     }
+    await captureRunMemories(tx, run, executionToken, candidates);
     const owned = await updateIfOwned(
       run.id,
       executionToken,

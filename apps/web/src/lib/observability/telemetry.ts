@@ -397,7 +397,10 @@ export function createRunTelemetry(run: RunTelemetryContext) {
         runContext(),
       );
       try {
-        const telemetry = await aiSdkTelemetry(`orbit.${stage}`, run.allowContentCapture !== false);
+        const telemetry = await aiSdkTelemetry(
+          `orbit.${stage}`,
+          run.allowContentCapture !== false && !request.useMemory && !request.captureMemory,
+        );
         const response = await context.with(
           span ? trace.setSpan(context.active(), span) : context.active(),
           () => call({ ...request, telemetry }),

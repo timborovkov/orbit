@@ -21,7 +21,7 @@ test('private agent pictures survive RustFS restart, preserve edits and support 
     S3_ACCESS_KEY_ID: 'orbit_local',
     S3_SECRET_ACCESS_KEY: 'orbit_local_storage_only',
   });
-  await sql`TRUNCATE evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE agent_memories, evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await page.goto('/login');
   await page.getByLabel(/^Email/).fill('admin@example.com');
   await page.getByLabel(/^Password/).fill('test-only-password-123456');

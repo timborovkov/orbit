@@ -23,14 +23,18 @@ export function WorkspaceTabs({
   const openedHistoryRun = useRef<HTMLDetailsElement | null>(null);
   const search = useSearchParams();
   const historyRunId = search.get('run');
-  const emailRequested = search.get('tab') === 'email';
-  const linkedTab = historyRunId ? 'history' : emailRequested ? 'email' : undefined;
+  const requestedTab = search.get('tab');
+  const linkedTab = historyRunId
+    ? 'history'
+    : requestedTab === 'email' || requestedTab === 'memory'
+      ? requestedTab
+      : undefined;
   const selected = linkedTab ?? selectedTab ?? items.at(0)?.id;
 
   function selectTab(id: string) {
     if (linkedTab && id !== linkedTab) {
       const url = new URL(window.location.href);
-      for (const key of ['run', 'tab', 'emailThread', 'emailPage', 'messagePage']) {
+      for (const key of ['run', 'tab', 'emailThread', 'emailPage', 'messagePage', 'memoryPage']) {
         url.searchParams.delete(key);
       }
       window.history.replaceState(null, '', url);

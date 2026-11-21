@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { updateEmailMailbox } from '@/actions/email';
 import { EmailDraftReview } from '@/app/email-draft-review';
 import { KnowledgeCitations } from '@/app/knowledge-citations';
+import { MemoryCitations } from '@/app/memory-citations';
 import { SaveEmailCaseForm } from '@/app/save-evaluation-case-form';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { Button } from '@/components/ui/button';
@@ -155,7 +156,10 @@ function SelectedThread({
                 initialDraft={message.review.draft}
               />
               {message.draft && (
-                <KnowledgeCitations agentId={agentId} sources={message.draft.sources} />
+                <>
+                  <KnowledgeCitations agentId={agentId} sources={message.draft.sources} />
+                  <MemoryCitations agentId={agentId} references={message.draft.memories} />
+                </>
               )}
             </section>
           )}
@@ -166,7 +170,10 @@ function SelectedThread({
                 {message.review?.draft ?? message.draft?.answer ?? ''}
               </p>
               {message.draft && (
-                <KnowledgeCitations agentId={agentId} sources={message.draft.sources} />
+                <>
+                  <KnowledgeCitations agentId={agentId} sources={message.draft.sources} />
+                  <MemoryCitations agentId={agentId} references={message.draft.memories} />
+                </>
               )}
             </section>
           )}

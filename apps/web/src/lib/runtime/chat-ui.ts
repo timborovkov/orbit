@@ -1,6 +1,7 @@
 import type { UIMessage } from 'ai';
 
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
+import { MEMORY_SEARCH } from '@/lib/runtime/memory/types';
 import { groundedAnswerFromResult, type SimulationResult } from '@/lib/runtime/simulation';
 import { isTerminalSimulationStatus } from '@/lib/runtime/simulation-watch';
 
@@ -33,6 +34,7 @@ export interface PlaygroundStreamProgress {
   emittedStages: Set<'evaluator' | 'main'>;
   emittedActions: Set<string>;
   emittedKnowledge: boolean;
+  emittedMemory: boolean;
   textStarted: boolean;
   textFinished: boolean;
 }
@@ -42,6 +44,7 @@ export function createPlaygroundStreamProgress(): PlaygroundStreamProgress {
     emittedStages: new Set(),
     emittedActions: new Set(),
     emittedKnowledge: false,
+    emittedMemory: false,
     textStarted: false,
     textFinished: false,
   };
@@ -117,6 +120,23 @@ export function playgroundChunksFromResult(
       toolCallId,
       output: { status, reason, sources: grounded?.sources ?? [] },
     });
+  }
+  if (grounded?.memories.length && !progress.emittedMemory) {
+    progress.emittedMemory = true;
+    chunks.push(
+      {
+        type: 'tool-input-available',
+        toolCallId: MEMORY_SEARCH,
+        toolName: MEMORY_SEARCH,
+        title: 'Memory evidence',
+        input: {},
+      },
+      {
+        type: 'tool-output-available',
+        toolCallId: MEMORY_SEARCH,
+        output: grounded.memories,
+      },
+    );
   }
   if (terminal) {
     for (const action of result.actions) {

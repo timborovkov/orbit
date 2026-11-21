@@ -8,7 +8,9 @@ import {
 } from '@/lib/runtime/openrouter-key';
 import { decryptCredential, encryptCredential } from '@/lib/runtime/secrets';
 import {
+  captureDecisionSchema,
   hasSimulationProgress,
+  memoryGroundedDecisionSchema,
   type ModelCall,
   simulate,
   type SimulationResult,
@@ -823,6 +825,24 @@ test('OpenRouter adapter sends credentials only as authorization and parses stru
   } finally {
     transport.mockRestore();
   }
+});
+
+test('memory response fields are required in the provider schemas and accept empty lists', () => {
+  const capture = captureDecisionSchema.toJSONSchema();
+  const grounded = memoryGroundedDecisionSchema.toJSONSchema();
+  expect(capture.required).toContain('memoryCandidates');
+  expect(grounded.required).toContain('memoryCitations');
+  expect(
+    captureDecisionSchema.parse({ ...decision, memoryCandidates: [] }).memoryCandidates,
+  ).toEqual([]);
+  expect(
+    memoryGroundedDecisionSchema.parse({
+      ...decision,
+      answer: null,
+      citations: [],
+      memoryCitations: [],
+    }).memoryCitations,
+  ).toEqual([]);
 });
 
 test('OpenRouter costMicros stays unknown unless every step has cost metadata', async () => {

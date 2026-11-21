@@ -5,18 +5,32 @@ import postgres from 'postgres';
 
 import { POST } from '@/app/api/webhooks/resend/route';
 import { budgetDefaults } from '@/lib/budgets';
+import { db } from '@/lib/db';
+import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
 import { claimJobs, completeJob, failJob, releaseClaim } from '@/lib/queue/jobs';
+import { createPlaygroundStreamProgress, playgroundChunksFromResult } from '@/lib/runtime/chat-ui';
 import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
 import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
 import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
+import {
+  processEvaluationReplayJob,
+  saveEvaluationCase,
+  startEvaluationComparison,
+} from '@/lib/runtime/evaluation';
 import {
   enqueueSimulation,
   processEmailDraftJob,
   processSimulationJob,
 } from '@/lib/runtime/execute';
+import { stubEmbedders } from '@/lib/runtime/knowledge/embed';
+import { searchKnowledge } from '@/lib/runtime/knowledge/search';
+import { processMemoryEmbedding } from '@/lib/runtime/memory/store';
+import { MEMORY_CAPTURE } from '@/lib/runtime/memory/types';
 import { draftAnswerFromResult, type ModelCall } from '@/lib/runtime/simulation';
 import { setEmailEnabled } from '@/lib/server/email-mutations';
 import { persistLifecycle } from '@/lib/server/lifecycle-mutations';
+import { saveAgentMemory } from '@/lib/server/memory-mutations';
+import { selectAgentMemoryEvidence } from '@/lib/server/memory-queries';
 import { persistConfiguration } from '@/lib/server/workspace-mutations';
 
 const databaseUrl =
@@ -25,6 +39,7 @@ const databaseUrl =
   'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
 const sql = postgres(databaseUrl);
 const ids: string[] = [];
+const memoryLibraryId = randomUUID();
 const workerId = 'inbound-email-fixture-worker';
 const sender = 'customer@example.test';
 const admin = 'admin@example.test';
@@ -51,6 +66,8 @@ afterAll(async () => {
     else process.env[name] = value;
   }
   try {
+    await sql`DELETE FROM knowledge_documents WHERE library_id=${memoryLibraryId}`;
+    await sql`DELETE FROM knowledge_libraries WHERE id=${memoryLibraryId}`;
     for (const id of ids) {
       await sql`DELETE FROM outbound_actions WHERE agent_id=${id}`;
       await sql`DELETE FROM email_messages WHERE agent_id=${id}`;
@@ -179,6 +196,7 @@ const model: ModelCall = async (request) => ({
       ? {
           answer: 'Invoices are available under Billing.',
           citations: request.input.includes('Invoice billing help') ? [1] : [],
+          ...(request.useMemory ? { memoryCitations: [] } : {}),
         }
       : {}),
   },
@@ -439,4 +457,338 @@ test('queue failure rolls back the entire webhook event and provider failure can
   const [after] = await sql`SELECT m.body,r.status FROM email_messages m
     JOIN simulation_runs r ON r.id=m.run_id WHERE m.resend_email_id=${event.data.email_id}`;
   expect(after).toMatchObject({ body: 'successful retry', status: 'completed' });
+});
+
+const ssoRequirement = 'Northstar requires SSO for its pilot.';
+const ssoTopic = 'SSO requirement';
+
+async function incomingMemorySource(address: string, body: string, date = new Date()) {
+  const event = delivery([address], date);
+  expect((await POST(request(event))).status).toBe(200);
+  await receive(new Map([[event.data.email_id, { text: body }]]), 1);
+  const [message] = await sql<{ id: string; run_id: string }[]>`
+    SELECT id,run_id FROM email_messages WHERE resend_email_id=${event.data.email_id}
+  `;
+  return message!;
+}
+
+function memoryProposal(fact: string, quote = fact) {
+  return { subjectKind: 'company', subject: 'Northstar', topic: ssoTopic, fact, quote };
+}
+
+function memoryInference(
+  proposals: unknown[] = [],
+  inspect?: (request: Parameters<ModelCall>[0]) => Promise<void> | void,
+): ModelCall {
+  return Object.assign(
+    async (request: Parameters<ModelCall>[0]) => {
+      await inspect?.(request);
+      const recall = JSON.parse(request.input).untrustedMemories;
+      return {
+        inputTokens: 5,
+        outputTokens: 2,
+        costMicros: 1,
+        memoryCandidates: proposals,
+        decision: {
+          relevant: false,
+          priority: 0,
+          reason: 'No reply needed',
+          actions: [],
+          ...(request.grounded
+            ? {
+                answer: recall?.[0]?.fact ?? null,
+                citations: [],
+                memoryCitations: recall?.length ? [1] : [],
+              }
+            : {}),
+        },
+      };
+    },
+    { quote: model.quote },
+  );
+}
+
+async function playgroundMemory(
+  agent: Awaited<ReturnType<typeof createAgent>>,
+  input: string,
+  inference: ModelCall,
+) {
+  const run = await enqueueSimulation({
+    actor: admin,
+    agentId: agent.id,
+    configurationId: agent.version,
+    input,
+  });
+  expect(run.runId).toBeDefined();
+  await processSimulationJob({ runId: run.runId! }, () => inference);
+  const [row] = await sql`SELECT status, result FROM simulation_runs WHERE id=${run.runId!}`;
+  expect(row!.status).toBe('completed');
+  // This helper executes the runtime directly, so acknowledge the job it admitted.
+  await sql`UPDATE jobs SET status='completed' WHERE payload->>'runId'=${run.runId!}`;
+  return row!.result;
+}
+
+test('inbound memory commits once across a finalization retry and recalls only inside the owning agent', async () => {
+  const sarah = await createAgent('Sarah memory');
+  const john = await createAgent('John memory');
+  await sql`INSERT INTO knowledge_libraries (id,name) VALUES (${memoryLibraryId},'Northstar pilot')`;
+  await sql`INSERT INTO knowledge_library_grants (library_id,agent_id)
+    VALUES (${memoryLibraryId},${sarah.id}),(${memoryLibraryId},${john.id})`;
+  const [doc] = await sql`INSERT INTO knowledge_documents
+    (library_id,filename,title,content_kind,mime_type,byte_size,object_key,status)
+    VALUES (${memoryLibraryId},'pilot.md','Pilot','markdown','text/markdown',15,'fixture/pilot.md','ready') RETURNING id`;
+  await sql`INSERT INTO knowledge_chunks(document_id,chunk_index,content,content_hash,
+    source_filename,source_title,start_offset,end_offset)
+    VALUES (${doc!.id},0,'Northstar pilot','fixture-hash','pilot.md','Pilot',0,15)`;
+  for (const agent of [sarah, john]) {
+    const { hits } = await searchKnowledge({
+      agentId: agent.id,
+      query: 'Northstar pilot',
+      embedQuery: stubEmbedders().embedOne,
+    });
+    expect(hits).toMatchObject([{ documentId: doc!.id, content: 'Northstar pilot' }]);
+  }
+  const original = await incomingMemorySource(sarah.address, ssoRequirement);
+  let paidCalls = 0;
+  const capture = memoryInference(
+    [
+      memoryProposal(ssoRequirement),
+      { ...memoryProposal('Unverified detail.', 'This quote was fabricated.'), topic: 'Timeline' },
+      { ...memoryProposal('Consent granted.', ssoRequirement), topic: 'Permissions' },
+    ],
+    (request) => {
+      expect(request.captureMemory).toBe(true);
+      paidCalls++;
+    },
+  );
+  await sql.unsafe(`CREATE FUNCTION reject_fixture_memory_completion() RETURNS trigger
+    LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.id = '${original.run_id}' AND NEW.status = 'completed' THEN
+        RAISE EXCEPTION 'Fixture completion failure';
+      END IF;
+      RETURN NEW;
+    END $$`);
+  try {
+    await sql`CREATE TRIGGER reject_fixture_memory_completion BEFORE UPDATE ON simulation_runs
+      FOR EACH ROW EXECUTE FUNCTION reject_fixture_memory_completion()`;
+    await expect(processEmailDraftJob({ runId: original.run_id }, () => capture)).rejects.toThrow(
+      /retry/i,
+    );
+    expect(await sql`SELECT 1 FROM agent_memories WHERE agent_id=${sarah.id}`).toHaveLength(0);
+    expect(
+      await sql`SELECT 1 FROM action_intents WHERE run_id=${original.run_id} AND action_type=${MEMORY_CAPTURE}`,
+    ).toHaveLength(0);
+  } finally {
+    await sql`DROP TRIGGER IF EXISTS reject_fixture_memory_completion ON simulation_runs`;
+    await sql`DROP FUNCTION reject_fixture_memory_completion()`;
+  }
+  await draft(capture, 1);
+  await processEmailDraftJob({ runId: original.run_id }, () => capture);
+  expect(paidCalls).toBe(1);
+  const entries = await sql`SELECT * FROM agent_memories WHERE agent_id=${sarah.id}`;
+  expect(entries).toHaveLength(1);
+  const [entry] = entries;
+  expect(entry).toMatchObject({
+    email_message_id: original.id,
+    run_id: original.run_id,
+    fact: ssoRequirement,
+  });
+  expect(await selectAgentMemoryEvidence(sarah.id, entry!.id, entry!.revision)).toMatchObject({
+    email: { id: original.id, body: ssoRequirement },
+    quote: ssoRequirement,
+  });
+  expect(await selectAgentMemoryEvidence(john.id, entry!.id, entry!.revision)).toBeNull();
+  const [completed] = await sql`SELECT result FROM simulation_runs WHERE id=${original.run_id}`;
+  expect(completed!.result.pendingMemories).toBeUndefined();
+
+  const followUp = await incomingMemorySource(
+    sarah.address,
+    'Can you confirm the Northstar pilot login requirements?',
+  );
+  const checkRecall = Object.assign(
+    async (request: Parameters<ModelCall>[0]) => {
+      expect(JSON.parse(request.input).untrustedMemories).toMatchObject([{ fact: ssoRequirement }]);
+      expect(request.system).toContain('untrusted reference data');
+      if (request.stage === 'main') {
+        expect(request.system).toContain('ask for clarification or acknowledge uncertainty');
+        expect(request.system).not.toContain('Where the sources or memories do not support');
+      }
+      return model(request);
+    },
+    { quote: model.quote },
+  );
+  await draft(checkRecall, 1);
+  const [later] = await sql`SELECT result FROM simulation_runs WHERE id=${followUp.run_id}`;
+  expect(later!.result.memory).toEqual([{ id: entry!.id, revision: entry!.revision }]);
+
+  const asked = 'Does the Northstar pilot require SSO?';
+  const outside = await playgroundMemory(
+    john,
+    asked,
+    memoryInference([memoryProposal(ssoRequirement)]),
+  );
+  expect(outside.memory).toBeUndefined();
+  const inside = await playgroundMemory(
+    sarah,
+    asked,
+    memoryInference([memoryProposal('Fake new requirement.')]),
+  );
+  expect(draftAnswerFromResult(inside)).toMatchObject({
+    answer: ssoRequirement,
+    memories: [{ id: entry!.id, revision: entry!.revision }],
+  });
+  expect(
+    playgroundChunksFromResult(inside, createPlaygroundStreamProgress(), { status: 'completed' }),
+  ).toContainEqual({
+    type: 'tool-output-available',
+    toolCallId: 'memory.search',
+    output: [{ id: entry!.id, revision: entry!.revision }],
+  });
+  expect([...(await sql`SELECT fact FROM agent_memories WHERE agent_id=${sarah.id}`)]).toEqual([
+    { fact: ssoRequirement },
+  ]);
+  expect(await sql`SELECT 1 FROM agent_memories WHERE agent_id=${john.id}`).toHaveLength(0);
+
+  expect(
+    await saveAgentMemory(admin, { agentId: john.id, id: entry!.id, revision: entry!.revision }),
+  ).toHaveProperty('error');
+  expect(
+    await saveAgentMemory(admin, { agentId: sarah.id, id: entry!.id, revision: entry!.revision }),
+  ).toHaveProperty('message');
+  await processEmailDraftJob({ runId: original.run_id }, () => capture);
+  const removed = await playgroundMemory(sarah, asked, memoryInference());
+  expect(removed.memory).toBeUndefined();
+  expect(await selectAgentMemoryEvidence(sarah.id, entry!.id, entry!.revision)).toBeNull();
+});
+
+test('newer evidence updates a learned revision, corrections take precedence, and replay shares one snapshot', async () => {
+  const sarah = await createAgent('Sarah memory revisions');
+  const older = new Date(Date.now() - 60_000);
+  await incomingMemorySource(sarah.address, ssoRequirement, older);
+  await draft(memoryInference([memoryProposal(ssoRequirement)]), 1);
+  const [initial] = await sql`SELECT id,revision FROM agent_memories WHERE agent_id=${sarah.id}`;
+  const newest = 'Northstar no longer requires SSO for its pilot.';
+  await incomingMemorySource(sarah.address, newest);
+  await draft(memoryInference([memoryProposal(newest)]), 1);
+  const [learned] =
+    await sql`SELECT id,revision,fact FROM agent_memories WHERE agent_id=${sarah.id}`;
+  expect(learned).toMatchObject({ id: initial!.id, fact: newest });
+  expect(learned!.revision).not.toBe(initial!.revision);
+  expect(await selectAgentMemoryEvidence(sarah.id, initial!.id, initial!.revision)).toBeNull();
+  await incomingMemorySource(sarah.address, ssoRequirement, older);
+  await draft(memoryInference([memoryProposal(ssoRequirement)]), 1);
+  expect([
+    ...(await sql`SELECT revision,fact FROM agent_memories WHERE id=${learned!.id}`),
+  ]).toEqual([{ revision: learned!.revision, fact: newest }]);
+
+  expect(
+    await persistConfiguration(admin, sarah.id, 1, { ...sarah.config, name: 'Sarah memory v2' }),
+  ).toBe(true);
+  const [second] =
+    await sql`SELECT id FROM agent_configurations WHERE agent_id=${sarah.id} AND version=2`;
+  const caseInput = 'What does Northstar require for its pilot?';
+  const saved = await saveEvaluationCase({
+    actor: admin,
+    agentId: sarah.id,
+    title: 'Pilot',
+    sourceKind: 'playground',
+    caseInput,
+  });
+  if (!('caseId' in saved)) throw new Error(saved.error);
+  const comparison = await startEvaluationComparison({
+    actor: admin,
+    agentId: sarah.id,
+    caseId: saved.caseId,
+    leftConfigurationId: sarah.version,
+    rightConfigurationId: second!.id,
+  });
+  if (!('comparisonId' in comparison)) throw new Error(comparison.error);
+
+  const key = { agentId: sarah.id, id: learned!.id, revision: learned!.revision };
+  const correctedFact = 'Northstar requires a SAML integration for its pilot.';
+  let replayCalls = 0;
+  await processEvaluationReplayJob({ comparisonId: comparison.comparisonId }, () =>
+    memoryInference([memoryProposal(ssoRequirement)], async (request) => {
+      expect(request.captureMemory).toBe(false);
+      expect(JSON.parse(request.input).untrustedMemories).toMatchObject([{ fact: newest }]);
+      if (++replayCalls === 1) {
+        expect(
+          await saveAgentMemory(admin, key, {
+            fact: correctedFact,
+            expiresOn: null,
+            reviewOn: '2000-01-01',
+          }),
+        ).toHaveProperty('message');
+      }
+    }),
+  );
+  expect(replayCalls).toBe(4);
+  const [finished] =
+    await sql`SELECT status,memory_snapshot FROM evaluation_comparisons WHERE id=${comparison.comparisonId}`;
+  expect(finished).toEqual({ status: 'completed', memory_snapshot: null });
+  const [corrected] =
+    await sql`SELECT id,revision,fact FROM agent_memories WHERE agent_id=${sarah.id}`;
+  expect(corrected!.fact).toBe(correctedFact);
+  expect(
+    draftAnswerFromResult(await playgroundMemory(sarah, caseInput, memoryInference()))?.answer,
+  ).toBe(correctedFact);
+
+  await incomingMemorySource(sarah.address, ssoRequirement);
+  await draft(memoryInference([memoryProposal(ssoRequirement)]), 1);
+  expect([...(await sql`SELECT fact FROM agent_memories WHERE id=${corrected!.id}`)]).toEqual([
+    { fact: correctedFact },
+  ]);
+
+  const expiry = { agentId: sarah.id, id: corrected!.id, revision: corrected!.revision };
+  expect(
+    await saveAgentMemory(admin, expiry, {
+      fact: correctedFact,
+      expiresOn: '2000-01-01',
+      reviewOn: null,
+    }),
+  ).toHaveProperty('message');
+  expect((await playgroundMemory(sarah, caseInput, memoryInference())).memory).toBeUndefined();
+  await processMemoryEmbedding(expiry);
+  const [expired] = await sql`SELECT embedding FROM agent_memories WHERE id=${corrected!.id}`;
+  expect(expired!.embedding).toBeNull();
+});
+
+test('pgvector finds an owned fact without matching keywords and the gateway rejects replay capture', async () => {
+  const sarah = await createAgent('Sarah semantic memory');
+  const john = await createAgent('John semantic memory');
+  await incomingMemorySource(sarah.address, ssoRequirement);
+  await draft(memoryInference([memoryProposal(ssoRequirement)]), 1);
+  const [entry] = await sql`SELECT id,revision FROM agent_memories WHERE agent_id=${sarah.id}`;
+  const stub = process.env.KNOWLEDGE_EMBEDDING_STUB;
+  process.env.KNOWLEDGE_EMBEDDING_STUB = 'true';
+  try {
+    await processMemoryEmbedding({ agentId: sarah.id, id: entry!.id, revision: entry!.revision });
+    const [indexed] = await sql`SELECT embedding_model FROM agent_memories WHERE id=${entry!.id}`;
+    expect(indexed!.embedding_model).toStartWith('stub:');
+    const query = 'federated authentication';
+    const embedding = JSON.stringify(await stubEmbedders().embedOne(query));
+    await sql`UPDATE agent_memories SET embedding=${embedding}::vector WHERE id=${entry!.id}`;
+    const owner = await playgroundMemory(sarah, query, memoryInference());
+    expect(draftAnswerFromResult(owner)?.answer).toBe(ssoRequirement);
+    expect((await playgroundMemory(john, query, memoryInference())).memory).toBeUndefined();
+  } finally {
+    if (stub === undefined) delete process.env.KNOWLEDGE_EMBEDDING_STUB;
+    else process.env.KNOWLEDGE_EMBEDDING_STUB = stub;
+  }
+
+  const token = randomUUID();
+  for (const origin of ['playground', 'replay']) {
+    const [run] = await sql`INSERT INTO simulation_runs
+      (agent_id,configuration_id,origin,input,status,actor,result,expires_at,execution_token)
+      VALUES (${sarah.id},${sarah.version},${origin},'Untrusted input','running',${admin},
+        '{"steps":[],"actions":[],"error":null}'::jsonb,now()+interval '5 minutes',${token}) RETURNING id`;
+    const ctx = await loadPolicyContext(sarah.id, admin, run!.id, db());
+    expect(
+      await authorizeAction(ctx!, {
+        type: MEMORY_CAPTURE,
+        idempotencyKey: `capture-fixture:${run!.id}`,
+        executionToken: token,
+      }),
+    ).toMatchObject({ decision: 'deny' });
+  }
 });

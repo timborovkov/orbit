@@ -251,7 +251,7 @@ the first invalid field. On success, close after the server action completes.
 
 Show agent identity, lifecycle, current configuration version and OpenRouter
 status above the task tabs. The tasks are Configuration, Playground,
-Knowledge, Email, Follow-ups, History, Approvals and Access. Save evaluation
+Knowledge, Memory, Email, Follow-ups, History, Approvals and Access. Save evaluation
 cases from History or Email; open Comparisons from the global Evaluations
 page. Use a horizontal tablist with Left, Right, Home and End support above
 600px and a full-width Select at 600px and narrower. Keep task panels mounted
@@ -336,6 +336,21 @@ the selected agent. It remains usable when the agent’s Playground search is of
 Playground retrieval uses a Switch. Grounded answers use numbered citations
 with filename, page or section and the quoted passage. Inspector and citation
 source links download the original through the selected agent’s current access.
+
+### Memory
+
+Use the workspace disclosure rows to list learned company and project facts.
+Keep the fact, learned timestamp and active, review due or expired state visible
+in the collapsed row. Let admins open the original message or event from the
+expanded row, correct the fact and UTC dates, or confirm removal. A corrected
+entry labels the original quote as the evidence for what was first learned.
+Use a single date column on phones and keep source text readable as plain text.
+Show memory evidence links alongside the corresponding answer in Playground,
+History and replay comparisons. Keep Knowledge citations alongside their
+quoted passages.
+
+Playwright verified evidence access at 1440px and correction, expiry and removal
+at 390px in Dark mode, including keyboard focus and mobile overflow checks.
 
 ### Email
 

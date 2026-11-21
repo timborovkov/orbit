@@ -25,6 +25,7 @@ import type {
   FollowUpSource,
   FollowUpStatus,
 } from '@/lib/runtime/follow-ups/types';
+import type { MemorySubject, RecalledMemory } from '@/lib/runtime/memory/types';
 import type { SimulationResult } from '@/lib/runtime/simulation';
 
 const KNOWLEDGE_EMBEDDING_DIMENSIONS = 1536;
@@ -133,31 +134,35 @@ export const jobs = pgTable('jobs', {
 export type RunStatus =
   'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'interrupted';
 
-export const runs = pgTable('simulation_runs', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  agentId: uuid('agent_id')
-    .notNull()
-    .references(() => agents.id),
-  configurationId: uuid('configuration_id')
-    .notNull()
-    .references(() => configurations.id),
-  origin: text('origin')
-    .$type<'playground' | 'email' | 'discovery' | 'replay'>()
-    .notNull()
-    .default('playground'),
-  input: text('input').notNull(),
-  recipients: jsonb('recipients').$type<string[]>().notNull().default([]),
-  status: text('status').$type<RunStatus>().notNull().default('queued'),
-  result: jsonb('result').$type<SimulationResult>().notNull(),
-  actor: text('actor').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  finishedAt: timestamp('finished_at', { withTimezone: true }),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  jobId: uuid('job_id').references(() => jobs.id),
-  deferReason: text('defer_reason'),
-  /** Rotated whenever a worker takes ownership of a running execution; fences stale writers. */
-  executionToken: uuid('execution_token'),
-});
+export const runs = pgTable(
+  'simulation_runs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id),
+    configurationId: uuid('configuration_id')
+      .notNull()
+      .references(() => configurations.id),
+    origin: text('origin')
+      .$type<'playground' | 'email' | 'discovery' | 'replay'>()
+      .notNull()
+      .default('playground'),
+    input: text('input').notNull(),
+    recipients: jsonb('recipients').$type<string[]>().notNull().default([]),
+    status: text('status').$type<RunStatus>().notNull().default('queued'),
+    result: jsonb('result').$type<SimulationResult>().notNull(),
+    actor: text('actor').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    jobId: uuid('job_id').references(() => jobs.id),
+    deferReason: text('defer_reason'),
+    /** Rotated whenever a worker takes ownership of a running execution; fences stale writers. */
+    executionToken: uuid('execution_token'),
+  },
+  (table) => [unique().on(table.agentId, table.id)],
+);
 
 export const emailMailboxes = pgTable('email_mailboxes', {
   agentId: uuid('agent_id')
@@ -209,6 +214,7 @@ export const emailMessages = pgTable(
     waitingForCapacity: boolean('waiting_for_capacity').notNull().default(false),
   },
   (table) => [
+    unique().on(table.agentId, table.id),
     unique().on(table.agentId, table.resendEmailId),
     foreignKey({
       columns: [table.agentId, table.threadId],
@@ -259,6 +265,7 @@ export const evaluationComparisons = pgTable('evaluation_comparisons', {
   finishedAt: timestamp('finished_at', { withTimezone: true }),
   jobId: uuid('job_id').references(() => jobs.id, { onDelete: 'set null' }),
   error: text('error'),
+  memorySnapshot: jsonb('memory_snapshot').$type<RecalledMemory[]>(),
 });
 
 export const actionIntents = pgTable('action_intents', {
@@ -493,7 +500,53 @@ export const sourceEvents = pgTable(
       .unique()
       .references(() => runs.id, { onDelete: 'set null' }),
   },
-  (table) => [unique().on(table.agentId, table.provider, table.providerEventId)],
+  (table) => [
+    unique().on(table.agentId, table.id),
+    unique().on(table.agentId, table.provider, table.providerEventId),
+  ],
+);
+
+export const agentMemories = pgTable(
+  'agent_memories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    subjectKind: text('subject_kind').$type<MemorySubject>().notNull(),
+    subject: text('subject').notNull(),
+    topic: text('topic').notNull(),
+    identityKey: text('identity_key').notNull(),
+    fact: text('fact').notNull(),
+    quote: text('quote').notNull(),
+    runId: uuid('run_id').notNull(),
+    emailMessageId: uuid('email_message_id'),
+    sourceEventId: uuid('source_event_id'),
+    sourceAt: timestamp('source_at', { withTimezone: true }).notNull(),
+    learnedAt: timestamp('learned_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresOn: date('expires_on'),
+    reviewOn: date('review_on'),
+    correctedBy: text('corrected_by'),
+    correctedAt: timestamp('corrected_at', { withTimezone: true }),
+    revision: uuid('revision').notNull().defaultRandom(),
+    embedding: vector('embedding', { dimensions: KNOWLEDGE_EMBEDDING_DIMENSIONS }),
+    embeddingModel: text('embedding_model'),
+  },
+  (table) => [
+    unique().on(table.agentId, table.subjectKind, table.identityKey),
+    foreignKey({
+      columns: [table.agentId, table.runId],
+      foreignColumns: [runs.agentId, runs.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.agentId, table.emailMessageId],
+      foreignColumns: [emailMessages.agentId, emailMessages.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.agentId, table.sourceEventId],
+      foreignColumns: [sourceEvents.agentId, sourceEvents.id],
+    }).onDelete('cascade'),
+  ],
 );
 
 export const discoveryCursors = pgTable(

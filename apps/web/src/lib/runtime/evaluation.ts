@@ -518,6 +518,7 @@ export async function processEvaluationReplayJob(
         .update(evaluationComparisons)
         .set({
           status: 'completed',
+          memorySnapshot: null,
           finishedAt: new Date(),
           error: null,
           leftRunId: left.runId,
@@ -580,6 +581,7 @@ export async function finalizeCancelledEvaluationComparisons(
     .update(evaluationComparisons)
     .set({
       status: 'failed',
+      memorySnapshot: null,
       finishedAt: new Date(),
       error: inspectable,
     })
@@ -646,6 +648,7 @@ export async function finalizeExhaustedEvaluationReplayJob(
       .update(evaluationComparisons)
       .set({
         status: 'failed',
+        memorySnapshot: null,
         finishedAt: new Date(),
         error: inspectable,
       })

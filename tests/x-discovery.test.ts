@@ -4,11 +4,14 @@ import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
+import { processSimulationJob } from '@/lib/runtime/execute';
+import type { ModelCall } from '@/lib/runtime/simulation';
 import { createFixtureXSearchAdapter, FIXTURE_X_POSTS } from '@/lib/runtime/x/fixture';
 import { ensureDiscoveryPollJob, processDiscoveryPoll } from '@/lib/runtime/x/poll';
 import { X_DISCOVERY_POLL_JOB, X_PROVIDER } from '@/lib/runtime/x/types';
 import { createAgentFromTemplate } from '@/lib/server/agents-mutations';
 import { persistLifecycle } from '@/lib/server/lifecycle-mutations';
+import { selectAgentMemoryEvidence } from '@/lib/server/memory-queries';
 
 const databaseUrl =
   process.env.TEST_DATABASE_URL ??
@@ -388,4 +391,55 @@ test('createAgentFromTemplate enqueues discovery poll when template has xSearchQ
   } finally {
     await sql`UPDATE templates SET config=${sql.json(previous)} WHERE id='sales'`;
   }
+});
+
+test('a discovery run can remember a project detail with evidence from its event', async () => {
+  const agentId = await createAgent('Discovery memory', '*');
+  const quote = 'Project Juniper moves to pilot in December.';
+  const adapter = createFixtureXSearchAdapter([{ id: '2001', text: quote, raw: {} }]);
+  expect(
+    await processDiscoveryPoll({ payload: { agentId } }, signal, {
+      adapter,
+      evaluate: true,
+    }),
+  ).toMatchObject({ evaluated: 1 });
+  const [event] = await sql`SELECT id,run_id FROM source_events WHERE agent_id=${agentId}`;
+  const inference: ModelCall = async (request) => {
+    expect(request.stage).toBe('evaluator');
+    expect(request.captureMemory).toBe(true);
+    return {
+      inputTokens: 5,
+      outputTokens: 1,
+      decision: { relevant: false, priority: 0, reason: 'Informational', actions: [] },
+      memoryCandidates: [
+        {
+          subjectKind: 'project',
+          subject: 'Juniper',
+          topic: 'Pilot timing',
+          fact: quote,
+          quote,
+        },
+      ],
+    };
+  };
+  inference.quote = async () => ({
+    upperBoundMicros: 100,
+    endpoint: 'Fixture',
+    maxPrice: { prompt: 1, completion: 1, request: 0 },
+  });
+  const priorKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = 'fixture';
+  try {
+    await processSimulationJob({ runId: event!.run_id }, () => inference);
+  } finally {
+    if (priorKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = priorKey;
+  }
+  const [memory] =
+    await sql`SELECT id,revision,source_event_id,subject_kind FROM agent_memories WHERE agent_id=${agentId}`;
+  expect(memory).toMatchObject({ source_event_id: event!.id, subject_kind: 'project' });
+  expect(await selectAgentMemoryEvidence(agentId, memory!.id, memory!.revision)).toMatchObject({
+    event: { id: event!.id, text: quote },
+    quote,
+  });
 });
