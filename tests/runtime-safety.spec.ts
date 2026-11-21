@@ -80,7 +80,7 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
   await capturePage(page, 'test-results/runtime-access-mobile.png');
 
   await openWorkspaceTab(page, 'History');
-  await expect(page.getByRole('heading', { name: 'Run history', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Activity timeline', exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
   await capturePage(page, 'test-results/runtime-history-desktop.png');
   await page.setViewportSize({ width: 390, height: 844 });

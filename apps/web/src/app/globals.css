@@ -2915,6 +2915,15 @@ fieldset[aria-disabled='true'] textarea {
   }
 }
 
+@media (max-width: 400px) {
+  .config-sections {
+    flex-wrap: wrap;
+  }
+  .config-sections button {
+    flex: 1 0 calc(50% - 4px);
+  }
+}
+
 .disclosure-chevron {
   flex-shrink: 0;
   color: var(--muted);
@@ -4129,6 +4138,7 @@ details[open] > summary > .disclosure-chevron {
 
 .history-primary {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 40px;
   min-width: 0;
 }
