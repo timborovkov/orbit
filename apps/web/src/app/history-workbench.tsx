@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 import { ChevronDown, History } from 'lucide-react';
 
 import { type ActivityEventRow, ActivityTimeline } from '@/app/activity-timeline';
@@ -70,6 +72,11 @@ export function HistoryWorkbench({
                 </span>
                 <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
               </summary>
+              {run.personId && (
+                <Link className="person-source-link" href={`/people/${run.personId}`}>
+                  View X author in People
+                </Link>
+              )}
               <RunContent run={run} interrupted={run.interrupted} />
               {run.origin === 'playground' && (
                 <SavePlaygroundCaseForm

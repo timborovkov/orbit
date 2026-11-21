@@ -12,6 +12,7 @@ import { followUpsModule } from '@/lib/seed/modules/follow-ups';
 import { knowledgeModule } from '@/lib/seed/modules/knowledge';
 import { knowledgeLibrariesModule } from '@/lib/seed/modules/knowledge-libraries';
 import { memoryModule } from '@/lib/seed/modules/memory';
+import { peopleModule } from '@/lib/seed/modules/people';
 import { runsModule } from '@/lib/seed/modules/runs';
 import { usageModule } from '@/lib/seed/modules/usage';
 import type { SeedModule } from '@/lib/seed/types';
@@ -34,6 +35,7 @@ export const seedModules: SeedModule[] = [
   emailModule,
   memoryModule,
   discoveryModule,
+  peopleModule,
   followUpsModule,
   evaluationsModule,
   auditModule,

@@ -17,8 +17,10 @@ import {
   controls,
   credentials,
   jobs,
+  personIdentities,
   recipientConsents,
   runs,
+  sourceEvents,
   templates,
   usageCounters,
 } from '@/lib/schema';
@@ -136,8 +138,17 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
       .from(credentials)
       .where(eq(credentials.agentId, id)),
     db()
-      .select()
+      .select({ run: runs, personId: personIdentities.personId })
       .from(runs)
+      .leftJoin(
+        sourceEvents,
+        and(
+          eq(sourceEvents.runId, runs.id),
+          eq(sourceEvents.agentId, runs.agentId),
+          eq(sourceEvents.provider, 'x'),
+        ),
+      )
+      .leftJoin(personIdentities, eq(personIdentities.id, sourceEvents.personIdentityId))
       .where(and(eq(runs.agentId, id), inArray(runs.origin, ['playground', 'discovery'])))
       .orderBy(
         ...(focusRunId ? [desc(sql`${runs.id} = ${focusRunId}::uuid`)] : []),
@@ -192,17 +203,18 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
   ]);
   const current = versions.at(0);
   if (!current) return null;
-  const jobIds = history.map((run) => run.jobId).filter((jobId): jobId is string => !!jobId);
+  const jobIds = history.map(({ run }) => run.jobId).filter((jobId): jobId is string => !!jobId);
   const linkedJobs = jobIds.length
     ? await db().select().from(jobs).where(inArray(jobs.id, jobIds))
     : [];
   const jobsById = new Map(linkedJobs.map((job) => [job.id, job]));
-  const viewedHistory = history.map((run) => {
+  const viewedHistory = history.map(({ run, personId }) => {
     // awaiting_approval waits on reviewExpiresAt, not the execution deadline.
     const expired = isExpiredSimulationRun(run);
     const deferred = Boolean(run.deferReason) && (run.status === 'failed' || expired);
     return {
       ...run,
+      personId,
       deferReason: run.deferReason ?? (expired ? budgetViolationMessage('run-deadline') : null),
       interrupted: expired || run.status === 'interrupted',
       displayStatus: expired

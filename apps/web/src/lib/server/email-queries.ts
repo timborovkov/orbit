@@ -14,6 +14,7 @@ import {
   emailThreads,
   jobs,
   outboundActions,
+  personIdentities,
   runs,
 } from '@/lib/schema';
 import { inboundEmailConfigured } from '@/lib/server/email-mutations';
@@ -51,6 +52,7 @@ export async function getEmailInbox(
   threadId: string | undefined,
   page: number,
   messagePage: number,
+  focusMessageId?: string,
 ) {
   await requireAdmin();
   const store = db();
@@ -66,52 +68,76 @@ export async function getEmailInbox(
     .orderBy(asc(emailMessages.threadId), desc(emailMessages.receivedAt), desc(emailMessages.id))
     .as('latest_email');
 
-  const [mailboxes, threadPage, selected, pendingReceive, pendingOutbound] = await Promise.all([
-    store
-      .select({ enabled: emailMailboxes.enabled, address: emailMailboxes.address })
-      .from(emailMailboxes)
-      .where(eq(emailMailboxes.agentId, agentId)),
-    store
-      .select()
-      .from(latest)
-      .orderBy(desc(latest.receivedAt), desc(latest.id))
-      .offset((page - 1) * THREADS_PER_PAGE)
-      .limit(THREADS_PER_PAGE + 1),
-    threadId
-      ? store
-          .select({ id: emailThreads.id })
-          .from(emailThreads)
-          .where(and(eq(emailThreads.agentId, agentId), eq(emailThreads.id, threadId)))
-      : [],
-    store
-      .select({ id: emailMessages.id })
-      .from(emailMessages)
-      .leftJoin(jobs, eq(jobs.id, emailMessages.receiveJobId))
-      .leftJoin(runs, and(eq(runs.id, emailMessages.runId), eq(runs.agentId, agentId)))
-      .where(
-        and(
-          eq(emailMessages.agentId, agentId),
-          or(
-            inArray(jobs.status, ['pending', 'claimed']),
-            inArray(runs.status, ['queued', 'running']),
+  const [mailboxes, threadPage, selected, pendingReceive, pendingOutbound, focusedMessages] =
+    await Promise.all([
+      store
+        .select({ enabled: emailMailboxes.enabled, address: emailMailboxes.address })
+        .from(emailMailboxes)
+        .where(eq(emailMailboxes.agentId, agentId)),
+      store
+        .select()
+        .from(latest)
+        .orderBy(desc(latest.receivedAt), desc(latest.id))
+        .offset((page - 1) * THREADS_PER_PAGE)
+        .limit(THREADS_PER_PAGE + 1),
+      threadId
+        ? store
+            .select({ id: emailThreads.id })
+            .from(emailThreads)
+            .where(and(eq(emailThreads.agentId, agentId), eq(emailThreads.id, threadId)))
+        : [],
+      store
+        .select({ id: emailMessages.id })
+        .from(emailMessages)
+        .leftJoin(jobs, eq(jobs.id, emailMessages.receiveJobId))
+        .leftJoin(runs, and(eq(runs.id, emailMessages.runId), eq(runs.agentId, agentId)))
+        .where(
+          and(
+            eq(emailMessages.agentId, agentId),
+            or(
+              inArray(jobs.status, ['pending', 'claimed']),
+              inArray(runs.status, ['queued', 'running']),
+            ),
           ),
-        ),
-      )
-      .limit(1),
-    store
-      .select({ id: outboundActions.id })
-      .from(outboundActions)
-      .where(
-        and(
-          eq(outboundActions.agentId, agentId),
-          inArray(outboundActions.status, ['queued', 'sending']),
-        ),
-      )
-      .limit(1),
-  ]);
+        )
+        .limit(1),
+      store
+        .select({ id: outboundActions.id })
+        .from(outboundActions)
+        .where(
+          and(
+            eq(outboundActions.agentId, agentId),
+            inArray(outboundActions.status, ['queued', 'sending']),
+          ),
+        )
+        .limit(1),
+      focusMessageId
+        ? store
+            .select({
+              id: emailMessages.id,
+              threadId: emailMessages.threadId,
+              receivedAt: sql<string>`${emailMessages.receivedAt}::text`,
+            })
+            .from(emailMessages)
+            .where(and(eq(emailMessages.agentId, agentId), eq(emailMessages.id, focusMessageId)))
+        : [],
+    ]);
   const pending = [...pendingReceive, ...pendingOutbound];
   const threads = threadPage.slice(0, THREADS_PER_PAGE);
-  const selectedId = selected.at(0)?.id ?? threads.at(0)?.id;
+  const focused = focusedMessages[0];
+  const selectedId = focused?.threadId ?? selected.at(0)?.id ?? threads.at(0)?.id;
+  const newerMessages = focused
+    ? await store.$count(
+        emailMessages,
+        and(
+          eq(emailMessages.agentId, agentId),
+          eq(emailMessages.threadId, focused.threadId),
+          sql`(${emailMessages.receivedAt}, ${emailMessages.id}) > (${focused.receivedAt}::timestamptz, ${focused.id}::uuid)`,
+        ),
+      )
+    : null;
+  const selectedMessagePage =
+    newerMessages === null ? messagePage : Math.floor(newerMessages / MESSAGES_PER_PAGE) + 1;
   const messages = selectedId
     ? await store
         .select({
@@ -119,6 +145,7 @@ export async function getEmailInbox(
           receivedAt: emailMessages.receivedAt,
           body: emailMessages.body,
           sender: emailMessages.sender,
+          personId: personIdentities.personId,
           subject: emailMessages.subject,
           skipReason: emailMessages.skipReason,
           waitingForCapacity: emailMessages.waitingForCapacity,
@@ -129,11 +156,12 @@ export async function getEmailInbox(
           runId: emailMessages.runId,
         })
         .from(emailMessages)
+        .leftJoin(personIdentities, eq(personIdentities.id, emailMessages.personIdentityId))
         .leftJoin(jobs, eq(jobs.id, emailMessages.receiveJobId))
         .leftJoin(runs, and(eq(runs.id, emailMessages.runId), eq(runs.agentId, agentId)))
         .where(and(eq(emailMessages.agentId, agentId), eq(emailMessages.threadId, selectedId)))
         .orderBy(desc(emailMessages.receivedAt), desc(emailMessages.id))
-        .offset((messagePage - 1) * MESSAGES_PER_PAGE)
+        .offset((selectedMessagePage - 1) * MESSAGES_PER_PAGE)
         .limit(MESSAGES_PER_PAGE + 1)
     : [];
 
@@ -219,6 +247,7 @@ export async function getEmailInbox(
     pending: pending.length > 0,
     threads,
     selectedId,
+    messagePage: selectedMessagePage,
     hasOlderThreads: threadPage.length > THREADS_PER_PAGE,
     hasOlderMessages: messages.length > MESSAGES_PER_PAGE,
     messages: messages

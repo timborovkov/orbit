@@ -6,6 +6,12 @@ import { enqueueJob } from '@/lib/queue/jobs';
 import type { JobRecord } from '@/lib/queue/types';
 import { type AgentConfig, configSchema } from '@/lib/runtime/config';
 import { admitRun } from '@/lib/runtime/execute';
+import {
+  lockPeople,
+  observedClaimedHandle,
+  reconcilePeople,
+  xEmailClaim,
+} from '@/lib/runtime/people/identity';
 import { createXSearchAdapter } from '@/lib/runtime/x/adapter';
 import { compareSnowflake } from '@/lib/runtime/x/fixture';
 import {
@@ -164,13 +170,30 @@ async function persistPosts(
           text: post.text,
           authorId: post.authorId ?? null,
           authorUsername: post.authorUsername ?? null,
+          authorName: post.authorName ?? null,
+          personClaim: post.authorId && post.authorUsername ? xEmailClaim(post.text) : null,
           providerCreatedAt: post.createdAt ? new Date(post.createdAt) : null,
         })
         .onConflictDoNothing()
         .returning(),
     ),
   );
-  return rows.flatMap((row) => row.at(0) ?? []);
+  const inserted = rows.flatMap((row) => row.at(0) ?? []);
+  const handles = [
+    ...new Set(
+      inserted.flatMap(({ authorUsername, personIdentityId }) =>
+        authorUsername && personIdentityId ? [authorUsername.toLowerCase()] : [],
+      ),
+    ),
+  ];
+  if (handles.length) await lockPeople(tx);
+  if (
+    inserted.some(({ personIdentityId, personClaim }) => personIdentityId && personClaim) ||
+    (await observedClaimedHandle(tx, handles))
+  ) {
+    await reconcilePeople(tx);
+  }
+  return inserted;
 }
 
 async function listUnevaluatedEvents(tx: Tx, agentId: string) {

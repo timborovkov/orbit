@@ -34,7 +34,15 @@ export function WorkspaceTabs({
   function selectTab(id: string) {
     if (linkedTab && id !== linkedTab) {
       const url = new URL(window.location.href);
-      for (const key of ['run', 'tab', 'emailThread', 'emailPage', 'messagePage', 'memoryPage']) {
+      for (const key of [
+        'run',
+        'tab',
+        'emailThread',
+        'emailMessage',
+        'emailPage',
+        'messagePage',
+        'memoryPage',
+      ]) {
         url.searchParams.delete(key);
       }
       window.history.replaceState(null, '', url);

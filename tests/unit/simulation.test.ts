@@ -8,6 +8,7 @@ import {
 } from '@/lib/runtime/openrouter-key';
 import { decryptCredential, encryptCredential } from '@/lib/runtime/secrets';
 import {
+  captureAndRelationshipDecisionSchema,
   captureDecisionSchema,
   hasSimulationProgress,
   memoryGroundedDecisionSchema,
@@ -832,6 +833,9 @@ test('memory response fields are required in the provider schemas and accept emp
   const grounded = memoryGroundedDecisionSchema.toJSONSchema();
   expect(capture.required).toContain('memoryCandidates');
   expect(grounded.required).toContain('memoryCitations');
+  expect(captureAndRelationshipDecisionSchema.toJSONSchema().required).toEqual(
+    expect.arrayContaining(['memoryCandidates', 'relationshipNote']),
+  );
   expect(
     captureDecisionSchema.parse({ ...decision, memoryCandidates: [] }).memoryCandidates,
   ).toEqual([]);

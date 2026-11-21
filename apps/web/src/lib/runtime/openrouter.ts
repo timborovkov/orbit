@@ -3,12 +3,14 @@ import { generateText, isStepCount, Output } from 'ai';
 import { z } from 'zod';
 
 import {
+  captureAndRelationshipDecisionSchema,
   captureDecisionSchema,
   decisionSchema,
   groundedDecisionSchema,
   type InferenceQuote,
   memoryGroundedDecisionSchema,
   type ModelCall,
+  relationshipDecisionSchema,
 } from '@/lib/runtime/simulation';
 
 const maxOutputTokens = 3000;
@@ -92,6 +94,7 @@ export function openRouterInference(apiKey: string): ModelCall {
     const {
       model,
       system,
+      summarizeRelationship,
       input,
       signal,
       quote,
@@ -103,12 +106,16 @@ export function openRouterInference(apiKey: string): ModelCall {
     const hasTools = Boolean(tools && Object.keys(tools).length);
     const toolSteps = maxToolSteps ?? 10;
     const schema = request.captureMemory
-      ? captureDecisionSchema
-      : request.grounded
-        ? request.useMemory
-          ? memoryGroundedDecisionSchema
-          : groundedDecisionSchema
-        : decisionSchema;
+      ? summarizeRelationship
+        ? captureAndRelationshipDecisionSchema
+        : captureDecisionSchema
+      : summarizeRelationship
+        ? relationshipDecisionSchema
+        : request.grounded
+          ? request.useMemory
+            ? memoryGroundedDecisionSchema
+            : groundedDecisionSchema
+          : decisionSchema;
     const response = await generateText({
       model: provider(model, {
         usage: { include: true },
@@ -137,13 +144,15 @@ export function openRouterInference(apiKey: string): ModelCall {
       abortSignal: signal,
       telemetry: telemetry ?? { isEnabled: false },
     });
-    const output = response.output;
+    const { relationshipNote, memoryCandidates, ...decision } =
+      response.output as typeof response.output & {
+        relationshipNote?: ReturnType<typeof relationshipDecisionSchema.parse>['relationshipNote'];
+        memoryCandidates?: unknown[];
+      };
     return {
-      decision: output,
-      memoryCandidates:
-        'memoryCandidates' in output && Array.isArray(output.memoryCandidates)
-          ? output.memoryCandidates
-          : undefined,
+      decision,
+      memoryCandidates,
+      relationshipNote,
       inputTokens: response.usage.inputTokens ?? 0,
       outputTokens: response.usage.outputTokens ?? 0,
       // Only bill a complete sum — partial metadata would release reserved spend for unpriced steps.

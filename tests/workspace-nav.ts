@@ -6,14 +6,13 @@ export async function openWorkspaceTab(page: Page, name: string | RegExp) {
   const tab = page.getByRole('tab', { name: pattern });
   const select = page.getByRole('combobox', { name: 'Agent workspace section', exact: true });
 
-  await expect(tab.or(select).first()).toBeVisible({ timeout: 15000 });
-
-  if ((await tab.count()) > 0 && (await tab.first().isVisible())) {
-    await tab.first().click();
+  // The desktop tabs can be rendered before React switches to the compact view.
+  if (!(await page.evaluate(() => matchMedia('(max-width: 600px)').matches))) {
+    await tab.first().click({ timeout: 15000 });
     return;
   }
 
-  await select.click();
+  await select.click({ timeout: 15000 });
   await page.getByRole('option', { name: pattern }).click();
 }
 

@@ -152,9 +152,10 @@ to the same grid.
 The desktop header keeps the brand, appearance and account controls above
 a 44px navigation row. At 600px and narrower, the Workspace navigation menu
 holds the same destinations and marks the active page. The global destinations
-are Overview, Approvals, Evaluations, Templates, Knowledge, Skills and MCP. The Approvals link shows
-the workspace-wide pending count when there are pending items. Agents, recent
-activity and outbound controls are sections of Overview. The agent breadcrumb
+are Overview, Approvals, People, Evaluations, Templates, Knowledge, Skills and
+MCP. The Approvals link shows the workspace-wide pending count when there are
+pending items. Agents, recent activity and outbound controls are sections of
+Overview. The agent breadcrumb
 links directly to the Agents section.
 
 Keep the header below menus and dialogs, respect the top safe area and leave
@@ -378,6 +379,24 @@ mounted to preserve unsaved fields.
 - **Consent** shows saved recipient, scope, choice and evidence records above the form. Let administrators decide whether introductions and escalations require recorded consent.
 - **Skills and MCP** use checkboxes to assign library entries. Attached MCP connections show a nested checklist of administrator-classified read-only tools. New attachments start with an empty checklist.
 - **OpenRouter** identifies the active source as an agent override, environment default or missing key. Use a password input for the override and clear it after submission. Removing the override falls back to the environment default if configured. Display only the source label.
+
+## People
+
+Use a searchable list of people and a detail page with the activity timeline
+first. Show contact methods, linked identities and their source evidence next
+to the timeline on larger screens and below it on smaller screens. Link the
+email sender and X author from their existing agent workspaces using underlined
+links. Keep a return link to each original thread or X activity.
+
+Label inferred and confirmed links in text. Linking and unlinking both show
+the evidence being acted on and require a reason. The relationship timeline
+shows the observing agents. Choosing one agent narrows the timeline and
+reveals only that agent’s private notes and their supporting excerpts. Manage
+identities and contacts from the all-agents view.
+
+Playwright exercised the link and unlink flow at desktop and phone widths,
+opened the supporting email from a private note, and checked keyboard access,
+overflow, and automated accessibility in both themes at 390px.
 
 ## Workspace libraries and approvals
 

@@ -83,7 +83,7 @@ test('admins can trace, correct, expire and remove an agent memory', async ({ pa
     await expect(page.getByText('<em>Please confirm compatibility.</em>')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Open email thread' })).toHaveAttribute(
       'href',
-      `/agents/${sarah}?tab=email&emailThread=${threadId}`,
+      `/agents/${sarah}?tab=email&emailThread=${threadId}&emailMessage=${messageId}#message-${messageId}`,
     );
 
     await page.goto(evidence.replace(sarah, john));

@@ -6,6 +6,7 @@ import { expect, type Page, test } from '@playwright/test';
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
+import { closeDb } from '@/lib/db';
 import { claimJobs, completeJob } from '@/lib/queue/jobs';
 import { processEmailSendJob } from '@/lib/runtime/email/send';
 import { createStubEmailTransport } from '@/lib/runtime/email/transport';
@@ -48,7 +49,7 @@ async function screenshotToArtifacts(
 }
 
 test.beforeEach(async ({ page }) => {
-  await sql`TRUNCATE agent_memories, evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE agent_memories, person_relationship_notes, person_identity_changes, person_link_rejections, person_contacts, person_identities, people, evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=false`;
   await page.goto('/login');
   await page.getByLabel(/^Email/).fill('admin@example.com');
@@ -58,6 +59,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.afterAll(async () => {
+  await closeDb();
   await sql.end();
 });
 
@@ -115,6 +117,7 @@ async function seedLiveAgentWithDraft() {
 }
 
 test('review, approve, reject, and send outcome at desktop and mobile', async ({ page }) => {
+  process.env.DATABASE_URL = databaseUrl;
   const pending = await seedLiveAgentWithDraft();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/agents/${pending.agentId}?tab=email&emailThread=${pending.threadId}`);
@@ -140,7 +143,9 @@ test('review, approve, reject, and send outcome at desktop and mobile', async ({
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/agents/${approved.agentId}?tab=email&emailThread=${approved.threadId}`);
   const editedBody = 'Edited approved reply for screenshots.';
-  await page.getByLabel('Reply draft').fill(editedBody);
+  const draft = page.getByLabel('Reply draft');
+  await draft.fill(editedBody);
+  await expect(draft).toHaveValue(editedBody);
   await page.getByRole('button', { name: 'Approve & queue' }).click();
   await expect(page.getByRole('region', { name: 'Send outcome' })).toContainText('Queued');
   const emailPanel = page.getByRole('tabpanel', { name: 'Email' });
@@ -151,10 +156,14 @@ test('review, approve, reject, and send outcome at desktop and mobile', async ({
 
   const transport = createStubEmailTransport();
   const claimed = await claimJobs({ workerId, limit: 5, types: [EMAIL_SEND_JOB] });
+  expect(claimed).toHaveLength(1);
   for (const job of claimed) {
-    await processEmailSendJob(job, new AbortController().signal, transport);
+    await processEmailSendJob(job, new AbortController().signal, transport, {
+      sendingDomain: 'inbound.example.test',
+    });
     await completeJob(job.id, workerId);
   }
+  expect(transport.calls.map(({ text }) => text)).toEqual([editedBody]);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
   await openWorkspaceTab(page, 'Email');

@@ -59,7 +59,7 @@ export default async function MemoryEvidence({
           {evidence.email ? (
             <Link
               className="memory-link"
-              href={`/agents/${id}?tab=email&emailThread=${evidence.email.threadId}`}
+              href={`/agents/${id}?tab=email&emailThread=${evidence.email.threadId}&emailMessage=${evidence.email.id}#message-${evidence.email.id}`}
             >
               Open email thread
             </Link>

@@ -1,6 +1,6 @@
 ALTER TABLE simulation_runs ADD CONSTRAINT simulation_runs_agent_id_id_unique UNIQUE (agent_id, id);
-ALTER TABLE email_messages ADD CONSTRAINT email_messages_agent_id_id_unique UNIQUE (agent_id, id);
-ALTER TABLE source_events ADD CONSTRAINT source_events_agent_id_id_unique UNIQUE (agent_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS email_messages_agent_id_id_unique ON email_messages (agent_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS source_events_agent_id_id_unique ON source_events (agent_id, id);
 
 CREATE TABLE agent_memories (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

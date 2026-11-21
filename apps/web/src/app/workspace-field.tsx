@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 
+import { useHydrated } from '@/app/use-hydrated';
 import { MarkdownEditor } from '@/components/markdown-editor';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -12,10 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-
-const subscribe = () => () => undefined;
-const clientReady = () => true;
-const serverReady = () => false;
 
 export function WorkspaceField({
   id,
@@ -38,7 +35,7 @@ export function WorkspaceField({
   description?: string;
   error?: string;
 }) {
-  const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
+  const hydrated = useHydrated();
   const [value, setValue] = useState(initialValue);
   const descriptionId = description ? `${id}-description` : undefined;
   const errorId = error ? `${id}-error` : undefined;
@@ -105,7 +102,7 @@ export function WorkspaceSelect({
   description?: string;
   error?: string;
 }) {
-  const hydrated = useSyncExternalStore(subscribe, clientReady, serverReady);
+  const hydrated = useHydrated();
   const [value, setValue] = useState(initialValue);
   const descriptionId = description ? `${id}-description` : undefined;
   const errorId = error ? `${id}-error` : undefined;

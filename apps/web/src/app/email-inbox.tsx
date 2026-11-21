@@ -133,7 +133,7 @@ function SelectedThread({
         </nav>
       )}
       {inbox.messages.map((message) => (
-        <article className="email-message" key={message.id}>
+        <article className="email-message" id={`message-${message.id}`} key={message.id}>
           <header className="email-message-heading">
             <div>
               <h3>{message.subject || '(No subject)'}</h3>
@@ -146,6 +146,11 @@ function SelectedThread({
             </div>
             <span className="state-label">{message.status}</span>
           </header>
+          {message.personId && (
+            <Link className="person-source-link" href={`/people/${message.personId}`}>
+              View sender in People
+            </Link>
+          )}
           {!!message.body && <p className="preserve-text">{message.body}</p>}
           {message.detail && <p className="muted">{message.detail}</p>}
           {message.review?.status === 'pending' && message.review.draft !== null && (

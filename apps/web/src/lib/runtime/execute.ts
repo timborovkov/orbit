@@ -54,6 +54,7 @@ import {
 import { type MemoryCandidate, memoryCaptureOrigin } from '@/lib/runtime/memory/types';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
+import { loadRelationshipContext, storeRelationshipNote } from '@/lib/runtime/people/history';
 import { prepareRunTools } from '@/lib/runtime/resources';
 import {
   hasSimulationProgress,
@@ -805,10 +806,18 @@ async function processSimulationRun(
             await assertOwned(run.id, executionToken);
             return response;
           },
-          async (partial) => {
-            const updated = await retryableStore(() =>
-              updateIfOwned(run.id, executionToken, { result: partial }),
-            );
+          async (partial, note) => {
+            const updated = await retryableStore(() => {
+              if (!note || (origin !== 'email' && origin !== 'discovery')) {
+                return updateIfOwned(run.id, executionToken, { result: partial });
+              }
+              return db().transaction(async (tx) => {
+                const owned = await updateIfOwned(run.id, executionToken, { result: partial }, tx);
+                if (owned.length)
+                  await storeRelationshipNote(tx, run.agentId, run.id, origin, note);
+                return owned;
+              });
+            });
             if (!updated.length) throw new BudgetError('cancelled');
           },
           {
@@ -836,6 +845,11 @@ async function processSimulationRun(
                 return [];
               }
             },
+            summarizeRelationship: origin === 'email' || origin === 'discovery',
+            loadRelationshipContext:
+              origin === 'email' || origin === 'discovery'
+                ? () => retryableStore(() => loadRelationshipContext(run.agentId, run.id, origin))
+                : undefined,
             maxToolSteps: budgets.maxToolStepsPerRun,
             signal,
             initial: checkpointed,

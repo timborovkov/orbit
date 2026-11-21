@@ -33,6 +33,7 @@ export default defineConfig({
     'knowledge.spec.ts',
     'inbound-email.spec.ts',
     'memory.spec.ts',
+    'people.spec.ts',
   ],
   workers: 1,
   use: {
