@@ -3,7 +3,7 @@ import postgres from 'postgres';
 
 const sql = postgres('postgres://orbit:orbit_dev@127.0.0.1:5432/orbit_test');
 test.beforeAll(async () => {
-  await sql`TRUNCATE evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE person_relationship_notes, person_identity_changes, person_link_rejections, person_contacts, person_identities, people, evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 test.afterAll(async () => {
@@ -17,9 +17,9 @@ test('local bypass skips login and sessions while preserving admin actions and a
   test.setTimeout(90000);
   await page.goto('/login');
   await expect(page).toHaveURL('http://127.0.0.1:3001/');
-  await expect(page.getByRole('status')).toContainText(
-    'Authentication disabled · Local development · local-admin@example.test',
-  );
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Authentication disabled' }),
+  ).toContainText('Authentication disabled · Local development · local-admin@example.test');
   await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Create agent', exact: true }).click();
   await page.getByLabel(/^Name/).fill('Local agent');

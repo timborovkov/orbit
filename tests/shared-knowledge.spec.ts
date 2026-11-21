@@ -10,8 +10,7 @@ async function inspectHandbook(page: Page, agentId: string) {
   await openWorkspaceTab(page, 'Knowledge');
   const sections = page.getByLabel('Knowledge section', { exact: true });
   const button = page.getByRole('button', { name: 'Inspector', exact: true });
-  await expect(button.or(sections).first()).toBeVisible();
-  if (await sections.isVisible()) {
+  if (await page.evaluate(() => matchMedia('(max-width: 900px)').matches)) {
     await sections.click();
     await page.getByRole('option', { name: 'Inspector', exact: true }).click();
   } else {
@@ -29,7 +28,7 @@ test('admins share one indexed handbook and source access follows current grants
   test.setTimeout(90000);
   const sql = postgres('postgres://orbit:orbit_dev@localhost:5432/orbit_test');
   try {
-    await sql`TRUNCATE evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+    await sql`TRUNCATE person_relationship_notes, person_identity_changes, person_link_rejections, person_contacts, person_identities, people, evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
     const agentIds: Record<string, string> = {};
     for (const name of ['Sarah', 'John', 'Maya']) {
       const [agent] = await sql`

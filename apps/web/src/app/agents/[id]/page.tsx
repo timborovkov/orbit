@@ -42,6 +42,7 @@ import { storageConfigured } from '@/lib/storage/objects';
 interface WorkspaceSearch {
   run?: string;
   emailThread?: string;
+  emailMessage?: string;
   emailPage?: string;
   messagePage?: string;
 }
@@ -53,6 +54,7 @@ function workspaceLocation(search: WorkspaceSearch) {
   return {
     focusRunId,
     selectedThread,
+    focusMessageId: z.uuid().safeParse(search.emailMessage).data,
     emailPage: pageNumber.safeParse(search.emailPage).data ?? 1,
     messagePage: pageNumber.safeParse(search.messagePage).data ?? 1,
   };
@@ -69,7 +71,7 @@ export default async function AgentWorkspace({
   const email = await requireAdmin();
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
-  const { focusRunId, selectedThread, emailPage, messagePage } = workspaceLocation(
+  const { focusRunId, selectedThread, focusMessageId, emailPage, messagePage } = workspaceLocation(
     await searchParams,
   );
   const workspace = await getAgentWorkspace(id, focusRunId);
@@ -101,7 +103,7 @@ export default async function AgentWorkspace({
     listGrantedKnowledgeLibraries(id),
     listSkillSummaries(),
     listMcpConnections(),
-    getEmailInbox(id, selectedThread, emailPage, messagePage),
+    getEmailInbox(id, selectedThread, emailPage, messagePage, focusMessageId),
     listFollowUpsForAgent(id),
     listActivityEventsForAgent(id),
   ]);
@@ -282,7 +284,7 @@ export default async function AgentWorkspace({
                     agentId={id}
                     inbox={inbox}
                     page={emailPage}
-                    messagePage={messagePage}
+                    messagePage={inbox.messagePage}
                   />
                 ),
               },

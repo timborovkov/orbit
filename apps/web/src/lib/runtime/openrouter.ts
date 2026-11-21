@@ -7,6 +7,7 @@ import {
   groundedDecisionSchema,
   type InferenceQuote,
   type ModelCall,
+  relationshipDecisionSchema,
 } from '@/lib/runtime/simulation';
 
 const maxOutputTokens = 3000;
@@ -90,6 +91,7 @@ export function openRouterInference(apiKey: string): ModelCall {
     const {
       model,
       system,
+      summarizeRelationship,
       input,
       signal,
       quote,
@@ -100,6 +102,11 @@ export function openRouterInference(apiKey: string): ModelCall {
     } = request;
     const hasTools = Boolean(tools && Object.keys(tools).length);
     const toolSteps = maxToolSteps ?? 10;
+    const schema = summarizeRelationship
+      ? relationshipDecisionSchema
+      : request.grounded
+        ? groundedDecisionSchema
+        : decisionSchema;
     const response = await generateText({
       model: provider(model, {
         usage: { include: true },
@@ -122,16 +129,18 @@ export function openRouterInference(apiKey: string): ModelCall {
         await beforeProviderCall?.(stepNumber);
         if (hasTools && stepNumber >= toolSteps) return { activeTools: [] };
       },
-      output: Output.object({
-        schema: request.grounded ? groundedDecisionSchema : decisionSchema,
-      }),
+      output: Output.object({ schema }),
       maxOutputTokens,
       maxRetries: 0,
       abortSignal: signal,
       telemetry: telemetry ?? { isEnabled: false },
     });
+    const { relationshipNote, ...decision } = response.output as typeof response.output & {
+      relationshipNote?: ReturnType<typeof relationshipDecisionSchema.parse>['relationshipNote'];
+    };
     return {
-      decision: response.output,
+      decision,
+      relationshipNote,
       inputTokens: response.usage.inputTokens ?? 0,
       outputTokens: response.usage.outputTokens ?? 0,
       // Only bill a complete sum — partial metadata would release reserved spend for unpriced steps.

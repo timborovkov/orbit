@@ -6,6 +6,7 @@ import type { JobRecord } from '@/lib/queue/types';
 import type { fetchReceivedEmail } from '@/lib/runtime/email/provider';
 import { EMAIL_ACTOR, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import { admitRun } from '@/lib/runtime/execute';
+import { emailXClaim, reconcilePeople } from '@/lib/runtime/people/identity';
 import {
   agents,
   emailMailboxes,
@@ -67,10 +68,12 @@ async function storeMessage(tx: Tx, message: Message, received: Received) {
       .set({ provisional: parentIds.length > 0 })
       .where(and(eq(emailThreads.agentId, agentId), eq(emailThreads.id, threadId)));
   }
+  const personClaim = message.personIdentityId ? emailXClaim(received.body) : null;
   await tx
     .update(emailMessages)
-    .set({ ...received, threadId })
+    .set({ ...received, threadId, personClaim })
     .where(eq(emailMessages.id, message.id));
+  if (personClaim) await reconcilePeople(tx);
   const mergedIds = [
     ...new Set([message.threadId, ...lateChildren.map((thread) => thread.id)]),
   ].filter((id) => id !== threadId);
