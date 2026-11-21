@@ -441,11 +441,28 @@ export const recipientConsents = pgTable(
   (table) => [primaryKey({ columns: [table.agentId, table.recipient, table.scope] })],
 );
 
+export const knowledgeLibraries = pgTable('knowledge_libraries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+});
+
+export const knowledgeLibraryGrants = pgTable(
+  'knowledge_library_grants',
+  {
+    libraryId: uuid('library_id')
+      .notNull()
+      .references(() => knowledgeLibraries.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.libraryId, table.agentId] })],
+);
+
 export const knowledgeDocuments = pgTable('knowledge_documents', {
   id: uuid('id').defaultRandom().primaryKey(),
-  agentId: uuid('agent_id')
-    .notNull()
-    .references(() => agents.id, { onDelete: 'cascade' }),
+  agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
+  libraryId: uuid('library_id').references(() => knowledgeLibraries.id),
   filename: text('filename').notNull(),
   title: text('title').notNull(),
   contentKind: text('content_kind').$type<KnowledgeContentKind>().notNull(),
@@ -471,9 +488,7 @@ export const knowledgeChunks = pgTable(
     documentId: uuid('document_id')
       .notNull()
       .references(() => knowledgeDocuments.id, { onDelete: 'cascade' }),
-    agentId: uuid('agent_id')
-      .notNull()
-      .references(() => agents.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
     chunkIndex: integer('chunk_index').notNull(),
     content: text('content').notNull(),
     contentHash: text('content_hash').notNull(),

@@ -1,46 +1,81 @@
 'use client';
 
-import { type RefObject } from 'react';
+import { useRef, useState, useTransition } from 'react';
 
 import { LoaderCircle, Upload } from 'lucide-react';
 
+import {
+  deleteKnowledge,
+  replaceKnowledge,
+  reprocessKnowledge,
+  uploadKnowledge,
+} from '@/actions/knowledge';
 import { KnowledgeDocumentList, KnowledgeDropzone } from '@/app/knowledge-document-list';
 import { KNOWLEDGE_ACCEPT, type KnowledgeDoc } from '@/app/knowledge-shared';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import type { KnowledgeScope } from '@/lib/knowledge/types';
 
 export function KnowledgeDocumentsSection({
-  agentId,
+  scope,
   documents,
   storageReady,
-  pending,
-  busyId,
-  uploading,
-  dragOver,
-  error,
-  uploadInput,
-  onBrowse,
-  onUploadFile,
-  onReprocess,
-  onReplace,
-  onRequestDelete,
-  setDragOver,
+  indexingReady = true,
 }: {
-  agentId: string;
+  scope: KnowledgeScope;
   documents: KnowledgeDoc[];
   storageReady: boolean;
-  pending: boolean;
-  busyId: string | null;
-  uploading: boolean;
-  dragOver: boolean;
-  error: string | null;
-  uploadInput: RefObject<HTMLInputElement | null>;
-  onBrowse: () => void;
-  onUploadFile: (file: File) => void;
-  onReprocess: (documentId: string) => void;
-  onReplace: (documentId: string, file: File) => void;
-  onRequestDelete: (doc: KnowledgeDoc) => void;
-  setDragOver: (value: boolean) => void;
+  indexingReady?: boolean;
 }) {
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const [pending, startTransition] = useTransition();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<KnowledgeDoc | null>(null);
+  const uploading = pending && busyId === null;
+  const uploadReady = storageReady && indexingReady;
+  const shared = scope.kind === 'library';
+
+  function mutate(
+    action: (form: FormData) => Promise<{ error: string } | { message: string }>,
+    documentId: string | null,
+    file?: File,
+  ) {
+    if (pending) return;
+    const form = new FormData();
+    form.set(shared ? 'libraryId' : 'agentId', scope.id);
+    if (documentId) form.set('documentId', documentId);
+    if (file) form.set('file', file);
+    setBusyId(documentId);
+    setError(null);
+    startTransition(async () => {
+      try {
+        const result = await action(form);
+        if ('error' in result) setError(result.error);
+      } catch {
+        setError('Unable to complete that document action. Try again.');
+      }
+    });
+  }
+
+  function uploadFile(file: File) {
+    if (uploadReady) mutate(uploadKnowledge, null, file);
+  }
+
+  function browse() {
+    uploadInput.current?.click();
+  }
+
   return (
     <section
       className="access-workbench knowledge-library"
@@ -50,29 +85,31 @@ export function KnowledgeDocumentsSection({
         <div>
           <h2 id="knowledge-library-title">Documents</h2>
           <p className="muted">
-            Upload PDF, Markdown, plain text or FAQ files for agent-scoped retrieval.
+            {shared
+              ? 'Upload PDF, Markdown, plain text or FAQ files for agents with access.'
+              : 'Upload private PDF, Markdown, plain text or FAQ files for this agent.'}
           </p>
         </div>
         <div className="knowledge-upload-actions">
           <Button
             type="button"
             variant="outline"
-            disabled={pending || !storageReady}
-            onClick={onBrowse}
+            disabled={pending || !uploadReady}
+            onClick={browse}
           >
             <Upload size={16} aria-hidden="true" />
-            {uploading || (pending && busyId === null) ? 'Uploading…' : 'Upload'}
+            {uploading ? 'Uploading…' : 'Upload'}
           </Button>
           <input
             ref={uploadInput}
             type="file"
             hidden
             accept={KNOWLEDGE_ACCEPT}
-            disabled={pending || !storageReady}
+            disabled={pending || !uploadReady}
             onChange={(event) => {
               const file = event.currentTarget.files?.[0];
               event.currentTarget.value = '';
-              if (file) onUploadFile(file);
+              if (file) uploadFile(file);
             }}
           />
         </div>
@@ -83,12 +120,17 @@ export function KnowledgeDocumentsSection({
           Document uploads need a RustFS connection. Ask your administrator to configure storage.
         </p>
       )}
+      {!indexingReady && (
+        <p className="field-hint">
+          Shared knowledge indexing requires the workspace OpenRouter key.
+        </p>
+      )}
       {error && (
         <p className="form-error" role="alert">
           {error}
         </p>
       )}
-      {(uploading || (pending && busyId === null)) && (
+      {uploading && (
         <p className="knowledge-progress" role="status">
           <LoaderCircle size={14} className="knowledge-spin" aria-hidden="true" />
           Uploading document…
@@ -98,11 +140,11 @@ export function KnowledgeDocumentsSection({
       {!documents.length ? (
         <KnowledgeDropzone
           dragOver={dragOver}
-          disabled={pending || !storageReady}
-          onBrowse={onBrowse}
+          disabled={pending || !uploadReady}
+          onBrowse={browse}
           onDragEnter={(event) => {
             event.preventDefault();
-            if (storageReady) setDragOver(true);
+            if (uploadReady) setDragOver(true);
           }}
           onDragOver={(event) => {
             event.preventDefault();
@@ -115,21 +157,49 @@ export function KnowledgeDocumentsSection({
             event.preventDefault();
             setDragOver(false);
             const file = event.dataTransfer.files.item(0);
-            if (file) onUploadFile(file);
+            if (file) uploadFile(file);
           }}
         />
       ) : (
         <KnowledgeDocumentList
-          agentId={agentId}
           documents={documents}
           pending={pending}
           busyId={busyId}
-          storageReady={storageReady}
-          onReprocess={onReprocess}
-          onReplace={onReplace}
-          onRequestDelete={onRequestDelete}
+          storageReady={uploadReady}
+          indexingReady={indexingReady}
+          onReprocess={(id) => mutate(reprocessKnowledge, id)}
+          onReplace={(id, file) => mutate(replaceKnowledge, id, file)}
+          onRequestDelete={setDeleteTarget}
         />
       )}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete “{deleteTarget?.title}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {shared
+                ? 'This removes the file, chunks and embeddings for every agent with access.'
+                : 'This removes the file, chunks and embeddings for this agent.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteTarget) mutate(deleteKnowledge, deleteTarget.id);
+                setDeleteTarget(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

@@ -4,11 +4,26 @@ import type { KnowledgeContentKind, KnowledgeDocumentStatus } from '@/lib/knowle
 
 export const knowledgeSourceSchema = z.object({
   id: z.number().int().positive(),
+  documentId: z.string().optional(),
   sourceFilename: z.string(),
   page: z.number().nullable(),
   section: z.string().nullable(),
   content: z.string(),
 });
+
+export function knowledgeSourceHref(agentId: string, documentId?: string) {
+  if (!documentId || !z.uuid().safeParse(documentId).success) return undefined;
+  return `/agents/${encodeURIComponent(agentId)}/knowledge/sources/${documentId}`;
+}
+
+export interface KnowledgeLibraryAccess {
+  id: string;
+  name: string;
+  documentCount: number;
+  readyCount: number;
+  pendingCount: number;
+  updatedAt: string | null;
+}
 
 export interface KnowledgeDoc {
   id: string;

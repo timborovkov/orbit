@@ -152,9 +152,10 @@ to the same grid.
 The desktop header keeps the brand, appearance and account controls above
 a 44px navigation row. At 600px and narrower, the Workspace navigation menu
 holds the same destinations and marks the active page. The global destinations
-are Overview, Approvals, People, Evaluations, Templates, Skills and MCP. The Approvals link shows
-the workspace-wide pending count when there are pending items. Agents, recent
-activity and outbound controls are sections of Overview. The agent breadcrumb
+are Overview, Approvals, People, Evaluations, Templates, Knowledge, Skills and
+MCP. The Approvals link shows the workspace-wide pending count when there are
+pending items. Agents, recent activity and outbound controls are sections of
+Overview. The agent breadcrumb
 links directly to the Agents section.
 
 Keep the header below menus and dialogs, respect the top safe area and leave
@@ -324,11 +325,18 @@ status, file type, size, chunk count and relative update time with full UTC
 available. Use an ellipsis menu for row actions, confirm deletion and show
 failures inline with Retry.
 
+Keep private document controls in Documents and list the agent’s granted shared
+libraries below them. Show each library’s ready document count and link to its
+workspace page. Indicate when the agent’s knowledge search is disabled.
+
 Use an inline query and Inspect action for the Inspector. Show retrieval
 errors in the Inspector panel. Results list rank, combined and component
 scores, with detailed match reasons in a disclosure. Label stub embeddings.
+The Inspector previews the private documents and shared libraries available to
+the selected agent. It remains usable when the agent’s Playground search is off.
 Playground retrieval uses a Switch. Grounded answers use numbered citations
-with filename, page or section and the quoted passage.
+with filename, page or section and the quoted passage. Inspector and citation
+source links download the original through the selected agent’s current access.
 
 ### Email
 
@@ -390,6 +398,16 @@ transport Select, chip rows for the tool allowlist, an optional Fetch tools
 action and key/value rows for auth headers. Display stored auth as a masked
 state. New tools default to Mutating. Changing an endpoint requires the
 stored headers to be replaced or cleared before discovery or save.
+
+Workspace Knowledge lists named libraries with document and access counts.
+New library opens the shared form dialog. A library page uses the same document
+controls and shows each agent’s grant with an explicit Grant access or Revoke
+access button. Library membership takes effect on the agent’s next retrieval
+request and source downloads check it each time.
+
+Playwright verified library creation, keyboard focus return, and grants at
+1440px, then revocation and document maintenance at 390px. It verified source
+downloads at both widths and covered the private document flow.
 
 The workspace Approvals inbox shows pending proposals newest first and groups
 resolved entries under History. Show agent, action, recipients, originating

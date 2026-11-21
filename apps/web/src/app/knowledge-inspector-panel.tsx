@@ -2,7 +2,7 @@
 
 import { CircleAlert, Search } from 'lucide-react';
 
-import type { InspectionHit } from '@/app/knowledge-shared';
+import { type InspectionHit, knowledgeSourceHref } from '@/app/knowledge-shared';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -14,17 +14,17 @@ import {
 } from '@/components/ui/input-group';
 
 export function KnowledgeInspectorPanel({
+  agentId,
   query,
   pending,
-  searching,
   error,
   inspection,
   onQueryChange,
   onInspect,
 }: {
+  agentId: string;
   query: string;
   pending: boolean;
-  searching: boolean;
   error: string | null;
   inspection: {
     query: string;
@@ -42,7 +42,7 @@ export function KnowledgeInspectorPanel({
       <div className="editor-section-heading">
         <h2 id="knowledge-inspector-title">Inspector</h2>
         <p className="muted">
-          Hybrid search over this agent’s ready chunks with scores and citations.
+          Preview retrieval from this agent’s private documents and granted libraries.
         </p>
       </div>
 
@@ -66,7 +66,7 @@ export function KnowledgeInspectorPanel({
               onQueryChange(event.currentTarget.value);
             }}
             placeholder="Ask about a product detail, policy or FAQ…"
-            disabled={searching}
+            disabled={pending}
           />
           <InputGroupAddon align="inline-end">
             <InputGroupButton
@@ -76,7 +76,7 @@ export function KnowledgeInspectorPanel({
               disabled={pending || !query.trim()}
               aria-disabled={pending || !query.trim()}
             >
-              {searching ? 'Searching…' : 'Inspect'}
+              {pending ? 'Searching…' : 'Inspect'}
             </InputGroupButton>
           </InputGroupAddon>
         </InputGroup>
@@ -143,7 +143,15 @@ export function KnowledgeInspectorPanel({
                       <dl className="knowledge-hit-detail-list">
                         <div>
                           <dt>Source</dt>
-                          <dd>{hit.sourceFilename}</dd>
+                          <dd>
+                            <a
+                              className="knowledge-source-link"
+                              href={knowledgeSourceHref(agentId, hit.documentId)}
+                              download
+                            >
+                              {hit.sourceFilename}
+                            </a>
+                          </dd>
                         </div>
                         {hit.section && (
                           <div>

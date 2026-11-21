@@ -4,9 +4,10 @@ import { migrateDatabase } from '@orbit/migrate';
 import * as Sentry from '@sentry/bun';
 
 import { closeDb } from '@/lib/db';
-import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
+import { KNOWLEDGE_JOB_TYPE, SHARED_KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { registerErrorCapture } from '@/lib/observability/errors';
 import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
+import type { JobRecord } from '@/lib/queue/types';
 import { startJobWorker } from '@/lib/queue/worker';
 import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
 import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
@@ -41,7 +42,10 @@ import {
   processKnowledgeDocument,
   reconcileDeadKnowledgeJobs,
 } from '@/lib/runtime/knowledge/process';
-import { resolveKnowledgeEmbedders } from '@/lib/runtime/knowledge/provider';
+import {
+  resolveKnowledgeEmbedders,
+  resolveWorkspaceKnowledgeEmbedders,
+} from '@/lib/runtime/knowledge/provider';
 import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
 import { createXSearchAdapter } from '@/lib/runtime/x/adapter';
 import { processDiscoveryPoll } from '@/lib/runtime/x/poll';
@@ -100,6 +104,33 @@ function jobCorrelation(job: { id: string; payload: Record<string, unknown> }) {
 
 const xAdapter = createXSearchAdapter(resolveXBearerToken(config.X_BEARER_TOKEN));
 
+async function runKnowledgeJob(job: JobRecord, signal: AbortSignal) {
+  try {
+    const shared = job.type === SHARED_KNOWLEDGE_JOB_TYPE;
+    const { agentId, libraryId } = job.payload;
+    const resolveProvider = shared
+      ? resolveWorkspaceKnowledgeEmbedders
+      : typeof agentId === 'string'
+        ? () => resolveKnowledgeEmbedders(agentId)
+        : undefined;
+    if (!resolveProvider || (shared ? typeof libraryId !== 'string' : libraryId !== undefined)) {
+      throw new Error('Knowledge job is missing its document owner');
+    }
+    let provider: Awaited<ReturnType<typeof resolveKnowledgeEmbedders>> | undefined;
+    await processKnowledgeDocument(
+      job.payload,
+      async (values, abortSignal) => {
+        provider ??= await resolveProvider();
+        return provider.embedMany(values, abortSignal);
+      },
+      signal,
+    );
+  } catch (error) {
+    reportFailure('worker.runtime', jobCorrelation(job), error);
+    throw error;
+  }
+}
+
 const worker = startJobWorker({
   workerId,
   handlers: {
@@ -152,24 +183,8 @@ const worker = startJobWorker({
         throw error;
       }
     },
-    [KNOWLEDGE_JOB_TYPE]: async (job, signal) => {
-      try {
-        const agentId = typeof job.payload.agentId === 'string' ? job.payload.agentId : undefined;
-        if (!agentId) throw new Error('Knowledge job is missing agentId');
-        let provider: Awaited<ReturnType<typeof resolveKnowledgeEmbedders>> | undefined;
-        await processKnowledgeDocument(
-          job.payload,
-          async (values, abortSignal) => {
-            provider ??= await resolveKnowledgeEmbedders(agentId);
-            return provider.embedMany(values, abortSignal);
-          },
-          signal,
-        );
-      } catch (error) {
-        reportFailure('worker.runtime', jobCorrelation(job), error);
-        throw error;
-      }
-    },
+    [KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
+    [SHARED_KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
     [FOLLOW_UP_JOB_TYPE]: async (job) => {
       try {
         await processFollowUpJob(job.payload, job.attempts);
@@ -193,7 +208,7 @@ const worker = startJobWorker({
       await finalizeExhaustedOutboundJob(job.payload, error);
       return;
     }
-    if (job.type === KNOWLEDGE_JOB_TYPE) {
+    if (job.type === KNOWLEDGE_JOB_TYPE || job.type === SHARED_KNOWLEDGE_JOB_TYPE) {
       await finalizeFailedKnowledgeJob(job.payload, error);
       return;
     }

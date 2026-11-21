@@ -549,7 +549,7 @@ function PlaygroundMessagePart({
   }
   if (!isToolUIPart(part)) return null;
   if (part.type === 'tool-knowledge.search' && 'output' in part)
-    return <KnowledgeToolResult output={part.output} />;
+    return <KnowledgeToolResult agentId={agentId} output={part.output} />;
   return <PlaygroundToolPart part={part} />;
 }
 

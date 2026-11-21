@@ -1746,6 +1746,36 @@ fieldset[aria-disabled='true'] textarea {
 .knowledge-inspector {
   min-width: 0;
 }
+.knowledge-workspace-sections {
+  display: grid;
+  gap: 32px;
+  min-width: 0;
+}
+.knowledge-library-name,
+.knowledge-workspace-sections strong,
+.knowledge-source-link {
+  overflow-wrap: anywhere;
+}
+.knowledge-source-link {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.knowledge-grant-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 600px) {
+  .knowledge-grant-actions {
+    flex: initial;
+  }
+  .knowledge-grant-actions .button {
+    min-height: 44px;
+  }
+}
 .knowledge-library-heading {
   display: flex;
   align-items: flex-start;
@@ -3375,7 +3405,7 @@ details[open] > summary > .disclosure-chevron {
   overflow: hidden;
 }
 
-/* Skills / MCP library */
+/* Workspace libraries */
 .library-page-heading > div {
   min-width: 0;
 }

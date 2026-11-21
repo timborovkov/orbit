@@ -1,4 +1,4 @@
-import { inArray, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, notExists, or, sql } from 'drizzle-orm';
 
 import {
   actionIntents,
@@ -19,6 +19,8 @@ import {
   jobs,
   knowledgeChunks,
   knowledgeDocuments,
+  knowledgeLibraries,
+  knowledgeLibraryGrants,
   mcpConnections,
   outboundActions,
   policyDecisions,
@@ -44,6 +46,7 @@ import {
   DEMO_JOBS,
   DEMO_KNOWLEDGE_CHUNK_IDS,
   DEMO_KNOWLEDGE_DOC_IDS,
+  DEMO_KNOWLEDGE_LIBRARY_ID,
   DEMO_POLICY,
   DEMO_RUNS,
   DEMO_SOURCE_EVENT_IDS,
@@ -188,6 +191,25 @@ export async function resetDemoData(ctx: SeedContext): Promise<void> {
   await tx.delete(credentials).where(inArray(credentials.agentId, [...DEMO_AGENT_IDS]));
   await tx.delete(configurations).where(inArray(configurations.agentId, [...DEMO_AGENT_IDS]));
   await tx.delete(agents).where(inArray(agents.id, [...DEMO_AGENT_IDS]));
+  await tx
+    .delete(knowledgeLibraries)
+    .where(
+      and(
+        eq(knowledgeLibraries.id, DEMO_KNOWLEDGE_LIBRARY_ID),
+        notExists(
+          tx
+            .select({ id: knowledgeDocuments.id })
+            .from(knowledgeDocuments)
+            .where(eq(knowledgeDocuments.libraryId, DEMO_KNOWLEDGE_LIBRARY_ID)),
+        ),
+        notExists(
+          tx
+            .select({ id: knowledgeLibraryGrants.agentId })
+            .from(knowledgeLibraryGrants)
+            .where(eq(knowledgeLibraryGrants.libraryId, DEMO_KNOWLEDGE_LIBRARY_ID)),
+        ),
+      ),
+    );
 
   await tx.delete(audit).where(inArray(audit.id, demoAuditIds));
   await tx.delete(audit).where(sql`${audit.actor} = ${DEMO_ACTOR}`);

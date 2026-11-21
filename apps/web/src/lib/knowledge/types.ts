@@ -1,7 +1,9 @@
 export type KnowledgeDocumentStatus = 'pending' | 'processing' | 'ready' | 'failed';
 export type KnowledgeContentKind = 'pdf' | 'markdown' | 'plain' | 'faq';
+export type KnowledgeScope = { kind: 'agent' | 'library'; id: string };
 
 export const KNOWLEDGE_JOB_TYPE = 'knowledge.process';
+export const SHARED_KNOWLEDGE_JOB_TYPE = 'knowledge.process.shared';
 export const KNOWLEDGE_SEARCH_TOOL = 'knowledge.search';
 export const DEFAULT_KNOWLEDGE_EMBEDDING_MODEL = 'openai/text-embedding-3-small';
 export const DEFAULT_KNOWLEDGE_EMBEDDING_DIMENSIONS = 1536;
