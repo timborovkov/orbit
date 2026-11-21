@@ -3,6 +3,7 @@ import {
   boolean,
   date,
   foreignKey,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -159,6 +160,89 @@ export const runs = pgTable('simulation_runs', {
   executionToken: uuid('execution_token'),
 });
 
+export const people = pgTable('people', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type PersonChannel = 'email' | 'x';
+export type PersonEvidence = { channel: PersonChannel; sourceId: string };
+
+export const personIdentities = pgTable(
+  'person_identities',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    personId: uuid('person_id')
+      .notNull()
+      .references(() => people.id),
+    homePersonId: uuid('home_person_id')
+      .notNull()
+      .unique()
+      .references(() => people.id),
+    channel: text('channel').$type<PersonChannel>().notNull(),
+    identityKey: text('identity_key').notNull(),
+    linkState: text('link_state')
+      .$type<'standalone' | 'inferred' | 'confirmed'>()
+      .notNull()
+      .default('standalone'),
+    linkedViaId: uuid('linked_via_id'),
+    revision: integer('revision').notNull().default(0),
+  },
+  (table) => [
+    unique().on(table.channel, table.identityKey),
+    foreignKey({ columns: [table.linkedViaId], foreignColumns: [table.id] }),
+    index('person_identities_person').on(table.personId),
+  ],
+);
+
+export const personContacts = pgTable(
+  'person_contacts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    personId: uuid('person_id')
+      .notNull()
+      .references(() => people.id),
+    kind: text('kind').$type<'phone' | 'instagram'>().notNull(),
+    label: text('label').notNull(),
+    providerAccountId: text('provider_account_id'),
+  },
+  (table) => [
+    unique().on(table.kind, table.providerAccountId),
+    unique().on(table.personId, table.kind, table.label),
+  ],
+);
+
+export const personIdentityChanges = pgTable('person_identity_changes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  identityId: uuid('identity_id')
+    .notNull()
+    .references(() => personIdentities.id),
+  fromPersonId: uuid('from_person_id')
+    .notNull()
+    .references(() => people.id),
+  toPersonId: uuid('to_person_id')
+    .notNull()
+    .references(() => people.id),
+  action: text('action').$type<'infer' | 'confirm' | 'unlink' | 'rollback'>().notNull(),
+  actor: text('actor').notNull(),
+  reason: text('reason').notNull(),
+  evidence: jsonb('evidence').$type<PersonEvidence[]>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const personLinkRejections = pgTable(
+  'person_link_rejections',
+  {
+    firstIdentityId: uuid('first_identity_id')
+      .notNull()
+      .references(() => personIdentities.id),
+    secondIdentityId: uuid('second_identity_id')
+      .notNull()
+      .references(() => personIdentities.id),
+  },
+  (table) => [primaryKey({ columns: [table.firstIdentityId, table.secondIdentityId] })],
+);
+
 export const emailMailboxes = pgTable('email_mailboxes', {
   agentId: uuid('agent_id')
     .primaryKey()
@@ -189,6 +273,8 @@ export const emailMessages = pgTable(
     resendEmailId: text('resend_email_id').notNull(),
     event: jsonb('event').$type<Record<string, unknown>>().notNull(),
     sender: text('sender').notNull(),
+    personIdentityId: uuid('person_identity_id').references(() => personIdentities.id),
+    personClaim: text('person_claim'),
     subject: text('subject').notNull(),
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
     configurationId: uuid('configuration_id').references(() => configurations.id, {
@@ -210,6 +296,7 @@ export const emailMessages = pgTable(
   },
   (table) => [
     unique().on(table.agentId, table.resendEmailId),
+    unique().on(table.agentId, table.id),
     foreignKey({
       columns: [table.agentId, table.threadId],
       foreignColumns: [emailThreads.agentId, emailThreads.id],
@@ -472,13 +559,42 @@ export const sourceEvents = pgTable(
     text: text('text').notNull(),
     authorId: text('author_id'),
     authorUsername: text('author_username'),
+    authorName: text('author_name'),
+    personIdentityId: uuid('person_identity_id').references(() => personIdentities.id),
+    personClaim: text('person_claim'),
     providerCreatedAt: timestamp('provider_created_at', { withTimezone: true }),
     ingestedAt: timestamp('ingested_at', { withTimezone: true }).defaultNow().notNull(),
     runId: uuid('run_id')
       .unique()
       .references(() => runs.id, { onDelete: 'set null' }),
   },
-  (table) => [unique().on(table.agentId, table.provider, table.providerEventId)],
+  (table) => [
+    unique().on(table.agentId, table.provider, table.providerEventId),
+    unique().on(table.agentId, table.id),
+  ],
+);
+
+export const personRelationshipNotes = pgTable(
+  'person_relationship_notes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    agentId: uuid('agent_id').notNull(),
+    emailMessageId: uuid('email_message_id').unique(),
+    sourceEventId: uuid('source_event_id').unique(),
+    summary: text('summary').notNull(),
+    excerpt: text('excerpt').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.agentId, table.emailMessageId],
+      foreignColumns: [emailMessages.agentId, emailMessages.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.agentId, table.sourceEventId],
+      foreignColumns: [sourceEvents.agentId, sourceEvents.id],
+    }).onDelete('cascade'),
+  ],
 );
 
 export const discoveryCursors = pgTable(

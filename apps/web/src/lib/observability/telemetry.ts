@@ -397,7 +397,10 @@ export function createRunTelemetry(run: RunTelemetryContext) {
         runContext(),
       );
       try {
-        const telemetry = await aiSdkTelemetry(`orbit.${stage}`, run.allowContentCapture !== false);
+        const telemetry = await aiSdkTelemetry(
+          `orbit.${stage}`,
+          run.allowContentCapture !== false && !request.summarizeRelationship,
+        );
         const response = await context.with(
           span ? trace.setSpan(context.active(), span) : context.active(),
           () => call({ ...request, telemetry }),
@@ -433,7 +436,11 @@ export function createRunTelemetry(run: RunTelemetryContext) {
       } catch (error) {
         span?.setStatus({ code: SpanStatusCode.ERROR, message: 'Inference failed' });
         if (!request.signal.aborted) {
-          reportFailure('worker.inference', { ...correlation, stage, traceId }, error);
+          reportFailure(
+            'worker.inference',
+            { ...correlation, stage, traceId },
+            request.summarizeRelationship ? undefined : error,
+          );
         }
         throw error;
       } finally {

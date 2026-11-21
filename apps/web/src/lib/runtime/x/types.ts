@@ -4,6 +4,7 @@ export interface XSearchPost {
   text: string;
   authorId?: string;
   authorUsername?: string;
+  authorName?: string;
   createdAt?: string;
   /** Raw provider payload retained for audit / replay. */
   raw: Record<string, unknown>;

@@ -4369,3 +4369,148 @@ details[open] > summary > .disclosure-chevron {
     grid-template-columns: 1fr;
   }
 }
+
+.people-workspace {
+  display: grid;
+  gap: 16px;
+  overflow-wrap: anywhere;
+}
+
+.people-heading,
+.people-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.people-control-row {
+  margin-block-end: 12px;
+}
+
+.people-control-row input {
+  max-width: 360px;
+  flex: 1 1 200px;
+}
+
+.people-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
+  gap: 24px;
+}
+
+.people-timeline,
+.people-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 24px;
+}
+
+.people-detail h2 {
+  margin-block-end: 12px;
+}
+
+.people-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.people-list:empty {
+  display: none;
+}
+
+.people-list > li + li {
+  border-block-start: 1px solid var(--border);
+}
+
+.people-list > li > a,
+.people-card {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 12px;
+}
+
+.people-card p,
+.people-card blockquote {
+  margin: 0;
+}
+
+.people-card blockquote {
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 12px;
+}
+
+.people-card + .people-list {
+  margin-block-start: 8px;
+}
+
+.people-evidence-list,
+.people-identity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.people-sidebar .people-identity-actions {
+  display: grid;
+  margin-block-start: 8px;
+}
+
+.people-card a,
+.people-control-row a,
+.people-identity-actions > a,
+.people-heading > a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.people-sidebar summary {
+  cursor: pointer;
+}
+
+.people-sidebar .workspace-form {
+  margin-block-start: 8px;
+}
+
+.people-sidebar .workspace-form fieldset {
+  display: grid;
+  gap: 6px;
+}
+
+.people-contact {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.people-contact .workspace-form {
+  margin: 0;
+}
+
+.people-agent-select {
+  min-height: 36px;
+  max-width: min(100%, 20rem);
+  padding-inline: 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: var(--ink);
+}
+
+@media (max-width: 768px) {
+  .people-detail,
+  .people-contact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.email-message[id] {
+  scroll-margin-block-start: 112px;
+}
