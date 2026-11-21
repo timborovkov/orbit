@@ -5,6 +5,7 @@
     "dockerfilePath": "docker/web.Dockerfile"
   },
   "deploy": {
+    "preDeployCommand": ["env NODE_ENV=production bun --bun --no-env-file scripts/migrate.ts"],
     "healthcheckPath": "/health",
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",

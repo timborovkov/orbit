@@ -8,7 +8,8 @@
     "noEmit": true,
     "types": ["bun"],
     "paths": {
-      "@/*": ["./apps/web/src/*"]
+      "@/*": ["./apps/web/src/*"],
+      "@orbit/migrate": ["./scripts/migrate.ts"]
     }
   },
   "include": ["scripts/**/*.ts", "tests/**/*.ts", "playwright*.ts"]

@@ -4,5 +4,9 @@
     "builder": "DOCKERFILE",
     "dockerfilePath": "docker/worker.Dockerfile"
   },
-  "deploy": { "restartPolicyType": "ON_FAILURE", "restartPolicyMaxRetries": 3 }
+  "deploy": {
+    "preDeployCommand": ["env NODE_ENV=production bun --bun --no-env-file scripts/migrate.ts"],
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  }
 }

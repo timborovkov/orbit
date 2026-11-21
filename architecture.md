@@ -34,7 +34,7 @@ Orbit is not a multi-tenant SaaS in its first incarnation, nor a single-purpose 
 | Email | Resend for sending and inbound routing; PostgreSQL-backed virtual inboxes |
 | Research | Exa web search; optional Firecrawl extraction and Browserbase later |
 
-Deployment target: one web service, one worker service, PostgreSQL and RustFS on Railway. RustFS uses a persistent data volume; the web service accesses its private S3 endpoint. No Go, Redis, Kafka, Kubernetes or per-agent containers for the MVP. Separate credentials and data scopes provide logical isolation.
+Deployment target: one web service, one worker service, PostgreSQL and RustFS on Railway. RustFS uses a persistent data volume; the web service accesses its private S3 endpoint. No Go, Redis, Kafka, Kubernetes or per-agent containers for the MVP. Separate credentials and data scopes provide logical isolation. Database migrations run automatically on Railway pre-deploy and again at web/worker process start under a shared Postgres advisory lock; operators do not apply SQL by hand for routine deploys.
 
 ## 4. Core agent model
 | Element | Meaning |
@@ -318,7 +318,7 @@ Event coordination and research may be added as further templates without new ru
 - Evaluations combine deterministic assertions, model judges and human feedback. Administrators can rate, correct and save regression cases, and compare model/prompt versions side by side.
 - Orbit shows detailed execution timelines, operational metrics and goal outcomes; Langfuse stores diagnostic traces, not the authoritative job/action ledger.
 - Authentication initially supports environment-configured administrator credentials, with OAuth and magic links with allowlisted emails planned; local-only `AUTH_DISABLED` bypass is explicitly guarded. Per-agent secrets are encrypted in PostgreSQL with an external master key; optional provider defaults such as `OPENROUTER_API_KEY` may live only in the process environment. Zod validates environment configuration.
-- Web + worker + PostgreSQL deploy on Railway with Docker, Compose and per-service Railway config. RustFS provides S3-compatible object storage for files on a persistent volume; back up object data alongside PostgreSQL references. Jobs recover with reconciliation, integration failures degrade only affected capabilities, hard per-agent budgets apply, and automated backups are periodically restore-tested.
+- Web + worker + PostgreSQL deploy on Railway with Docker, Compose and per-service Railway config. Both images ship `scripts/migrate.ts` and `apps/web/drizzle/`; Railway `preDeployCommand` and process startup apply pending migrations under `pg_advisory_xact_lock` before serving traffic or claiming jobs. RustFS provides S3-compatible object storage for files on a persistent volume; back up object data alongside PostgreSQL references. Jobs recover with reconciliation, integration failures degrade only affected capabilities, hard per-agent budgets apply, and automated backups are periodically restore-tested.
 - Evaluation and safety checks must pass before live activation, but **only an administrator** can enable live mode, pause, resume or stop an agent. The first complete release must support permitted real external actions, not merely a shadow demo.
 
 ## 20. Definition of success
