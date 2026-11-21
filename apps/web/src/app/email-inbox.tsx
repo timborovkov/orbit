@@ -146,7 +146,9 @@ function SelectedThread({
             <span className="state-label">{message.status}</span>
           </header>
           {message.personId && (
-            <Link href={`/people/${message.personId}`}>View sender in People</Link>
+            <Link className="person-source-link" href={`/people/${message.personId}`}>
+              View sender in People
+            </Link>
           )}
           {!!message.body && <p className="preserve-text">{message.body}</p>}
           {message.detail && <p className="muted">{message.detail}</p>}

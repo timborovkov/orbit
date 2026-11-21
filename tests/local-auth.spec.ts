@@ -17,9 +17,9 @@ test('local bypass skips login and sessions while preserving admin actions and a
   test.setTimeout(90000);
   await page.goto('/login');
   await expect(page).toHaveURL('http://127.0.0.1:3001/');
-  await expect(page.getByRole('status')).toContainText(
-    'Authentication disabled · Local development · local-admin@example.test',
-  );
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Authentication disabled' }),
+  ).toContainText('Authentication disabled · Local development · local-admin@example.test');
   await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Create agent', exact: true }).click();
   await page.getByLabel(/^Name/).fill('Local agent');

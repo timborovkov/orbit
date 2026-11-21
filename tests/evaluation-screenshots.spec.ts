@@ -133,7 +133,9 @@ for (const width of [1440, 390] as const) {
     const { agent, v1, v2, run } = await seedComparisonFixture();
 
     await page.goto(`/agents/${agent.id}?run=${run.id}`);
-    await expect(page.getByRole('heading', { name: 'Run history' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Activity timeline', exact: true }),
+    ).toBeVisible();
     await expect(page.locator(`#run-${run.id}`)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save as case' })).toBeVisible();
     // Ensure Save as case is laid out, then reset scroll so the sticky header is at the top.
@@ -154,9 +156,12 @@ for (const width of [1440, 390] as const) {
 
     await page.goto('/evaluations');
     await expect(page.getByRole('heading', { name: 'Evaluations' })).toBeVisible();
-    await page.locator('select[name="caseId"]').selectOption({ label: 'CRM lead post' });
-    await page.locator('select[name="leftConfigurationId"]').selectOption({ value: v1.id });
-    await page.locator('select[name="rightConfigurationId"]').selectOption({ value: v2.id });
+    await page.getByRole('combobox', { name: 'Case', exact: true }).click();
+    await page.getByRole('option', { name: 'CRM lead post', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Configuration A', exact: true }).click();
+    await page.getByRole('option', { name: /^v1\b/ }).click();
+    await page.getByRole('combobox', { name: 'Configuration B', exact: true }).click();
+    await page.getByRole('option', { name: /^v2\b/ }).click();
     if (width === 390) {
       const mobileCase = page.locator('.library-card-list .library-card', {
         has: page.locator('.library-primary', { hasText: 'CRM lead post' }),

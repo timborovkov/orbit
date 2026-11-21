@@ -362,13 +362,14 @@ mounted to preserve unsaved fields.
 Use a searchable list of people and a detail page with the activity timeline
 first. Show contact methods, linked identities and their source evidence next
 to the timeline on larger screens and below it on smaller screens. Link the
-email sender and X author from their existing agent workspaces. Keep a return
-link to each original thread or X activity.
+email sender and X author from their existing agent workspaces using underlined
+links. Keep a return link to each original thread or X activity.
 
 Label inferred and confirmed links in text. Linking and unlinking both show
 the evidence being acted on and require a reason. The relationship timeline
 shows the observing agents. Choosing one agent narrows the timeline and
-reveals only that agent’s private notes and their supporting excerpts.
+reveals only that agent’s private notes and their supporting excerpts. Manage
+identities and contacts from the all-agents view.
 
 Playwright exercised the link and unlink flow at desktop and phone widths,
 opened the supporting email from a private note, and checked keyboard access,

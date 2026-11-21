@@ -73,7 +73,9 @@ export function HistoryWorkbench({
                 <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
               </summary>
               {run.personId && (
-                <Link href={`/people/${run.personId}`}>View X author in People</Link>
+                <Link className="person-source-link" href={`/people/${run.personId}`}>
+                  View X author in People
+                </Link>
               )}
               <RunContent run={run} interrupted={run.interrupted} />
               {run.origin === 'playground' && (

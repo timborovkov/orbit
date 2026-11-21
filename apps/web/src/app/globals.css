@@ -3707,6 +3707,7 @@ details[open] > summary > .disclosure-chevron {
 }
 .markdown-tabs [data-slot='tabs-trigger'] {
   min-height: 28px;
+  transition-property: none;
   padding: 3px 10px;
   border: 1px solid transparent;
   border-radius: 4px;
@@ -4477,7 +4478,8 @@ details[open] > summary > .disclosure-chevron {
 .people-card a,
 .people-control-row a,
 .people-identity-actions > a,
-.people-heading > a {
+.people-heading > a,
+.person-source-link {
   text-decoration: underline;
   text-underline-offset: 3px;
 }

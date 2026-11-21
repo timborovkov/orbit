@@ -5,6 +5,7 @@ import { useId, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { reviewEmailReply } from '@/actions/email';
+import { useHydrated } from '@/app/use-hydrated';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,6 +21,7 @@ export function EmailDraftReview({
 }) {
   const draftId = useId();
   const router = useRouter();
+  const hydrated = useHydrated();
   const [draft, setDraft] = useState(initialDraft);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -52,6 +54,7 @@ export function EmailDraftReview({
             setDraft(event.target.value);
           }}
           rows={6}
+          readOnly={!hydrated}
           disabled={pending}
           className="email-draft-editor"
           aria-describedby={error ? `${draftId}-hint ${draftId}-error` : `${draftId}-hint`}
@@ -69,7 +72,7 @@ export function EmailDraftReview({
       <div className="email-draft-actions">
         <Button
           type="button"
-          disabled={pending || !draft.trim()}
+          disabled={!hydrated || pending || !draft.trim()}
           onClick={() => {
             review('approved');
           }}
@@ -79,7 +82,7 @@ export function EmailDraftReview({
         <Button
           type="button"
           variant="outline"
-          disabled={pending}
+          disabled={!hydrated || pending}
           onClick={() => {
             review('rejected');
           }}
