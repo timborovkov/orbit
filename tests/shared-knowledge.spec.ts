@@ -10,8 +10,7 @@ async function inspectHandbook(page: Page, agentId: string) {
   await openWorkspaceTab(page, 'Knowledge');
   const sections = page.getByLabel('Knowledge section', { exact: true });
   const button = page.getByRole('button', { name: 'Inspector', exact: true });
-  await expect(button.or(sections).first()).toBeVisible();
-  if (await sections.isVisible()) {
+  if (await page.evaluate(() => matchMedia('(max-width: 900px)').matches)) {
     await sections.click();
     await page.getByRole('option', { name: 'Inspector', exact: true }).click();
   } else {
