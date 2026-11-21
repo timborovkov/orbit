@@ -840,7 +840,8 @@ async function processSimulationRun(
             memoryCapture: source
               ? {
                   source: source.text,
-                  verify: (candidates) => verifiedMemoryCandidates(candidates, source.text),
+                  hasAuthor: source.personIdentityId !== null,
+                  verify: (candidates) => verifiedMemoryCandidates(candidates, source),
                 }
               : undefined,
             recallMemory: async (requestSignal) => {

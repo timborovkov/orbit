@@ -6,10 +6,13 @@ import { and, eq } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
 import { enqueueMemoryEmbedding } from '@/lib/runtime/memory/store';
+import { personMemoryStatement } from '@/lib/runtime/memory/types';
 import { agentMemories, audit } from '@/lib/schema';
 
 type EditKey = { agentId: string; id: string; revision: string };
-type Correction = { fact: string; expiresOn: string | null; reviewOn: string | null };
+type Correction = { expiresOn: string | null; reviewOn: string | null } & (
+  { fact: string; personValue?: never } | { personValue: string; fact?: never }
+);
 
 const stale = { error: 'This memory changed or was removed. Refresh and try again.' };
 
@@ -21,10 +24,28 @@ export function saveAgentMemory(actor: string, key: EditKey, correction?: Correc
   );
   return db().transaction(async (tx) => {
     if (correction) {
+      const [current] = await tx
+        .select({ subject: agentMemories.subject, personField: agentMemories.personField })
+        .from(agentMemories)
+        .where(target)
+        .for('update');
+      if (!current) return stale;
+      const { personField, subject } = current;
+      const personValue = correction.personValue;
+      const fact =
+        personField && personValue
+          ? personMemoryStatement(subject, personField, personValue)
+          : correction.fact;
+      if (!fact || Boolean(personField) !== Boolean(personValue)) {
+        return { error: 'Use the correction field for this memory.' };
+      }
       const [entry] = await tx
         .update(agentMemories)
         .set({
-          ...correction,
+          fact,
+          personValue: personValue ?? null,
+          expiresOn: correction.expiresOn,
+          reviewOn: correction.reviewOn,
           correctedBy: actor,
           correctedAt: new Date(),
           revision: randomUUID(),
@@ -38,7 +59,7 @@ export function saveAgentMemory(actor: string, key: EditKey, correction?: Correc
           revision: agentMemories.revision,
         });
       if (!entry) return stale;
-      await enqueueMemoryEmbedding(tx, entry);
+      if (!personField) await enqueueMemoryEmbedding(tx, entry);
     } else {
       const [entry] = await tx
         .delete(agentMemories)

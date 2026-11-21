@@ -5,15 +5,18 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
-import { memoryDate, memoryFact } from '@/lib/runtime/memory/types';
+import { memoryDate, memoryFact, personMemoryValue } from '@/lib/runtime/memory/types';
 import { saveAgentMemory } from '@/lib/server/memory-mutations';
 
 const editKey = z.object({ agentId: z.uuid(), id: z.uuid(), revision: z.uuid() });
-const correctionFields = z.object({
-  fact: memoryFact,
+const correctionDates = z.object({
   expiresOn: memoryDate.nullable(),
   reviewOn: memoryDate.nullable(),
 });
+const correctionFields = z.union([
+  correctionDates.extend({ fact: memoryFact }),
+  correctionDates.extend({ personValue: personMemoryValue }),
+]);
 
 async function memoryAction(form: FormData, remove: boolean) {
   await checkOrigin();
@@ -27,12 +30,14 @@ async function memoryAction(form: FormData, remove: boolean) {
   const correction = remove
     ? undefined
     : correctionFields.safeParse({
-        fact: form.get('fact'),
+        ...(form.has('personValue')
+          ? { personValue: form.get('personValue') }
+          : { fact: form.get('fact') }),
         expiresOn: form.get('expiresOn') || null,
         reviewOn: form.get('reviewOn') || null,
       });
   if (correction && !correction.success) {
-    return { error: 'Enter a company or project fact up to 500 characters and valid dates.' };
+    return { error: 'Enter a valid fact or person value and valid dates.' };
   }
 
   const result = await saveAgentMemory(actor, key.data, correction?.data);

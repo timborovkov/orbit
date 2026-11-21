@@ -23,12 +23,20 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { formatUtcTimestamp } from '@/lib/format';
-import { memoryEvidenceHref, type MemoryRef } from '@/lib/runtime/memory/types';
+import {
+  memoryEvidenceHref,
+  type MemoryRef,
+  type PersonMemoryField,
+  personMemoryLabels,
+} from '@/lib/runtime/memory/types';
 
 type MemoryRow = MemoryRef & {
   subject: string;
   topic: string;
   fact: string;
+  personField: PersonMemoryField | null;
+  personValue: string | null;
+  personId: string | null;
   learnedAt: Date;
   expiresOn: string | null;
   reviewOn: string | null;
@@ -105,15 +113,27 @@ function MemoryCorrection({ agentId, item }: { agentId: string; item: MemoryRow 
       <input type="hidden" name="revision" value={item.revision} />
       <FieldGroup className="form-fields">
         <Field>
-          <FieldLabel htmlFor={`${formId}-fact`}>Fact or note</FieldLabel>
-          <Textarea
-            id={`${formId}-fact`}
-            name="fact"
-            rows={3}
-            maxLength={500}
-            required
-            defaultValue={item.fact}
-          />
+          <FieldLabel htmlFor={`${formId}-fact`}>
+            {item.personField ? personMemoryLabels[item.personField] : 'Fact or note'}
+          </FieldLabel>
+          {item.personField ? (
+            <Input
+              id={`${formId}-fact`}
+              name="personValue"
+              maxLength={120}
+              required
+              defaultValue={item.personValue ?? ''}
+            />
+          ) : (
+            <Textarea
+              id={`${formId}-fact`}
+              name="fact"
+              rows={3}
+              maxLength={500}
+              required
+              defaultValue={item.fact}
+            />
+          )}
         </Field>
         <div className="memory-dates">
           <Field>
@@ -200,6 +220,19 @@ export function MemoryWorkbench({
                     </Link>
                   </dd>
                 </div>
+                {item.personId && (
+                  <div>
+                    <dt>Person</dt>
+                    <dd>
+                      <Link
+                        href={`/people/${item.personId}?agent=${agentId}`}
+                        className="memory-link"
+                      >
+                        View person
+                      </Link>
+                    </dd>
+                  </div>
+                )}
                 {item.correctedBy && item.correctedAt && (
                   <div>
                     <dt>Corrected</dt>

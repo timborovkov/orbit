@@ -15,6 +15,8 @@ import type { ModelCall } from '@/lib/runtime/simulation';
 import { createFixtureXSearchAdapter } from '@/lib/runtime/x/fixture';
 import { processDiscoveryPoll } from '@/lib/runtime/x/poll';
 import { persistReceivedEmail } from '@/lib/server/email-mutations';
+import { saveAgentMemory } from '@/lib/server/memory-mutations';
+import { selectAgentMemoryEvidence, selectPersonMemories } from '@/lib/server/memory-queries';
 import { removePersonLink, savePersonLink } from '@/lib/server/people-mutations';
 
 const databaseUrl =
@@ -158,6 +160,159 @@ async function identityFor(channel: string, key: string) {
   expect(row).toBeDefined();
   return row;
 }
+
+test('person facts follow current evidence identities and stay private to the learning agent', async () => {
+  const sarah = await agent('Sarah');
+  const john = await agent('John');
+  const author = `x-${randomUUID()}`;
+  const sender = `riley-${randomUUID()}@example.test`;
+  identityKeys.push(sender, author);
+  const libraryId = randomUUID();
+  await sql`INSERT INTO knowledge_libraries (id, name) VALUES (${libraryId}, 'Shared company resources')`;
+  try {
+    await sql`INSERT INTO knowledge_library_grants (library_id, agent_id)
+      VALUES (${libraryId}, ${sarah.id}), (${libraryId}, ${john.id})`;
+    const inbound = delivery(sarah.address, `Riley <${sender}>`, 'Nice to meet you');
+    await persistReceivedEmail(inbound);
+    const quote = 'I work at Acme as a Staff Engineer.';
+    const email = await receive(sarah.id, inbound.data.email_id, quote);
+    const model = async (request: Parameters<ModelCall>[0]) => {
+      expect(request.system).toContain('For the current author only');
+      return {
+        ...(await inference('', '')()(request)),
+        memoryCandidates: [
+          { subjectKind: 'person', personFact: { field: 'company', value: 'Acme' }, quote },
+          {
+            subjectKind: 'person',
+            personFact: { field: 'job_title', value: 'Staff Engineer' },
+            quote,
+          },
+          { subjectKind: 'person', personFact: { field: 'company', value: 'Invented Co' }, quote },
+        ],
+      };
+    };
+    const draft = () => processEmailDraftJob({ runId: email.run_id }, () => model);
+    await draft();
+    await draft();
+    const memories = await sql<
+      { id: string; revision: string; person_field: string; person_value: string; fact: string }[]
+    >`
+      SELECT id, revision, person_field, person_value, fact FROM agent_memories
+      WHERE agent_id = ${sarah.id} ORDER BY person_field`;
+    expect(
+      memories.map(({ person_field, person_value, fact }) => [person_field, person_value, fact]),
+    ).toEqual([
+      ['company', 'Acme', 'Riley works at Acme.'],
+      ['job_title', 'Staff Engineer', 'Riley’s job title is Staff Engineer.'],
+    ]);
+    const [company] = memories;
+    expect(await selectAgentMemoryEvidence(sarah.id, company.id, company.revision)).toMatchObject({
+      quote,
+      source: { id: email.id, href: expect.stringContaining(`emailMessage=${email.id}`) },
+    });
+    expect(await selectAgentMemoryEvidence(john.id, company.id, company.revision)).toBeNull();
+
+    const runX = async (agentId: string, eventId: string, text: string) => {
+      expect((await observe(agentId, eventId, author, 'riley', text, true)).evaluated).toBe(1);
+      const [post] = await sql<{ id: string; run_id: string }[]>`
+        SELECT id, run_id FROM source_events WHERE agent_id = ${agentId} AND provider_event_id = ${eventId}`;
+      const inputs: { untrustedMemories?: unknown[] }[] = [];
+      await processSimulationJob({ runId: post.run_id }, () => async (request) => {
+        inputs.push(JSON.parse(request.input));
+        return inference('', '')()(request);
+      });
+      expect(inputs).toHaveLength(1);
+      return { id: post.id, memories: inputs[0]?.untrustedMemories };
+    };
+    const observed = await runX(sarah.id, '201', 'Riley works at Acme as a Staff Engineer?');
+    expect(observed.memories).toBeUndefined();
+    const x = await identityFor('x', author);
+    const mail = await identityFor('email', sender);
+    const identity = { id: x.id, revision: x.revision, sourceId: observed.id };
+    expect(
+      await savePersonLink(admin, {
+        identity,
+        target: { id: mail.id, revision: mail.revision, sourceId: email.id },
+        reason: 'Confirmed Riley owns this X account.',
+      }),
+    ).toEqual({ message: 'Identity linked.' });
+
+    expect((await runX(sarah.id, '202', 'Hello again.')).memories).toMatchObject([
+      {
+        subjectKind: 'person',
+        fact: 'Riley works at Acme.',
+        personFact: { field: 'company', value: 'Acme' },
+      },
+      { subjectKind: 'person', personFact: { field: 'job_title', value: 'Staff Engineer' } },
+    ]);
+    expect((await runX(john.id, '202', 'Riley works at Acme.')).memories).toBeUndefined();
+    expect(await selectPersonMemories(sarah.id, mail.person_id)).toHaveLength(2);
+    expect(await selectPersonMemories(john.id, mail.person_id)).toHaveLength(0);
+
+    const edit = { agentId: sarah.id, id: company.id, revision: company.revision };
+    expect(
+      await saveAgentMemory(admin, edit, { fact: 'Free text', expiresOn: null, reviewOn: null }),
+    ).toHaveProperty('error');
+    expect(
+      await saveAgentMemory(admin, edit, {
+        personValue: 'Acme Labs',
+        expiresOn: null,
+        reviewOn: null,
+      }),
+    ).toHaveProperty('message');
+    expect((await runX(sarah.id, '203', 'A follow-up.')).memories).toMatchObject([
+      { fact: 'Riley works at Acme Labs.', personFact: { value: 'Acme Labs' } },
+      { topic: 'Job title' },
+    ]);
+
+    const linked = await identityFor('x', author);
+    expect(
+      await removePersonLink(admin, {
+        identity: { ...identity, revision: linked.revision },
+        reason: 'This is a different Riley.',
+      }),
+    ).toEqual({ message: 'Identity unlinked.' });
+    expect(
+      (await runX(sarah.id, '204', 'Riley works at Acme Labs as a Staff Engineer?')).memories,
+    ).toBeUndefined();
+    expect(await selectPersonMemories(sarah.id, x.person_id)).toHaveLength(0);
+    const own = await selectPersonMemories(sarah.id, mail.person_id);
+    const corrected = own.find(({ id }) => id === company.id)!;
+    expect(corrected.value).toBe('Acme Labs');
+    expect(await selectAgentMemoryEvidence(sarah.id, company.id, corrected.revision)).toMatchObject(
+      { quote, source: { id: email.id } },
+    );
+
+    expect(
+      await saveAgentMemory(
+        admin,
+        { ...edit, revision: corrected.revision },
+        {
+          personValue: 'Acme Labs',
+          expiresOn: '2000-01-01',
+          reviewOn: null,
+        },
+      ),
+    ).toHaveProperty('message');
+    expect(
+      (await selectPersonMemories(sarah.id, mail.person_id)).map(({ topic }) => topic),
+    ).toEqual(['Job title']);
+    const followUp = delivery(sarah.address, `Riley <${sender}>`, 'Follow-up');
+    await persistReceivedEmail(followUp);
+    const laterEmail = await receive(sarah.id, followUp.data.email_id, 'Checking in again.');
+    await processEmailDraftJob({ runId: laterEmail.run_id }, () => async (request) => {
+      expect(JSON.parse(request.input).untrustedMemories).toMatchObject([
+        { topic: 'Job title', personFact: { value: 'Staff Engineer' } },
+      ]);
+      expect(request.input).not.toContain('Acme Labs');
+      return inference('', '')()(request);
+    });
+    const [finished] = await sql`SELECT status FROM simulation_runs WHERE id=${laterEmail.run_id}`;
+    expect(finished?.status).toBe('completed');
+  } finally {
+    await sql`DELETE FROM knowledge_libraries WHERE id = ${libraryId}`;
+  }
+});
 
 test('known identities deduplicate repeated activity and keep private context isolated through admin link and unlink', async () => {
   const suffix = randomUUID();

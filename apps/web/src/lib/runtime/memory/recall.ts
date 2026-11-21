@@ -24,24 +24,61 @@ type RecallInput = {
   signal: AbortSignal;
 };
 
-const available = () => sqlClient()`
+const active = () => sqlClient()`
   (expires_on IS NULL OR expires_on > (now() AT TIME ZONE 'UTC')::date)
-  AND EXISTS (SELECT 1 FROM run_memory_evidence AS evidence
+`;
+
+const available = () => sqlClient()`
+  ${active()} AND EXISTS (SELECT 1 FROM run_memory_evidence AS evidence
     WHERE evidence.agent_id = agent_memories.agent_id AND evidence.run_id = agent_memories.run_id
       AND evidence.source_kind = agent_memories.source_kind AND evidence.source_id = agent_memories.source_id)
 `;
+
+// Check both identities in the same statement so unlinking immediately changes
+// which private facts qualify. An ambiguous or missing run source has no person.
+function forRunPerson(input: Pick<RecallInput, 'agentId' | 'runId' | 'replay'>) {
+  const store = sqlClient();
+  if (input.replay) return store`false`;
+  return store`
+    agent_memories.id IN (
+      SELECT projection.memory_id FROM person_memory_evidence projection
+      WHERE projection.agent_id = ${input.agentId} AND projection.person_id = (
+        SELECT (array_agg(identity.person_id))[1]
+        FROM run_memory_evidence evidence
+        LEFT JOIN person_identities identity ON identity.id = evidence.person_identity_id
+        WHERE evidence.agent_id = ${input.agentId} AND evidence.run_id = ${input.runId}
+        HAVING count(*) = 1
+      )
+    )
+  `;
+}
 
 type RecallRow = Omit<RecalledMemory, 'learnedAt'> & { learnedAt: Date | string };
 type VectorRow = RecallRow & { distance: number };
 type TextRow = RecallRow & { rank: number };
 
-async function rankMemories(agentId: string, query: string, model: string, vector: string | null) {
+async function rankMemories(
+  input: RecallInput,
+  query: string,
+  model: string,
+  vector: string | null,
+) {
   const store = sqlClient();
   const columns = store`id, revision, subject_kind AS "subjectKind", subject, topic, fact,
     learned_at AS "learnedAt"`;
-  const scope = store`agent_id = ${agentId} AND ${available()}`;
+  const scope = store`agent_id = ${input.agentId} AND subject_kind <> 'person' AND ${available()}`;
   const candidateLimit = MEMORY_LIMIT * 3;
-  const [semantic, lexical] = await Promise.all([
+  const [person, semantic, lexical] = await Promise.all([
+    input.replay
+      ? Promise.resolve([])
+      : store<RecallRow[]>`
+      SELECT DISTINCT ON (person_field) ${columns},
+        jsonb_build_object('field', person_field, 'value', person_value) AS "personFact"
+      FROM agent_memories
+      WHERE agent_id = ${input.agentId} AND subject_kind = 'person' AND ${active()} AND ${forRunPerson(input)}
+      ORDER BY person_field, corrected_at DESC NULLS LAST, source_at DESC, id
+      LIMIT ${MEMORY_LIMIT}
+    `,
     vector
       ? store<VectorRow[]>`
         WITH scoped AS MATERIALIZED (
@@ -53,7 +90,8 @@ async function rankMemories(agentId: string, query: string, model: string, vecto
         ORDER BY distance, id LIMIT ${candidateLimit}
       `
       : Promise.resolve([]),
-    store<TextRow[]>`
+    query
+      ? store<TextRow[]>`
       WITH terms AS (
         SELECT string_agg(quote_literal(term), ' | ')::tsquery AS query
         FROM unnest(tsvector_to_array(to_tsvector('english', ${query}))) AS term
@@ -62,21 +100,20 @@ async function rankMemories(agentId: string, query: string, model: string, vecto
       FROM agent_memories CROSS JOIN terms
       WHERE ${scope} AND search_vector @@ terms.query
       ORDER BY rank DESC, id LIMIT ${candidateLimit}
-    `,
+    `
+      : Promise.resolve([]),
   ]);
-  return mergeHybridRanks<RecallRow>(
+  const ranked = mergeHybridRanks<RecallRow>(
     semantic.map(({ distance, ...row }) => ({ ...row, vectorScore: 1 - distance })),
     lexical.map(({ rank, ...row }) => ({ ...row, textScore: rank })),
     { limit: MEMORY_LIMIT },
-  ).map(({ source: { id, revision, subjectKind, subject, topic, fact, learnedAt } }) => ({
-    id,
-    revision,
-    subjectKind,
-    subject,
-    topic,
-    fact,
-    learnedAt: new Date(learnedAt).toISOString(),
-  }));
+  );
+  return [...person, ...ranked.map(({ source }) => source)]
+    .slice(0, MEMORY_LIMIT)
+    .map(({ learnedAt, ...row }) => ({
+      ...row,
+      learnedAt: new Date(learnedAt).toISOString(),
+    }));
 }
 
 async function comparisonSnapshot(input: RecallInput) {
@@ -106,17 +143,19 @@ export async function recallRunMemories(input: RecallInput): Promise<RecalledMem
   const comparison = await comparisonSnapshot(input);
   const query = input.query.trim().slice(0, 2000);
   const model = knowledgeEmbeddingModelId();
-  const candidates =
-    query && !comparison?.snapshot
-      ? (
-          await sqlClient()`
+  const candidates = !comparison?.snapshot
+    ? (
+        await sqlClient()`
         SELECT count(*)::int AS count, COALESCE(bool_or(
-          embedding IS NOT NULL AND embedding_model = ${model}
+          subject_kind <> 'person' AND embedding IS NOT NULL AND embedding_model = ${model}
         ), false) AS semantic
-        FROM agent_memories WHERE agent_id = ${input.agentId} AND ${available()}
+        FROM agent_memories WHERE agent_id = ${input.agentId} AND (
+          (subject_kind <> 'person' AND ${Boolean(query)} AND ${available()}) OR
+          (subject_kind = 'person' AND ${active()} AND ${forRunPerson(input)})
+        )
       `
-        ).at(0)
-      : null;
+      ).at(0)
+    : null;
 
   let snapshot: RecalledMemory[] = [];
   if (comparison?.snapshot?.length || (candidates?.count ?? 0) > 0) {
@@ -158,7 +197,7 @@ export async function recallRunMemories(input: RecallInput): Promise<RecalledMem
         reportFailure('worker.runtime', { agentId: input.agentId, runId: input.runId }, error);
       }
     }
-    snapshot = await rankMemories(input.agentId, query, model, vector);
+    snapshot = await rankMemories(input, query, model, vector);
   }
 
   if (!comparison || comparison.snapshot) return snapshot;

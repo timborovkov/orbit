@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { env } from '@/lib/env';
 import { formatUtcTimestamp } from '@/lib/format';
 import { channelAdapter, channelLabel } from '@/lib/runtime/channels/registry';
+import { memoryEvidenceHref } from '@/lib/runtime/memory/types';
 import { getPerson, personHref } from '@/lib/server/people-queries';
 import { getPendingApprovalCount } from '@/lib/server/workspace-queries';
 
@@ -288,6 +289,7 @@ function interactionLabel(channel: string, sent: boolean) {
 }
 
 function PersonTimeline({ person, page }: { person: PersonView; page: number }) {
+  const selectedAgent = person.selectedAgent;
   function pageHref(number: number) {
     const params = new URLSearchParams();
     if (person.selectedAgent) params.set('agent', person.selectedAgent.id);
@@ -353,6 +355,22 @@ function PersonTimeline({ person, page }: { person: PersonView; page: number }) 
           ))}
         </ol>
       </section>
+      {selectedAgent && person.memories.length > 0 && (
+        <section aria-labelledby="person-private-memory">
+          <h2 id="person-private-memory">Private memory facts</h2>
+          <ul className="people-list">
+            {person.memories.map((memory) => (
+              <li className="people-card" key={memory.id}>
+                <strong>{memory.topic}</strong>
+                <p>{memory.value}</p>
+                <Link href={memoryEvidenceHref(selectedAgent.id, memory)}>
+                  View original source
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {person.selectedAgent && (
         <section aria-labelledby="person-private-notes">
           <h2 id="person-private-notes">Private relationship notes</h2>

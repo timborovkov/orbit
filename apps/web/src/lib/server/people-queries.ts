@@ -16,6 +16,7 @@ import {
   personIdentityChanges,
   sourceEvents,
 } from '@/lib/schema';
+import { selectPersonMemories } from '@/lib/server/memory-queries';
 
 const peoplePerPage = 40;
 const displayNameSql = sql`
@@ -189,9 +190,12 @@ export async function getPerson(
     return null;
   }
   const selectedAgent = agentsList.find(({ id }) => id === agentId);
-  const history = selectedAgent
-    ? await getPersonContextForAgent(selectedAgent.id, personId, page)
-    : { ...(await listPersonInteractions(personId, page)), notes: [] };
+  const [history, memories] = await Promise.all([
+    selectedAgent
+      ? getPersonContextForAgent(selectedAgent.id, personId, page)
+      : listPersonInteractions(personId, page).then((activity) => ({ ...activity, notes: [] })),
+    selectedAgent ? selectPersonMemories(selectedAgent.id, personId) : [],
+  ]);
   const evidenceKeys = changes.flatMap(({ evidence }) => evidence);
   const emailKeys = evidenceKeys
     .filter(({ channel }) => channel === 'email')
@@ -229,6 +233,7 @@ export async function getPerson(
   ];
   return {
     ...history,
+    memories,
     id: personId,
     name: identities[0]?.displayName ?? contacts[0].label,
     identities,

@@ -15,6 +15,9 @@ import {
   type MemoryCandidate,
   memoryCandidate,
   type MemoryRef,
+  personMemoryLabels,
+  personMemoryStatement,
+  personMemorySubject,
 } from '@/lib/runtime/memory/types';
 import { actionIntents, agentMemories, runMemoryEvidence, type runs } from '@/lib/schema';
 
@@ -29,29 +32,52 @@ export async function memoryRunSource(run: MemoryRun, store: Tx | ReturnType<typ
       sourceAt: runMemoryEvidence.sourceAt,
       title: runMemoryEvidence.title,
       body: runMemoryEvidence.body,
+      author: runMemoryEvidence.author,
+      personIdentityId: runMemoryEvidence.personIdentityId,
     })
     .from(runMemoryEvidence)
     .where(and(eq(runMemoryEvidence.agentId, run.agentId), eq(runMemoryEvidence.runId, run.id)))
     .limit(2);
   if (!match || other) return null;
-  const { title, body, ...source } = match;
-  return { ...source, text: title ? [title, body.slice(0, 8_000)] : [body.slice(0, 8_000)] };
+  const { title, body: rawBody, ...source } = match;
+  const body = rawBody.slice(0, 8_000);
+  return { ...source, body, text: title ? [title, body] : [body] };
 }
 
-function identityKey(candidate: Pick<MemoryCandidate, 'subject' | 'topic'>) {
+function topicKey(candidate: { subject: string; topic: string }) {
   const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ');
   return JSON.stringify([normalize(candidate.subject), normalize(candidate.topic)]);
 }
 
-export function verifiedMemoryCandidates(candidates: unknown[] | undefined, evidence: string[]) {
+type CaptureEvidence = NonNullable<Awaited<ReturnType<typeof memoryRunSource>>>;
+
+function identityKey(candidate: MemoryCandidate, evidence: CaptureEvidence) {
+  return candidate.subjectKind === 'person'
+    ? JSON.stringify([evidence.personIdentityId, candidate.personFact.field])
+    : topicKey(candidate);
+}
+
+export function verifiedMemoryCandidates(
+  candidates: unknown[] | undefined,
+  evidence: CaptureEvidence,
+) {
   const seen = new Set<string>();
   return (candidates ?? []).slice(0, 3).flatMap((raw) => {
     const parsed = memoryCandidate.safeParse(raw);
-    if (!parsed.success || !evidence.some((text) => text.includes(parsed.data.quote))) return [];
-    const key = JSON.stringify([parsed.data.subjectKind, identityKey(parsed.data)]);
+    if (!parsed.success) return [];
+    const candidate = parsed.data;
+    if (candidate.subjectKind === 'person') {
+      if (
+        !evidence.personIdentityId ||
+        !evidence.body.includes(candidate.quote) ||
+        !candidate.quote.includes(candidate.personFact.value)
+      )
+        return [];
+    } else if (!evidence.text.some((text) => text.includes(candidate.quote))) return [];
+    const key = JSON.stringify([candidate.subjectKind, identityKey(candidate, evidence)]);
     if (seen.has(key)) return [];
     seen.add(key);
-    return [parsed.data];
+    return [candidate];
   });
 }
 
@@ -97,28 +123,32 @@ export async function captureRunMemories(
   const evidence = await memoryRunSource(run, tx);
   if (!evidence) return;
 
-  const verified = verifiedMemoryCandidates(candidates, evidence.text);
+  const verified = verifiedMemoryCandidates(candidates, evidence);
   if (!verified.length) return;
   const learnedAt = new Date();
   const entries = await tx
     .insert(agentMemories)
     .values(
-      verified.map(({ subjectKind, subject, topic, fact, quote, expiresOn, reviewOn }) => ({
-        subjectKind,
-        subject,
-        topic,
-        fact,
-        quote,
-        expiresOn,
-        reviewOn,
-        identityKey: identityKey({ subject, topic }),
-        agentId: run.agentId,
-        runId: run.id,
-        sourceKind: evidence.sourceKind,
-        sourceId: evidence.sourceId,
-        sourceAt: evidence.sourceAt,
-        learnedAt,
-      })),
+      verified.map((candidate) => {
+        const fields =
+          candidate.subjectKind === 'person'
+            ? personFields(candidate.personFact, evidence.author)
+            : { subject: candidate.subject, topic: candidate.topic, fact: candidate.fact };
+        return {
+          ...fields,
+          subjectKind: candidate.subjectKind,
+          quote: candidate.quote,
+          expiresOn: candidate.expiresOn,
+          reviewOn: candidate.reviewOn,
+          identityKey: identityKey(candidate, evidence),
+          agentId: run.agentId,
+          runId: run.id,
+          sourceKind: evidence.sourceKind,
+          sourceId: evidence.sourceId,
+          sourceAt: evidence.sourceAt,
+          learnedAt,
+        };
+      }),
     )
     .onConflictDoUpdate({
       target: [agentMemories.agentId, agentMemories.subjectKind, agentMemories.identityKey],
@@ -126,6 +156,7 @@ export async function captureRunMemories(
         subject: sql`excluded.subject`,
         topic: sql`excluded.topic`,
         fact: sql`excluded.fact`,
+        personValue: sql`excluded.person_value`,
         quote: sql`excluded.quote`,
         runId: sql`excluded.run_id`,
         sourceKind: sql`excluded.source_kind`,
@@ -141,14 +172,34 @@ export async function captureRunMemories(
       setWhere: and(
         isNull(agentMemories.correctedBy),
         sql`${agentMemories.sourceAt} < excluded.source_at`,
+        sql`(excluded.subject_kind <> 'person' OR ${agentMemories.personValue} IS DISTINCT FROM excluded.person_value)`,
       ),
     })
     .returning({
       id: agentMemories.id,
       agentId: agentMemories.agentId,
       revision: agentMemories.revision,
+      subjectKind: agentMemories.subjectKind,
     });
-  await Promise.all(entries.map((entry) => enqueueMemoryEmbedding(tx, entry)));
+  await Promise.all(
+    entries
+      .filter(({ subjectKind }) => subjectKind !== 'person')
+      .map((entry) => enqueueMemoryEmbedding(tx, entry)),
+  );
+}
+
+function personFields(
+  { field, value }: Extract<MemoryCandidate, { subjectKind: 'person' }>['personFact'],
+  author: string | null,
+) {
+  const subject = personMemorySubject(author);
+  return {
+    subject,
+    topic: personMemoryLabels[field],
+    fact: personMemoryStatement(subject, field, value),
+    personField: field,
+    personValue: value,
+  };
 }
 
 export async function processMemoryEmbedding(

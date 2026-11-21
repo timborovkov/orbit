@@ -27,7 +27,7 @@ import type {
   FollowUpSource,
   FollowUpStatus,
 } from '@/lib/runtime/follow-ups/types';
-import type { MemorySubject, RecalledMemory } from '@/lib/runtime/memory/types';
+import type { MemorySubject, PersonMemoryField, RecalledMemory } from '@/lib/runtime/memory/types';
 import type { SimulationResult } from '@/lib/runtime/simulation';
 
 const KNOWLEDGE_EMBEDDING_DIMENSIONS = 1536;
@@ -634,6 +634,8 @@ export const agentMemories = pgTable(
     topic: text('topic').notNull(),
     identityKey: text('identity_key').notNull(),
     fact: text('fact').notNull(),
+    personField: text('person_field').$type<PersonMemoryField>(),
+    personValue: text('person_value'),
     quote: text('quote').notNull(),
     runId: uuid('run_id').notNull(),
     sourceKind: text('source_kind').notNull(),
@@ -672,6 +674,12 @@ export const runMemoryEvidence = pgView('run_memory_evidence', {
   channel: text('channel').notNull(),
   personIdentityId: uuid('person_identity_id'),
   observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+}).existing();
+
+export const personMemoryEvidence = pgView('person_memory_evidence', {
+  memoryId: uuid('memory_id').notNull(),
+  agentId: uuid('agent_id').notNull(),
+  personId: uuid('person_id').notNull(),
 }).existing();
 
 export const discoveryCursors = pgTable(

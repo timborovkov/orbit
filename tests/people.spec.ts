@@ -25,10 +25,18 @@ test('the email and X surfaces share a People record and unlink preserves both s
     const [run] =
       await sql`insert into simulation_runs (agent_id, configuration_id, origin, input, status, actor, result, expires_at)
       values (${agent}, ${config.id}, 'discovery', 'Fixture X evaluation', 'completed', 'fixture', '{"steps":[],"actions":[],"error":null}', now()) returning id`;
+    const employment = 'I work at Acme.';
+    const [emailRun] =
+      await sql`insert into simulation_runs (agent_id, configuration_id, origin, input, status, actor, result, expires_at)
+      values (${agent}, ${config.id}, 'email', ${employment}, 'completed', 'fixture', '{"steps":[],"actions":[],"error":null}', now()) returning id`;
     await sql`insert into email_threads (id, agent_id) values (${thread}, ${agent})`;
     const [message] =
-      await sql`insert into email_messages (agent_id, thread_id, resend_email_id, event, received_at, sender, subject, body)
-      values (${agent}, ${thread}, ${randomUUID()}, '{}', now(), ${sender}, 'People fixture email', 'Account question') returning id`;
+      await sql`insert into email_messages (agent_id, thread_id, resend_email_id, event, received_at, sender, subject, body, run_id)
+      values (${agent}, ${thread}, ${randomUUID()}, '{}', now(), ${sender}, 'People fixture email', ${`Account question\n${employment}`}, ${emailRun.id}) returning id`;
+    await sql`insert into agent_memories
+      (agent_id, subject_kind, subject, topic, identity_key, fact, quote, run_id, source_kind, source_id, source_at, person_field, person_value)
+      values (${agent}, 'person', 'Riley', 'Company', 'fixture-employment', 'Riley works at Acme.', ${employment},
+        ${emailRun.id}, 'email', ${message.id}, now(), 'company', 'Acme')`;
     await sql`insert into person_relationship_notes (agent_id, email_message_id, summary, excerpt)
       values (${agent}, ${message.id}, 'The sender has an account question.', 'Account question')`;
     await sql`insert into source_events (agent_id, provider, provider_event_id, payload, text, author_id, author_username, run_id)
@@ -84,10 +92,27 @@ test('the email and X surfaces share a People record and unlink preserves both s
     await page.getByLabel('Agent', { exact: true }).selectOption(agent);
     await page.getByRole('button', { name: 'Set agent' }).click();
     await expect(page.getByText('The sender has an account question.')).toBeVisible();
+    const privateFacts = page.getByRole('region', { name: 'Private memory facts' });
+    await expect(privateFacts.getByText('Acme', { exact: true })).toBeVisible();
+    await privateFacts.getByRole('link', { name: 'View original source' }).click();
+    await expect(page.getByRole('link', { name: 'Open email thread' })).toHaveAttribute(
+      'href',
+      `${emailUrl}&emailMessage=${message.id}#message-${message.id}`,
+    );
+    await page.goto(`/agents/${agent}?tab=memory`);
+    const memory = page.locator('.memory-detail');
+    await memory.locator('summary').click();
+    await memory.getByLabel('Company', { exact: true }).fill('Acme Labs');
+    await memory.getByRole('button', { name: 'Save correction' }).click();
+    await expect(memory.locator('summary')).toContainText('Riley works at Acme Labs.');
+    await memory.getByRole('link', { name: 'View person' }).click();
+    await expect(privateFacts.getByText('Acme Labs', { exact: true })).toBeVisible();
+    await capturePage(page, testInfo.outputPath('person-memory.png'));
     await page.getByLabel('Agent', { exact: true }).selectOption(secondAgent);
     await page.getByRole('button', { name: 'Set agent' }).click();
     await expect(page.getByText('The sender has an account question.')).toHaveCount(0);
     await expect(timeline.getByText('People fixture email')).toHaveCount(0);
+    await expect(privateFacts).toHaveCount(0);
     await page.getByLabel('Agent', { exact: true }).selectOption(agent);
     await page.getByRole('button', { name: 'Set agent' }).click();
     await sql`insert into email_messages (agent_id, thread_id, resend_email_id, event, received_at, sender, subject, body)
@@ -144,6 +169,10 @@ test('the email and X surfaces share a People record and unlink preserves both s
     await page.getByRole('button', { name: 'Unlink identity', exact: true }).click();
     await expect(timeline.getByText('People fixture X activity')).toHaveCount(0);
     await expect(timeline.getByText('People fixture email')).toBeVisible();
+    await page.goto(`${xPerson}?agent=${agent}`);
+    await expect(privateFacts).toHaveCount(0);
+    await page.goto(`${emailPerson}?agent=${agent}`);
+    await expect(privateFacts.getByText('Acme Labs', { exact: true })).toBeVisible();
     await page.goto(xUrl);
     await expect(authorLink).toHaveAttribute('href', xPerson!);
     await expect(page.locator(`#run-${run.id} > summary`)).toContainText('Fixture X evaluation');
