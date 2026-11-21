@@ -1,5 +1,6 @@
 import { hostname } from 'node:os';
 
+import { migrateDatabase } from '@orbit/migrate';
 import * as Sentry from '@sentry/bun';
 
 import { closeDb } from '@/lib/db';
@@ -62,6 +63,13 @@ if (config.X_BEARER_TOKEN) {
   process.env.X_BEARER_TOKEN = config.X_BEARER_TOKEN;
 } else {
   delete process.env.X_BEARER_TOKEN;
+}
+
+try {
+  await migrateDatabase({ databaseUrl: config.DATABASE_URL });
+} catch (error) {
+  console.error('Orbit worker migration failed; refusing to start queues', error);
+  process.exit(1);
 }
 
 const sentry = sentryInitOptions();

@@ -12,9 +12,9 @@ Set these variables on the web service:
 | `OPENROUTER_API_KEY`   | Optional. Default OpenRouter key for agents without a per-agent override.          |
 | `ORBIT_ENCRYPTION_KEY` | Optional until you save per-agent keys. Random 64-character hex master key.        |
 
-Set `OPENROUTER_API_KEY` when you want a deployment-wide OpenRouter default; agents may still store an encrypted override under **Access**. Set `ORBIT_ENCRYPTION_KEY` before saving those per-agent credentials. The environment default works without an encryption key because it is never written to PostgreSQL. Apply all pending migrations before deploying the web and worker together. No channel credentials are needed for manual simulation. OAuth and magic links are deferred. Password sessions expire after eight hours; rotating the password invalidates existing sessions. Login allows ten account-wide attempts per fifteen minutes.
+Set `OPENROUTER_API_KEY` when you want a deployment-wide OpenRouter default; agents may still store an encrypted override under **Access**. Set `ORBIT_ENCRYPTION_KEY` before saving those per-agent credentials. The environment default works without an encryption key because it is never written to PostgreSQL. Deploy the web and worker together so both pick up the same schema; migrations apply automatically. No channel credentials are needed for manual simulation. OAuth and magic links are deferred. Password sessions expire after eight hours; rotating the password invalidates existing sessions. Login allows ten account-wide attempts per fifteen minutes.
 
-Before starting the web service, run `bun run db:migrate` from a source checkout against the target database. Migrations are transactional, advisory-locked and tracked in `orbit_migrations`; the standalone web image does not run them automatically.
+Railway runs `scripts/migrate.ts` as `preDeployCommand` on web and worker, and again at process start (web via `scripts/start-web.ts`, worker before queues). Migrations are transactional, advisory-locked (`pg_advisory_xact_lock(712604)`) and tracked in `orbit_migrations`, so overlapping deploys and restarts stay safe. Local development still uses `bun run db:migrate` against Compose Postgres.
 
 Build the deployment images from the repository root:
 
@@ -58,7 +58,7 @@ From a trusted source checkout with provisioning credentials, run
 change existing bucket policies. Keep anonymous access disabled. The running web
 service needs GetObject, PutObject and DeleteObject on `agents/*`. The worker only needs
 GetObject on `agents/*/knowledge/*`. HeadBucket/CreateBucket are needed only by the
-provisioning script. Apply migrations before deploying both services. If overriding
+provisioning script. Migrations apply on deploy/start for both services. If overriding
 `KNOWLEDGE_EMBEDDING_MODEL`, set the same value on both services and reprocess existing
 documents. The configured vector width must be 1536.
 Pictures are served through
@@ -88,9 +88,9 @@ decision for tracing behaviour, redaction and evaluations.
 
 ## Email (inbound and approved outbound replies)
 
-Apply `apps/web/drizzle/0014_inbound_email.sql` and
-`apps/web/drizzle/0015_outbound_email.sql` with `bun run db:migrate` before deploying
-either service. Deploy the worker with `RESEND_API_KEY` for the Resend Receiving API
+Inbound and outbound email schema lives in `apps/web/drizzle/0014_inbound_email.sql`
+and `apps/web/drizzle/0015_outbound_email.sql`; Railway applies pending migrations on
+deploy and startup. Deploy the worker with `RESEND_API_KEY` for the Resend Receiving API
 and outbound sends, then deploy the web service with `RESEND_INBOUND_DOMAIN` and
 `RESEND_WEBHOOK_SECRET`. Optional `RESEND_SENDING_DOMAIN` on the worker constrains
 From addresses to that verified domain. All of these variables are optional for
@@ -100,9 +100,10 @@ In Resend, enable receiving for a dedicated subdomain and verify the MX record s
 for that domain. Verify the same domain (or a dedicated sending domain) for outbound
 mail. Create a webhook for `email.received` at
 `https://<app-host>/api/webhooks/resend` and use that webhook’s signing secret.
-Turn on delivery after the migration, worker, and web service are ready. Store
-credentials as runtime secrets. Old mailbox addresses keep their original domain
-if the environment value changes, so keep receiving configured for those addresses.
+Turn on delivery after the worker and web service are ready (migrations already ran
+on deploy/start). Store credentials as runtime secrets. Old mailbox addresses keep
+their original domain if the environment value changes, so keep receiving configured
+for those addresses.
 
 Enable email for Sarah in Orbit and send a message and a reply to the displayed
 address. Check the Email tab for a single thread, local drafts, citations when

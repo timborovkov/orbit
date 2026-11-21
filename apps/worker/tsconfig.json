@@ -8,7 +8,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "@/*": ["../web/src/*"]
+      "@/*": ["../web/src/*"],
+      "@orbit/migrate": ["../../scripts/migrate.ts"]
     }
   },
   "include": ["src/**/*.ts"]

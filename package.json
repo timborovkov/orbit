@@ -18,6 +18,7 @@
     "doctor": "bun scripts/run-react-doctor.mjs",
     "validate": "bun run format:check && bun run typecheck && bun run lint && bun run knip && bun run doctor",
     "db:migrate": "bun scripts/migrate.ts",
+    "start:web:prod": "bun scripts/start-web.ts",
     "db:seed:demo": "bun scripts/seed-demo.ts",
     "test:unit": "bun test --parallel --no-isolate tests/unit",
     "test:evaluation": "bun test tests/evaluation-replay.test.ts",
@@ -29,12 +30,14 @@
     "storage:setup": "bun apps/web/scripts/setup-storage.ts",
     "test:knowledge": "bun test tests/knowledge-integration.test.ts"
   },
+  "dependencies": {
+    "postgres": "^4.1.1"
+  },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.65.1",
     "@types/bun": "1.4.4",
     "knip": "6.45.1",
-    "postgres": "^4.1.1",
     "react-doctor": "0.9.23",
     "typescript": "7.0.2"
   }
