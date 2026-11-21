@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { env } from '@/lib/env';
 import { formatUtcTimestamp } from '@/lib/format';
+import { channelAdapter, channelLabel } from '@/lib/runtime/channels/registry';
 import { getPerson, personHref } from '@/lib/server/people-queries';
 import { getPendingApprovalCount } from '@/lib/server/workspace-queries';
 
@@ -28,6 +29,7 @@ function sourceHref(source: {
   threadId: string | null;
   runId: string | null;
   postId: string | null;
+  channel?: string;
   sourceId?: string | null;
 }) {
   if (source.agentId && source.threadId) {
@@ -37,9 +39,9 @@ function sourceHref(source: {
       : thread;
   }
   if (source.agentId && source.runId) return `/agents/${source.agentId}?run=${source.runId}`;
-  if (source.postId && /^\d+$/.test(source.postId))
-    return `https://x.com/i/web/status/${source.postId}`;
-  return null;
+  return source.postId
+    ? (channelAdapter(source.channel)?.activity?.externalHref?.(source.postId) ?? null)
+    : null;
 }
 
 function EvidenceLink({
@@ -70,14 +72,16 @@ function IdentityEvidence({ identity }: { identity: Identity }) {
         <EvidenceLink
           source={identity}
           label={
-            identity.channel === 'email' ? 'Open source email thread' : 'Open source X activity'
+            identity.threadId
+              ? 'Open source email thread'
+              : `Open source ${channelLabel(identity.channel)} activity`
           }
         />
       )}
       {identity.claimEvidence && (
         <p>
           <EvidenceLink
-            source={identity.claimEvidence}
+            source={{ ...identity.claimEvidence, channel: identity.channel }}
             label={
               identity.channel === 'email'
                 ? `Claimed X account @${identity.claimEvidence.claim}`
@@ -123,7 +127,7 @@ function PersonIdentities({ person }: { person: PersonView }) {
           <Link href={personHref(person.id)}>Cancel linking</Link>
         </div>
       )}
-      {!person.identities.length && <p className="muted">No email or X identities are linked.</p>}
+      {!person.identities.length && <p className="muted">No channel identities are linked.</p>}
       <ul className="people-list">
         {person.identities.map((identity) => {
           const peer = person.identities.find(({ id }) => id === identity.linkedViaId);
@@ -131,12 +135,8 @@ function PersonIdentities({ person }: { person: PersonView }) {
           return (
             <li className="people-card" key={identity.id}>
               <div>
-                <strong>{identity.channel === 'email' ? 'Email' : 'X'}</strong>
-                <p>
-                  {identity.channel === 'x' && identity.handle
-                    ? `@${identity.handle}`
-                    : identity.identityKey}
-                </p>
+                <strong>{channelLabel(identity.channel)}</strong>
+                <p>{identity.handle ? `@${identity.handle}` : identity.identityKey}</p>
                 {identity.linkState !== 'standalone' && (
                   <span className="state-label">
                     {identity.linkState === 'inferred' ? 'Inferred link' : 'Confirmed link'}
@@ -265,7 +265,7 @@ function PersonLinkHistory({ person }: { person: PersonView }) {
                     {source ? (
                       <EvidenceLink
                         source={{ ...source, sourceId }}
-                        label={channel === 'email' ? 'Email evidence' : 'X evidence'}
+                        label={`${channelLabel(channel)} evidence`}
                       />
                     ) : (
                       'Source no longer available'
@@ -281,6 +281,12 @@ function PersonLinkHistory({ person }: { person: PersonView }) {
   );
 }
 
+function interactionLabel(channel: string, sent: boolean) {
+  const activity = channelAdapter(channel)?.activity;
+  const label = channelLabel(channel);
+  return sent ? (activity?.sentLabel ?? `Sent via ${label}`) : (activity?.receivedLabel ?? label);
+}
+
 function PersonTimeline({ person, page }: { person: PersonView; page: number }) {
   function pageHref(number: number) {
     const params = new URLSearchParams();
@@ -290,7 +296,6 @@ function PersonTimeline({ person, page }: { person: PersonView; page: number }) 
     return suffix ? `${personHref(person.id)}?${suffix}` : personHref(person.id);
   }
 
-  const labels = { email: 'Received email', reply: 'Sent email reply', x: 'X post' };
   return (
     <div className="people-timeline">
       <section aria-labelledby="person-timeline">
@@ -317,9 +322,14 @@ function PersonTimeline({ person, page }: { person: PersonView; page: number }) 
         {!person.interactions.length && <p className="muted">No interactions to show.</p>}
         <ol className="people-list">
           {person.interactions.map((interaction) => (
-            <li className="people-card" key={`${interaction.kind}:${interaction.eventKey}`}>
+            <li
+              className="people-card"
+              key={`${interaction.channel}:${interaction.sent}:${interaction.eventKey}`}
+            >
               <div className="people-heading">
-                <span className="state-label">{labels[interaction.kind]}</span>
+                <span className="state-label">
+                  {interactionLabel(interaction.channel, interaction.sent)}
+                </span>
                 <time className="muted" dateTime={new Date(interaction.occurredAt).toISOString()}>
                   {formatUtcTimestamp(interaction.occurredAt)}
                 </time>
@@ -331,7 +341,8 @@ function PersonTimeline({ person, page }: { person: PersonView; page: number }) 
                     <EvidenceLink
                       source={{
                         ...source,
-                        postId: interaction.kind === 'x' ? source.providerId : null,
+                        channel: interaction.channel,
+                        postId: interaction.sent ? null : source.providerId,
                       }}
                       label={source.agentName}
                     />

@@ -4,6 +4,7 @@ import { asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { channelLabel } from '@/lib/runtime/channels/registry';
 import { getPersonContextForAgent, listPersonInteractions } from '@/lib/runtime/people/history';
 import {
   agents,
@@ -29,9 +30,9 @@ const latestPeopleSources = sql`
   ) mail on identity.channel = 'email'
   left join lateral (
     select id, agent_id, author_name, author_username, run_id, provider_event_id
-    from source_events where person_identity_id = identity.id
+    from source_events where person_identity_id = identity.id and provider = identity.channel
     order by coalesce(provider_created_at, ingested_at) desc, id desc limit 1
-  ) post on identity.channel = 'x'
+  ) post on true
 `;
 
 export function personHref(personId: string) {
@@ -78,7 +79,10 @@ export async function listPeople(query: string, page: number, linkIdentityId?: s
     order by person.created_at desc, person.id desc limit ${peoplePerPage + 1} offset ${(page - 1) * peoplePerPage}
   `);
   return {
-    people: rows.slice(0, peoplePerPage),
+    people: rows.slice(0, peoplePerPage).map((row) => ({
+      ...row,
+      channels: row.channels.map(channelLabel),
+    })),
     hasOlder: rows.length > peoplePerPage,
     linkSource,
   };
@@ -192,8 +196,8 @@ export async function getPerson(
   const emailKeys = evidenceKeys
     .filter(({ channel }) => channel === 'email')
     .map(({ sourceId }) => sourceId);
-  const xKeys = evidenceKeys
-    .filter(({ channel }) => channel === 'x')
+  const eventKeys = evidenceKeys
+    .filter(({ channel }) => channel !== 'email')
     .map(({ sourceId }) => sourceId);
   const [emails, posts] = await Promise.all([
     emailKeys.length
@@ -206,21 +210,22 @@ export async function getPerson(
           .from(emailMessages)
           .where(inArray(emailMessages.id, emailKeys))
       : [],
-    xKeys.length
+    eventKeys.length
       ? store
           .select({
             id: sourceEvents.id,
             agentId: sourceEvents.agentId,
             runId: sourceEvents.runId,
             postId: sourceEvents.providerEventId,
+            channel: sourceEvents.provider,
           })
           .from(sourceEvents)
-          .where(inArray(sourceEvents.id, xKeys))
+          .where(inArray(sourceEvents.id, eventKeys))
       : [],
   ]);
   const evidence = [
     ...emails.map((email) => ({ ...email, channel: 'email' as const, runId: null, postId: null })),
-    ...posts.map((post) => ({ ...post, channel: 'x' as const, threadId: null })),
+    ...posts.map((post) => ({ ...post, threadId: null })),
   ];
   return {
     ...history,

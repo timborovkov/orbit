@@ -15,7 +15,7 @@ export const lifecycleLabels: Record<LifecycleState, string> = {
 export const lifecycleDescriptions: Record<LifecycleState, string> = {
   shadow: 'Agent may process work. External writes are suppressed and logged. This is the default.',
   paused: 'Agent does not accept new worker jobs. Existing runs finish or expire.',
-  live: 'Live activation permits policy-approved external writes for registered adapters (currently administrator-approved email replies). Other proposals stay suppressed.',
+  live: 'The agent can dispatch channel actions allowed by its permissions and approval rules.',
   stopped:
     'Pending jobs are cancelled where feasible. External writes are blocked until an administrator changes state.',
 };

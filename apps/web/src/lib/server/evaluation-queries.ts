@@ -4,6 +4,7 @@ import { and, desc, eq } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { channelAdapter, channelLabel } from '@/lib/runtime/channels/registry';
 import { agents, configurations, evaluationCases, evaluationComparisons, runs } from '@/lib/schema';
 
 export async function listEvaluationWorkspace(agentId?: string) {
@@ -21,6 +22,7 @@ export async function listEvaluationWorkspace(agentId?: string) {
         agentId: evaluationCases.agentId,
         title: evaluationCases.title,
         sourceKind: evaluationCases.sourceKind,
+        sourceChannel: evaluationCases.sourceChannel,
         input: evaluationCases.input,
         recipients: evaluationCases.recipients,
         createdAt: evaluationCases.createdAt,
@@ -67,7 +69,10 @@ export async function listEvaluationWorkspace(agentId?: string) {
 
   return {
     agents: agentRows,
-    cases,
+    cases: cases.map((row) => {
+      const id = row.sourceChannel ?? channelAdapter(row.sourceKind)?.id;
+      return { ...row, sourceLabel: id ? channelLabel(id) : 'Playground' };
+    }),
     comparisons,
     versions: versionRows.map((row) => ({
       id: row.id,
@@ -100,6 +105,7 @@ export async function getEvaluationComparison(comparisonId: string) {
         caseTitle: evaluationCases.title,
         caseInput: evaluationCases.input,
         caseRecipients: evaluationCases.recipients,
+        caseSourceChannel: evaluationCases.sourceChannel,
         caseSourceKind: evaluationCases.sourceKind,
       })
       .from(evaluationComparisons)
@@ -133,9 +139,12 @@ export async function getEvaluationComparison(comparisonId: string) {
 
   const leftVersion = versionFor(comparison.leftConfigurationId);
   const rightVersion = versionFor(comparison.rightConfigurationId);
+  const channelId = comparison.caseSourceChannel ?? channelAdapter(comparison.caseSourceKind)?.id;
 
   return {
     comparison,
+    sourceLabel: channelId ? channelLabel(channelId) : 'Playground',
+    preferDraftAnswer: channelAdapter(channelId)?.run.mode === 'draft',
     left: {
       configurationId: comparison.leftConfigurationId,
       version: leftVersion?.version ?? null,

@@ -2,6 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 
 import type { Tx } from '@/lib/db';
 import { type ConsentScope, consentScope } from '@/lib/policy/scopes';
+import { channelAction } from '@/lib/runtime/channels/registry';
 import { recipientConsents } from '@/lib/schema';
 
 export async function recipientConsentFailure(
@@ -11,7 +12,7 @@ export async function recipientConsentFailure(
   recipients: string[],
   requiredTools: ConsentScope[],
 ) {
-  const scope = consentScope.safeParse(type);
+  const scope = consentScope.safeParse(channelAction(type)?.action.consentScope ?? type);
   if (!scope.success) return null;
 
   const distinct = [...new Set(recipients)];

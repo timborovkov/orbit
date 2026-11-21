@@ -4,7 +4,7 @@ import { ChevronDown, History } from 'lucide-react';
 
 import { type ActivityEventRow, ActivityTimeline } from '@/app/activity-timeline';
 import { RunContent } from '@/app/run-content';
-import { SavePlaygroundCaseForm } from '@/app/save-evaluation-case-form';
+import { SaveRunCaseForm } from '@/app/save-evaluation-case-form';
 import { formatUtcTimestamp } from '@/lib/format';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
@@ -34,14 +34,14 @@ export function HistoryWorkbench({
           <div className="editor-section-heading">
             <h2>Activity timeline</h2>
             <p className="muted">
-              Playground simulations and X discovery evaluations, with evaluator reasoning, proposed
-              actions and the configuration each one used.
+              Agent runs and Playground simulations, with evaluator reasoning, proposed actions and
+              the configuration each one used.
             </p>
           </div>
           {!history.length && (
             <div className="history-empty">
               <History size={24} aria-hidden="true" />
-              <p>No runs yet. Start in the Playground or configure X discovery.</p>
+              <p>No runs yet. Start in the Playground or connect a channel.</p>
             </div>
           )}
           {history.map((run) => (
@@ -54,10 +54,9 @@ export function HistoryWorkbench({
             >
               <summary>
                 <div>
-                  <span className="run-title">{run.input}</span>
+                  <span className="run-title">{run.sourceTitle}</span>
                   <time dateTime={run.createdAt.toISOString()}>
-                    {formatUtcTimestamp(run.createdAt)} ·{' '}
-                    {run.origin === 'discovery' ? 'Discovery' : 'Playground'} · Version{' '}
+                    {formatUtcTimestamp(run.createdAt)} · {run.channelName} · Version{' '}
                     {versionFor(run.configurationId)}
                     {run.job && run.job.status !== 'completed' ? ` · job ${run.job.status}` : ''}
                     {run.displayStatus !== 'deferred' && run.deferReason
@@ -74,17 +73,24 @@ export function HistoryWorkbench({
               </summary>
               {run.personId && (
                 <Link className="person-source-link" href={`/people/${run.personId}`}>
-                  View X author in People
+                  View {run.channelName} author in People
                 </Link>
               )}
-              <RunContent run={run} interrupted={run.interrupted} />
-              {run.origin === 'playground' && (
-                <SavePlaygroundCaseForm
+              {run.sourceHref && (
+                <Link className="person-source-link" href={run.sourceHref}>
+                  {run.sourceLinkLabel}
+                </Link>
+              )}
+              <RunContent
+                run={run}
+                interrupted={run.interrupted}
+                preferDraftAnswer={run.preferDraftAnswer}
+              />
+              {run.status === 'completed' && (
+                <SaveRunCaseForm
                   agentId={agentId}
                   runId={run.id}
-                  input={run.input}
-                  recipients={run.recipients}
-                  defaultTitle={run.input.slice(0, 80)}
+                  defaultTitle={run.sourceTitle.slice(0, 80)}
                 />
               )}
             </details>

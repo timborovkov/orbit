@@ -8,7 +8,7 @@ export interface EvaluationCaseRow {
   id: string;
   agentId: string;
   title: string;
-  sourceKind: 'playground' | 'email';
+  sourceLabel: string;
   input: string;
   createdAt: string;
   agentName: string;
@@ -37,13 +37,13 @@ export function EvaluationLists({
       <section aria-labelledby="cases-heading">
         <div className="editor-section-heading">
           <h2 id="cases-heading">Saved cases</h2>
-          <p className="muted">Reusable inputs from Playground history or inbound email.</p>
+          <p className="muted">Reusable inputs from saved runs and inbound messages.</p>
         </div>
         {cases.length === 0 && (
           <div className="library-empty">
             <FlaskConical size={24} aria-hidden="true" />
             <h2>No cases yet</h2>
-            <p>Save a completed playground run or inbound email from the agent workspace.</p>
+            <p>Save a run or inbound message from the agent workspace.</p>
           </div>
         )}
         {cases.length > 0 && (
@@ -66,7 +66,7 @@ export function EvaluationLists({
                         <div className="library-secondary preserve-text">{row.input}</div>
                       </td>
                       <td>{row.agentName}</td>
-                      <td>{row.sourceKind === 'email' ? 'Email' : 'Playground'}</td>
+                      <td>{row.sourceLabel}</td>
                       <td>
                         <time dateTime={row.createdAt}>
                           {formatUtcTimestamp(new Date(row.createdAt))}
@@ -84,7 +84,7 @@ export function EvaluationLists({
                     <div className="library-primary">{row.title}</div>
                     <div className="library-secondary preserve-text">{row.input}</div>
                     <div className="library-meta">
-                      {row.agentName} · {row.sourceKind === 'email' ? 'Email' : 'Playground'} ·{' '}
+                      {row.agentName} · {row.sourceLabel} ·{' '}
                       <time dateTime={row.createdAt}>
                         {formatUtcTimestamp(new Date(row.createdAt))}
                       </time>

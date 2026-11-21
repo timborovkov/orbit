@@ -91,7 +91,9 @@ test('the admin can enable Sarah’s inbox and inspect a draft on mobile', async
     await expect(page).toHaveURL(new RegExp(threadId));
     await expect(page.getByText('Awaiting approval')).toBeVisible();
     await expect(page.getByLabel('Reply draft')).toBeVisible();
-    await expect(page.getByText(/sarah-faq.md/)).toBeVisible();
+    const inbox = page.getByRole('tabpanel', { name: 'Email' });
+    await expect(inbox.getByText(/sarah-faq.md/)).toBeVisible();
+    await expect(page.getByLabel('Latest persisted run')).toHaveCount(0);
     await expect(
       page.getByText('<img src=x>Where are my invoices?', { exact: true }),
     ).toBeVisible();

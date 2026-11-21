@@ -13,17 +13,10 @@ import {
   recordApprovalReviews,
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
-import { enqueueApprovedOutbound } from '@/lib/runtime/outbound/dispatch';
-import { EMAIL_SEND_ACTION } from '@/lib/runtime/outbound/types';
+import { channelAction } from '@/lib/runtime/channels/registry';
+import { enqueueOutbound } from '@/lib/runtime/outbound/dispatch';
 import { recordApprovalDecision } from '@/lib/runtime/telemetry';
-import {
-  actionIntents,
-  agents,
-  audit,
-  emailMailboxes,
-  policyDecisions,
-  recipientConsents,
-} from '@/lib/schema';
+import { actionIntents, agents, audit, policyDecisions, recipientConsents } from '@/lib/schema';
 
 export async function persistConsentRequirements(
   actor: string,
@@ -82,6 +75,33 @@ export async function recordConsent(input: {
 
 type ReviewDecision = 'approved' | 'rejected';
 type ReviewResult = { error: string } | { message: string };
+
+export async function persistChannelGrant(
+  actor: string,
+  agentId: string,
+  type: string,
+  enabled: boolean,
+) {
+  const action = channelAction(type)?.action;
+  if (!action || action.usesProviderGrant) return { error: 'Choose a valid channel action.' };
+  return db().transaction(async (tx) => {
+    const agent = await lockApprovalAgent(tx, agentId);
+    if (!agent) return { error: 'Agent not found.' };
+    const tools = new Set(agent.enabledTools);
+    if (enabled === tools.has(type)) return { message: 'Channel permission saved.' };
+    if (enabled) tools.add(type);
+    else tools.delete(type);
+    await tx
+      .update(agents)
+      .set({ enabledTools: [...tools] })
+      .where(eq(agents.id, agentId));
+    await tx.insert(audit).values({
+      actor,
+      action: `${enabled ? 'Enabled' : 'Disabled'} ${type} for ${agent.name}`,
+    });
+    return { message: 'Channel permission saved.' };
+  });
+}
 
 export async function reviewProposedAction(
   actor: string,
@@ -155,18 +175,12 @@ export async function reviewProposedAction(
         return { error: policy.reasons.join(' ') };
       }
       approvalDecision = policy.decision === 'allow' ? 'allow' : 'suppressed';
-      if (approvalDecision === 'allow' && intent.actionType === EMAIL_SEND_ACTION) {
-        const mailbox = (
-          await tx
-            .select({ enabled: emailMailboxes.enabled })
-            .from(emailMailboxes)
-            .where(eq(emailMailboxes.agentId, agentId))
-        ).at(0);
-        if (!mailbox?.enabled) {
-          return { error: 'Enable the agent mailbox before approving an email reply.' };
-        }
-        const draft = typeof payload.draft === 'string' ? payload.draft.trim() : '';
-        if (!draft) return { error: 'Approved email replies need a non-empty draft.' };
+      if (approvalDecision === 'allow') {
+        const error = await channelAction(intent.actionType)?.action.validateApproval?.(tx, {
+          ...intent,
+          payload,
+        });
+        if (error) return { error };
       }
     }
 
@@ -186,21 +200,12 @@ export async function reviewProposedAction(
       decision: approved ? approvalDecision : 'deny',
     });
 
-    if (approved && approvalDecision === 'allow' && intent.actionType === EMAIL_SEND_ACTION) {
-      const draft = typeof payload.draft === 'string' ? payload.draft : '';
-      const emailMessageId =
-        typeof payload.emailMessageId === 'string' ? payload.emailMessageId : null;
-      const threadId = typeof payload.threadId === 'string' ? payload.threadId : null;
-      await enqueueApprovedOutbound(tx, {
-        agentId,
-        intentId: intent.id,
-        actionType: intent.actionType,
-        body: draft,
-        idempotencyKey: intent.idempotencyKey,
-        emailMessageId,
-        threadId,
+    if (approved && approvalDecision === 'allow') {
+      await enqueueOutbound(
+        tx,
+        { ...intent, payload, reviewStatus: 'approved', decision: approvalDecision },
         actor,
-      });
+      );
     }
 
     const settled = intent.runId && (await settleApprovalRun(tx, agent, intent.runId, actor));

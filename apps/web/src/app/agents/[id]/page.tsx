@@ -26,9 +26,9 @@ import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
+import { channelGrantOptions } from '@/lib/runtime/channels/registry';
 import { followUpWorkspaceRefresh } from '@/lib/runtime/follow-ups/refresh';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
-import { latestPersistedRun } from '@/lib/runtime/playground-ui';
 import { getEmailInbox } from '@/lib/server/email-queries';
 import { listActivityEventsForAgent, listFollowUpsForAgent } from '@/lib/server/follow-up-queries';
 import {
@@ -85,6 +85,7 @@ export default async function AgentWorkspace({
     hasAgentCredential,
     keySource,
     history,
+    latestPlaygroundRun,
     current,
     reviews,
     pendingApprovalCount,
@@ -115,7 +116,6 @@ export default async function AgentWorkspace({
   const lifecycle = agent.lifecycle;
   const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
-  const latestRun = latestPersistedRun(history);
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const followUpRefresh = followUpWorkspaceRefresh({
@@ -163,6 +163,7 @@ export default async function AgentWorkspace({
       </WorkspaceForm>
     </section>
   );
+  const enabledTools = new Set(agent.enabledTools);
   const access = (
     <AccessWorkbench
       agentId={id}
@@ -175,6 +176,10 @@ export default async function AgentWorkspace({
       approvalExpiresAfterHours={approvalSettings.approvalExpiresAfterHours}
       approvalOnReject={approvalSettings.approvalOnReject}
       approvalSpendCents={approvalSettings.approvalSpendCents}
+      channelActions={channelGrantOptions().map((option) => ({
+        ...option,
+        enabled: enabledTools.has(option.type),
+      }))}
       consentRequiredTools={agent.consentRequiredTools}
       consents={consents}
       hasAgentCredential={hasAgentCredential}
@@ -203,7 +208,7 @@ export default async function AgentWorkspace({
       versions={versions}
       currentConfigurationId={current.id}
       history={history}
-      latestRun={latestRun}
+      latestRun={latestPlaygroundRun}
       versionFor={versionFor}
     />
   );

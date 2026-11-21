@@ -55,6 +55,7 @@ export function AccessWorkbench({
   approvalExpiresAfterHours,
   approvalOnReject,
   approvalSpendCents,
+  channelActions,
   consentRequiredTools,
   consents,
   hasAgentCredential,
@@ -74,6 +75,7 @@ export function AccessWorkbench({
   approvalExpiresAfterHours: number | null;
   approvalOnReject: 'continue' | 'end';
   approvalSpendCents: number | null;
+  channelActions: Parameters<typeof ReviewSettings>[0]['channelActions'];
   consentRequiredTools: ConsentScope[];
   consents: Workspace['consents'];
   hasAgentCredential: boolean;
@@ -116,6 +118,7 @@ export function AccessWorkbench({
         approvalExpiresAfterHours={approvalExpiresAfterHours}
         approvalOnReject={approvalOnReject}
         approvalSpendCents={approvalSpendCents}
+        channelActions={channelActions}
       />
     ),
     consent: (

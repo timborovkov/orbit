@@ -6,8 +6,10 @@ import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
 import { consentScope, proposalTypes, recipientId } from '@/lib/policy/scopes';
+import { channelGrantOptions } from '@/lib/runtime/channels/registry';
 import { persistApprovalTools } from '@/lib/server/lifecycle-mutations';
 import {
+  persistChannelGrant,
   persistConsentRequirements,
   recordConsent,
   reviewProposedAction,
@@ -22,10 +24,13 @@ export async function saveApprovalTools(form: FormData) {
     .safeParse(Object.fromEntries(form));
   if (!fields.success) return { error: 'Choose a valid agent and configuration.' };
   const { agentId, configurationVersion } = fields.data;
-  const tools = z
-    .array(z.enum(proposalTypes))
-    .max(proposalTypes.length)
-    .safeParse(form.getAll('tool'));
+  const allowed = [
+    ...proposalTypes,
+    ...channelGrantOptions()
+      .filter((option) => !option.alwaysRequiresApproval)
+      .map(({ type }) => type),
+  ];
+  const tools = z.array(z.enum(allowed)).max(allowed.length).safeParse(form.getAll('tool'));
   if (!tools.success) return { error: 'Choose valid action types.' };
 
   const expiresValue = form.get('approvalExpiresAfterHours');
@@ -84,6 +89,19 @@ export async function saveConsent(form: FormData) {
   const { outcome, ...fields } = parsed.data;
   const result = await recordConsent({ ...fields, actor, granted: outcome === 'grant' });
   revalidatePath(`/agents/${fields.agentId}`);
+  return result;
+}
+
+export async function saveChannelGrant(form: FormData) {
+  await checkOrigin();
+  const actor = await requireAdmin();
+  const parsed = z
+    .object({ agentId: z.uuid(), type: z.string().max(80), enabled: z.enum(['true', 'false']) })
+    .safeParse(Object.fromEntries(form));
+  if (!parsed.success) return { error: 'Choose a valid channel action.' };
+  const { agentId, type, enabled } = parsed.data;
+  const result = await persistChannelGrant(actor, agentId, type, enabled === 'true');
+  revalidatePath(`/agents/${agentId}`);
   return result;
 }
 

@@ -20,9 +20,9 @@ import { recipientConsentFailure } from '@/lib/policy/consent';
 import { type ExecutionContext, executionContextForOrigin } from '@/lib/policy/execution-context';
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
+import { channelAction, channelForRun } from '@/lib/runtime/channels/registry';
 import { retryableStore } from '@/lib/runtime/errors';
 import { MEMORY_CAPTURE, MEMORY_SEARCH, memoryCaptureOrigin } from '@/lib/runtime/memory/types';
-import { hasWriteAdapter } from '@/lib/runtime/outbound/types';
 import {
   actionIntents,
   agentMcpConnections,
@@ -58,6 +58,7 @@ export interface PolicyContext {
   /** Derived from the run origin; replay always suppresses external writes. */
   executionContext: ExecutionContext;
   runOrigin?: typeof runs.$inferSelect.origin;
+  runChannel?: string;
   hasMemoryEvidence?: boolean;
   lifecycle: LifecycleState;
   enabledTools: string[];
@@ -102,6 +103,7 @@ export async function loadPolicyContext(
           .select({
             settings: configurations.approvalSettings,
             origin: runs.origin,
+            channel: runs.channel,
           })
           .from(runs)
           .innerJoin(configurations, eq(configurations.id, runs.configurationId))
@@ -143,6 +145,7 @@ export async function loadPolicyContext(
     runId: runId ?? null,
     executionContext,
     runOrigin: runRow?.origin,
+    runChannel: runRow && channelForRun(runRow)?.id,
     lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
     approvalTools: mergeApprovalTools(approval.approvalTools, global?.approvalTools),
@@ -218,15 +221,31 @@ export function evaluateCandidate(
   }
 
   const isMcp = action.type.startsWith('mcp:');
+  const registered = channelAction(action.type);
+  if (registered && ctx.executionContext !== 'replay' && registered.channel !== ctx.runChannel) {
+    return { decision: 'deny', reasons: ['Action is unavailable for this run’s channel.'] };
+  }
+  if (
+    registered &&
+    !registered.action.usesProviderGrant &&
+    !ctx.enabledTools.includes(action.type)
+  ) {
+    return { decision: 'deny', reasons: [`Tool ${action.type} is not enabled for this agent.`] };
+  }
   // knowledge.search is opt-in and must not flip empty-list semantics for other native tools.
-  const nativeEnablementTools = ctx.enabledTools.filter((tool) => tool !== KNOWLEDGE_SEARCH_TOOL);
+  const nativeEnablementTools = ctx.enabledTools.filter((tool) => {
+    const channelGrant = channelAction(tool)?.action;
+    return tool !== KNOWLEDGE_SEARCH_TOOL && (!channelGrant || channelGrant.usesProviderGrant);
+  });
   const toolDenied = isMcp
     ? !mcpGranted
     : action.type === 'load_skill'
       ? false
       : action.type === KNOWLEDGE_SEARCH_TOOL
         ? !ctx.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
-        : nativeEnablementTools.length > 0 && !nativeEnablementTools.includes(action.type);
+        : (!registered || registered.action.usesProviderGrant) &&
+          nativeEnablementTools.length > 0 &&
+          !nativeEnablementTools.includes(action.type);
   if (toolDenied) {
     reasons.push(`Tool ${action.type} is not enabled for this agent.`);
     return { decision: 'deny', reasons };
@@ -266,6 +285,7 @@ export function evaluateCandidate(
       actionNeedsApproval({
         actionType: action.type,
         preliminary: action.preliminary,
+        requiredByAdapter: registered?.action.alwaysRequiresApproval,
         approvalTools: ctx.approvalTools,
         approvalSpendCents: ctx.approvalSpendCents,
         daySpendMicros: ctx.usage.spendMicros,
@@ -286,7 +306,7 @@ export function evaluateCandidate(
     const dispatch = authorizeOutboundDispatch({
       executionContext: ctx.executionContext,
       lifecycle: ctx.lifecycle,
-      adapterAvailable: hasWriteAdapter(action.type),
+      adapterAvailable: Boolean(registered),
     });
     if (!dispatch.allowed) {
       reasons.push(

@@ -4,10 +4,10 @@ import { and, desc, eq } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
 import { canAcceptBackgroundWork } from '@/lib/lifecycle';
+import { scheduleChannelWork } from '@/lib/runtime/channels/registry';
 import type { AgentConfig } from '@/lib/runtime/config';
 import { environmentOpenRouterKey } from '@/lib/runtime/openrouter-key';
 import { encryptCredential } from '@/lib/runtime/secrets';
-import { ensureDiscoveryPollJob } from '@/lib/runtime/x/poll';
 import { agents, audit, configurations, credentials, templates } from '@/lib/schema';
 
 // Internal mutations: callers must authenticate, validate inputs and supply the audit actor.
@@ -45,8 +45,8 @@ export async function persistConfiguration(
     await tx
       .insert(audit)
       .values({ actor, action: `Saved configuration v${version + 1} for ${config.name}` });
-    if (config.xSearchQuery.trim() && canAcceptBackgroundWork(agent.lifecycle)) {
-      await ensureDiscoveryPollJob(agentId, tx);
+    if (canAcceptBackgroundWork(agent.lifecycle)) {
+      await scheduleChannelWork(tx, agentId, config);
     }
     return true;
   });

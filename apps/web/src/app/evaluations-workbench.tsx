@@ -73,7 +73,7 @@ export function EvaluationsWorkbench({
         <div>
           <h1>Evaluations</h1>
           <p className="muted">
-            Save playground runs or inbound emails as cases, then replay the same input against two
+            Save agent runs or inbound messages as cases, then replay the same input against two
             configuration versions. Replay never dispatches external writes.
           </p>
         </div>

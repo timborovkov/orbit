@@ -1,0 +1,35 @@
+# Channel adapters
+
+Orbit registers channel adapters in [the channel registry](../apps/web/src/lib/runtime/channels/registry.ts).
+Email and X use the same run, policy and history services. Email retains its
+signed webhook, mailbox settings and RFC threading. X retains its polling
+cursor, post formatting and reciprocal identity-claim checks.
+
+1. Give the adapter a stable channel ID and display label. Register it during
+   web and worker startup via the shared registry. The adapter owns provider
+   authentication, credential resolution, account-to-agent routing, and any
+   provider-specific screening or permissions.
+2. Normalize authorized inbound content and call `ingestChannelEvent` with the
+   trusted agent ID, the channel ID, the provider’s event and author IDs, and
+   the evidence text. Supply recipients only from trusted routing metadata.
+   Omit secrets and authentication headers from the stored provider payload.
+   Polling adapters that commit a cursor with a batch can use
+   `persistChannelEvent` and `admitChannelEvent` inside the agent transaction.
+   The database deduplicates events per agent and channel.
+3. Use the evaluation run mode for model-proposed actions. Register supported
+   actions as channel-qualified IDs such as `provider.reply`. An administrator
+   grants each supported action from the agent’s Access settings. The adapter
+   can require review for every use and declare the matching consent scope for
+   introductions and escalations. The shared policy gateway checks action
+   ownership, the grant, lifecycle, pause, approval and budgets before delivery.
+4. Implement `prepareDelivery` to enforce provider connection, scope and
+   recipient restrictions, including provider-specific opt-outs where they
+   apply. Its transport receives an abort signal and must use the outbound row’s
+   stable idempotency key or reconcile the provider result before a retry.
+   The shared dispatcher writes the outcome and usage to PostgreSQL.
+
+The source event links to History and supports People, evaluation cases, and
+agent-owned memory evidence. Replays use the saved case input and never
+dispatch or capture durable memory. The
+[fixture channel integration test](../tests/channel-framework.test.ts) covers
+registration through delivery against PostgreSQL without contacting a provider.

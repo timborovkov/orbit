@@ -3,14 +3,10 @@ import { generateText, isStepCount, Output } from 'ai';
 import { z } from 'zod';
 
 import {
-  captureAndRelationshipDecisionSchema,
-  captureDecisionSchema,
-  decisionSchema,
-  groundedDecisionSchema,
   type InferenceQuote,
-  memoryGroundedDecisionSchema,
   type ModelCall,
-  relationshipDecisionSchema,
+  type relationshipDecisionSchema,
+  simulationDecisionSchema,
 } from '@/lib/runtime/simulation';
 
 const maxOutputTokens = 3000;
@@ -94,7 +90,6 @@ export function openRouterInference(apiKey: string): ModelCall {
     const {
       model,
       system,
-      summarizeRelationship,
       input,
       signal,
       quote,
@@ -105,17 +100,7 @@ export function openRouterInference(apiKey: string): ModelCall {
     } = request;
     const hasTools = Boolean(tools && Object.keys(tools).length);
     const toolSteps = maxToolSteps ?? 10;
-    const schema = request.captureMemory
-      ? summarizeRelationship
-        ? captureAndRelationshipDecisionSchema
-        : captureDecisionSchema
-      : summarizeRelationship
-        ? relationshipDecisionSchema
-        : request.grounded
-          ? request.useMemory
-            ? memoryGroundedDecisionSchema
-            : groundedDecisionSchema
-          : decisionSchema;
+    const schema = simulationDecisionSchema(request);
     const response = await generateText({
       model: provider(model, {
         usage: { include: true },

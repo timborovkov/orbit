@@ -11,9 +11,7 @@ import {
 } from '@/lib/server/evaluation-mutations';
 
 const titleSchema = z.string().trim().min(1).max(200);
-const inputSchema = z.string().trim().min(1).max(16000);
-
-export async function saveCaseFromPlaygroundRun(form: FormData) {
+export async function saveCaseFromRun(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
   const parsed = z
@@ -21,41 +19,20 @@ export async function saveCaseFromPlaygroundRun(form: FormData) {
       agentId: z.uuid(),
       runId: z.uuid(),
       title: titleSchema,
-      input: inputSchema,
-      recipients: z.string().optional(),
     })
     .safeParse({
       agentId: form.get('agentId'),
       runId: form.get('runId'),
       title: form.get('title'),
-      input: form.get('input'),
-      recipients: form.get('recipients') ?? undefined,
     });
   if (!parsed.success) return { error: 'Invalid case details.' };
-
-  let recipients: string[] = [];
-  if (parsed.data.recipients) {
-    try {
-      const value: unknown = JSON.parse(parsed.data.recipients);
-      if (
-        !Array.isArray(value) ||
-        !value.every((entry): entry is string => typeof entry === 'string')
-      ) {
-        return { error: 'Invalid recipients.' };
-      }
-      recipients = value;
-    } catch {
-      return { error: 'Invalid recipients.' };
-    }
-  }
 
   const result = await createEvaluationCaseFromSource(actor, {
     agentId: parsed.data.agentId,
     title: parsed.data.title,
-    sourceKind: 'playground',
+    sourceKind: 'channel',
     sourceRunId: parsed.data.runId,
-    caseInput: parsed.data.input,
-    recipients,
+    caseInput: '',
   });
   if (!('error' in result)) {
     revalidatePath('/evaluations');

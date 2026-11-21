@@ -4,8 +4,6 @@ export const EMAIL_RECEIVE_JOB = 'email.receive';
 export const EMAIL_DRAFT_JOB = 'email.draft';
 export const EMAIL_ACTOR = 'system:inbound-email';
 
-export { EMAIL_SEND_JOB } from '@/lib/runtime/outbound/types';
-
 export function inboundEmailDomain(value: string | undefined) {
   const domain = value?.trim().toLowerCase();
   if (

@@ -2,22 +2,18 @@
 
 import { useId, useState, useTransition } from 'react';
 
-import { saveCaseFromEmailMessage, saveCaseFromPlaygroundRun } from '@/actions/evaluation';
+import { saveCaseFromEmailMessage, saveCaseFromRun } from '@/actions/evaluation';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/ui/submit-button';
 
-export function SavePlaygroundCaseForm({
+export function SaveRunCaseForm({
   agentId,
   runId,
-  input,
-  recipients,
   defaultTitle,
 }: {
   agentId: string;
   runId: string;
-  input: string;
-  recipients: string[];
   defaultTitle: string;
 }) {
   const formId = useId();
@@ -29,7 +25,7 @@ export function SavePlaygroundCaseForm({
       action={(data) => {
         startTransition(async () => {
           setState({});
-          const result = await saveCaseFromPlaygroundRun(data);
+          const result = await saveCaseFromRun(data);
           if ('error' in result && result.error) {
             setState({ error: result.error });
             return;
@@ -40,8 +36,6 @@ export function SavePlaygroundCaseForm({
     >
       <input type="hidden" name="agentId" value={agentId} />
       <input type="hidden" name="runId" value={runId} />
-      <input type="hidden" name="input" value={input} />
-      <input type="hidden" name="recipients" value={JSON.stringify(recipients)} />
       <Field data-invalid={state.error ? true : undefined}>
         <FieldLabel htmlFor={`${formId}-title`}>Case title</FieldLabel>
         <Input

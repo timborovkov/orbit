@@ -3,6 +3,7 @@ import { and, eq, inArray, isNotNull, lte, sql } from 'drizzle-orm';
 import { parseBudgets } from '@/lib/budgets';
 import { db, type Tx } from '@/lib/db';
 import { enqueueJob } from '@/lib/queue/jobs';
+import { channelForRun } from '@/lib/runtime/channels/registry';
 import { SIMULATION_JOB_TYPE } from '@/lib/runtime/simulation';
 import { recordApprovalDecision } from '@/lib/runtime/telemetry';
 import { actionIntents, agents, audit, configurations, policyDecisions, runs } from '@/lib/schema';
@@ -152,7 +153,7 @@ export async function settleApprovalRun(
   if (pending.length > 0) return;
 
   const job = await enqueueJob(tx, {
-    type: SIMULATION_JOB_TYPE,
+    type: channelForRun(run)?.run.jobType ?? SIMULATION_JOB_TYPE,
     payload: { runId: run.id, agentId: run.agentId, configurationId: run.configurationId, actor },
     idempotencyKey: `simulation:${run.id}:resume:${run.jobId ?? 'initial'}`,
     maxAttempts: 3,

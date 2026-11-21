@@ -4,8 +4,8 @@ import { db, type Tx } from '@/lib/db';
 import { canAcceptBackgroundWork } from '@/lib/lifecycle';
 import { enqueueJob } from '@/lib/queue/jobs';
 import type { JobRecord } from '@/lib/queue/types';
+import { admitChannelEvent, persistChannelEvent } from '@/lib/runtime/channels/ingest';
 import { type AgentConfig, configSchema } from '@/lib/runtime/config';
-import { admitRun } from '@/lib/runtime/execute';
 import {
   lockPeople,
   observedClaimedHandle,
@@ -160,25 +160,21 @@ async function persistPosts(
   if (!posts.length) return [];
   const rows = await Promise.all(
     posts.map((post) =>
-      tx
-        .insert(sourceEvents)
-        .values({
-          agentId,
-          provider: X_PROVIDER,
-          providerEventId: post.id,
-          payload: post.raw,
-          text: post.text,
-          authorId: post.authorId ?? null,
-          authorUsername: post.authorUsername ?? null,
-          authorName: post.authorName ?? null,
-          personClaim: post.authorId && post.authorUsername ? xEmailClaim(post.text) : null,
-          providerCreatedAt: post.createdAt ? new Date(post.createdAt) : null,
-        })
-        .onConflictDoNothing()
-        .returning(),
+      persistChannelEvent(tx, {
+        agentId,
+        provider: X_PROVIDER,
+        providerEventId: post.id,
+        payload: post.raw,
+        text: post.text,
+        authorId: post.authorId ?? null,
+        authorUsername: post.authorUsername ?? null,
+        authorName: post.authorName ?? null,
+        personClaim: post.authorId && post.authorUsername ? xEmailClaim(post.text) : null,
+        providerCreatedAt: post.createdAt ? new Date(post.createdAt) : null,
+      }),
     ),
   );
-  const inserted = rows.flatMap((row) => row.at(0) ?? []);
+  const inserted = rows.flatMap((row) => row ?? []);
   const handles = [
     ...new Set(
       inserted.flatMap(({ authorUsername, personIdentityId }) =>
@@ -510,11 +506,10 @@ async function admitDiscoveryEvents(
     createdAt: event.providerCreatedAt?.toISOString(),
     raw: event.payload,
   };
-  const admitted = await admitRun(tx, agent, {
+  const admitted = await admitChannelEvent(tx, agent, event, {
     actor: X_DISCOVERY_ACTOR,
     configurationId,
     input: formatDiscoveryInput(post),
-    origin: 'discovery',
   });
   if ('waitForCapacity' in admitted && admitted.waitForCapacity) {
     return {
@@ -523,14 +518,7 @@ async function admitDiscoveryEvents(
       remaining: events.length - index,
     };
   }
-  let nextCount = evaluated;
-  if ('runId' in admitted && admitted.runId) {
-    await tx
-      .update(sourceEvents)
-      .set({ runId: admitted.runId })
-      .where(eq(sourceEvents.id, event.id));
-    nextCount += 1;
-  }
+  const nextCount = 'runId' in admitted && admitted.runId ? evaluated + 1 : evaluated;
   // Hard errors (missing config, budgets) still leave run_id null for retry.
   return admitDiscoveryEvents(tx, agent, configurationId, events, index + 1, nextCount);
 }

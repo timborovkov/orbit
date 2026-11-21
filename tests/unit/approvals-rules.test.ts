@@ -69,10 +69,11 @@ test('introduce and escalate are opt-in via approvalTools', () => {
   }
 });
 
-test('email.send always requires administrator approval', () => {
+test('adapter-required approval applies independently of administrator rules', () => {
   expect(
     actionNeedsApproval({
-      actionType: 'email.send',
+      actionType: 'channel.send',
+      requiredByAdapter: true,
       approvalTools: [],
       approvalSpendCents: null,
       daySpendMicros: BigInt(0),

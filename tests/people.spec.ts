@@ -4,9 +4,11 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import postgres from 'postgres';
 
+import { capturePage } from './screenshot';
+
 test('the email and X surfaces share a People record and unlink preserves both sources', async ({
   page,
-}) => {
+}, testInfo) => {
   const sql = postgres('postgres://orbit:orbit_dev@localhost:5432/orbit_test');
   const agent = randomUUID();
   const secondAgent = randomUUID();
@@ -14,6 +16,7 @@ test('the email and X surfaces share a People record and unlink preserves both s
   const sender = `people-${agent}@example.test`;
   const author = `people-${agent}`;
   try {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await sql`truncate sessions, login_attempts`;
     await sql`insert into agents (id, name, mission) values (${agent}, 'People browser fixture', 'Help customers')`;
     await sql`insert into agents (id, name, mission) values (${secondAgent}, 'People research fixture', 'Research customer needs')`;
@@ -54,6 +57,16 @@ test('the email and X surfaces share a People record and unlink preserves both s
     const authorLink = page.getByRole('link', { name: 'View X author in People' });
     const xPerson = await authorLink.getAttribute('href');
     expect(xPerson).not.toBe(emailPerson);
+    const sourceRun = page.locator(`#run-${run.id}`);
+    await sourceRun.getByLabel('Case title').fill('X lead case');
+    await sourceRun.getByRole('button', { name: 'Save as case' }).click();
+    await expect(sourceRun.getByRole('status')).toContainText('Saved as evaluation case.');
+    await capturePage(page, testInfo.outputPath('x-history.png'));
+    await page.goto(`/evaluations?agent=${agent}`);
+    const savedCase = page.getByRole('row').filter({ hasText: 'X lead case' });
+    await expect(savedCase.getByRole('cell', { name: 'X', exact: true })).toBeVisible();
+    await capturePage(page, testInfo.outputPath('x-evaluation-case.png'));
+    await page.goto(xUrl);
     await authorLink.click();
     await page.getByRole('link', { name: 'Link to another person' }).click();
     await page.getByRole('searchbox', { name: 'Search people' }).fill(sender);
@@ -66,6 +79,7 @@ test('the email and X surfaces share a People record and unlink preserves both s
     await expect(timeline.getByText('People fixture X activity')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Email evidence', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'X evidence', exact: true })).toBeVisible();
+    await capturePage(page, testInfo.outputPath('cross-channel-people.png'));
     await expect(page.getByRole('heading', { name: 'Private relationship notes' })).toHaveCount(0);
     await page.getByLabel('Agent', { exact: true }).selectOption(agent);
     await page.getByRole('button', { name: 'Set agent' }).click();
@@ -137,6 +151,7 @@ test('the email and X surfaces share a People record and unlink preserves both s
     await expect(senderLink.first()).toHaveAttribute('href', emailPerson!);
     await expect(page.getByRole('heading', { name: 'People fixture email' })).toBeVisible();
   } finally {
+    await sql`delete from evaluation_cases where agent_id = ${agent}`;
     await sql`delete from source_events where agent_id = ${agent}`;
     await sql`delete from email_messages where agent_id = ${agent}`;
     await sql`delete from simulation_runs where agent_id = ${agent}`;

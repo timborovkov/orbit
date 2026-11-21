@@ -30,9 +30,7 @@ function PeopleResults({
             }
           >
             <strong>{person.name}</strong>
-            <span className="muted">
-              {person.channels.map((channel) => (channel === 'email' ? 'Email' : 'X')).join(' · ')}
-            </span>
+            <span className="muted">{person.channels.join(' · ')}</span>
           </Link>
         </li>
       ))}
@@ -43,7 +41,7 @@ function PeopleResults({
         ? 'No people match your search.'
         : linkSourceId
           ? 'There are no other people to link.'
-          : 'People appear here when email or X activity arrives.'}
+          : 'People appear here after agents receive channel activity.'}
     </p>
   );
 }

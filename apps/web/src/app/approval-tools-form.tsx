@@ -56,6 +56,7 @@ export function ApprovalToolsForm({
   approvalExpiresAfterHours,
   approvalOnReject,
   approvalSpendCents,
+  channelActions,
 }: {
   agentId: string;
   configurationVersion: number;
@@ -63,11 +64,15 @@ export function ApprovalToolsForm({
   approvalExpiresAfterHours: number | null;
   approvalOnReject: 'continue' | 'end';
   approvalSpendCents: number | null;
+  channelActions: { type: string; label: string }[];
 }) {
-  const tools = [...proposalTypes];
+  const tools = [
+    ...proposalTypes.map((type) => ({ type, label: actionLabels[type] })),
+    ...channelActions,
+  ];
   const [checked, setChecked] = useState<Record<string, boolean>>(() => {
     const initial = new Set(approvalTools);
-    return Object.fromEntries(tools.map((tool) => [tool, initial.has(tool)]));
+    return Object.fromEntries(tools.map(({ type }) => [type, initial.has(type)]));
   });
   const spendDollars = approvalSpendCents === null ? '' : String(approvalSpendCents / 100);
   const onRejectRef = useRef<HTMLInputElement>(null);
@@ -82,7 +87,7 @@ export function ApprovalToolsForm({
         name="approvalOnReject"
         defaultValue={approvalOnReject}
       />
-      {tools.map((tool) =>
+      {tools.map(({ type: tool }) =>
         checked[tool] ? (
           <input key={`hidden-${tool}`} type="hidden" name="tool" value={tool} />
         ) : null,
@@ -90,15 +95,17 @@ export function ApprovalToolsForm({
       <FieldSet>
         <FieldLegend variant="label">Actions requiring approval</FieldLegend>
         <FieldGroup className="approval-tool-list gap-0" data-slot="checkbox-group">
-          {tools.map((tool) => {
+          {tools.map(({ type: tool, label }) => {
             const id = `approval-tool-${tool}`;
             return (
               <Field key={tool} orientation="horizontal" className="approval-tool-row">
                 <div className="approval-tool-copy">
                   <FieldLabel htmlFor={id} className="font-medium">
-                    {actionLabels[tool]}
+                    {label}
                   </FieldLabel>
-                  <FieldDescription className="text-pretty">{actionHints[tool]}</FieldDescription>
+                  <FieldDescription className="text-pretty">
+                    {actionHints[tool] ?? 'Wait for an administrator before delivery.'}
+                  </FieldDescription>
                 </div>
                 <Switch
                   id={id}
@@ -106,7 +113,7 @@ export function ApprovalToolsForm({
                   onCheckedChange={(value) => {
                     setChecked((previous) => ({ ...previous, [tool]: value }));
                   }}
-                  aria-label={actionLabels[tool]}
+                  aria-label={label}
                 />
               </Field>
             );

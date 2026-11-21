@@ -433,14 +433,29 @@ Support filtering by agent or run, and cap bulk selection at 50.
 ### Evaluations
 
 Global Evaluations navigation lists saved cases and comparisons. Cases come
-from Playground history or inbound email via an inline “Save as case” form on
-those surfaces. Starting a comparison requires one case and two distinct
-configuration versions for the same agent. The comparison detail page shows
+from completed History runs or inbound email via an inline “Save as case” form.
+Use the source channel label in the case list and comparison heading. Starting a
+comparison requires one case and two distinct configuration versions for the same
+agent. The comparison detail page shows
 the shared input once, then a two-column side-by-side of drafts, citations,
 policy decisions and run status. Stack the columns below 900px. Pending
 comparisons soft-refresh like other in-flight workspace work. Replay runs use
 origin `replay`; the policy gateway and outbound dispatch gate always suppress
 external writes for that execution context.
+
+### Channel activity
+
+Use the registered channel name in History, Evaluations and People. In History,
+link to a separate source surface when the channel provides one. In People, show
+whether an interaction was received or sent and link each agent’s observation to
+its originating run or provider surface. In Access → Approvals, show channel
+permission controls when a registered action supports individual agent grants.
+Actions that always require review use the same Approvals inbox as other proposals.
+
+Chromium verified saving an X run as an evaluation case, tracing email and X
+sources in People, and inspecting evaluation and email approval states at
+1440px and 390px. The People and email views passed their mobile accessibility
+and overflow checks in Light and Dark mode.
 
 ## Design review and verification
 
