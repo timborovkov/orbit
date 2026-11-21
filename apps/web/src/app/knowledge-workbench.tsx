@@ -1,31 +1,16 @@
 'use client';
 
-import { type ReactNode, useEffect, useRef, useState, useTransition } from 'react';
+import { type ReactNode, useEffect, useState, useTransition } from 'react';
+
+import Link from 'next/link';
 
 import { FileText, MessageSquare, Search } from 'lucide-react';
 
-import {
-  deleteKnowledge,
-  inspectKnowledge,
-  replaceKnowledge,
-  reprocessKnowledge,
-  saveKnowledgeSearchAccess,
-  uploadKnowledge,
-} from '@/actions/knowledge';
+import { inspectKnowledge } from '@/actions/knowledge';
 import { KnowledgeDocumentsSection } from '@/app/knowledge-documents-section';
 import { KnowledgeInspectorPanel } from '@/app/knowledge-inspector-panel';
 import { KnowledgePlaygroundAccess } from '@/app/knowledge-playground-access';
-import type { InspectionHit, KnowledgeDoc } from '@/app/knowledge-shared';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import type { InspectionHit, KnowledgeDoc, KnowledgeLibraryAccess } from '@/app/knowledge-shared';
 import {
   Select,
   SelectContent,
@@ -45,23 +30,20 @@ const sections = [
 export function KnowledgeWorkbench({
   agentId,
   documents,
+  sharedLibraries,
   storageReady,
   searchEnabled,
 }: {
   agentId: string;
   documents: KnowledgeDoc[];
+  sharedLibraries: KnowledgeLibraryAccess[];
   storageReady: boolean;
   searchEnabled: boolean;
 }) {
-  const uploadInput = useRef<HTMLInputElement>(null);
   const [active, setActive] = useState<(typeof sections)[number]['id']>('documents');
   const [compact, setCompact] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<KnowledgeDoc | null>(null);
   const [query, setQuery] = useState('');
   const [inspection, setInspection] = useState<{
     library: string;
@@ -69,7 +51,10 @@ export function KnowledgeWorkbench({
     hits: InspectionHit[];
     embeddingMode: 'openrouter' | 'stub';
   } | null>(null);
-  const library = JSON.stringify(documents.map((doc) => [doc.id, doc.status, doc.updatedAt]));
+  const library = JSON.stringify([
+    documents.map((doc) => [doc.id, doc.status, doc.updatedAt]),
+    sharedLibraries,
+  ]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px)');
@@ -90,113 +75,72 @@ export function KnowledgeWorkbench({
       ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
   }, [active, compact]);
 
-  function run(
-    documentId: string | null,
-    work: () => Promise<{
-      error?: string;
-      message?: string;
-      documentId?: string;
-      inspection?: {
-        query: string;
-        hits: InspectionHit[];
-        embeddingMode?: 'openrouter' | 'stub';
-      };
-    }>,
-  ) {
-    setBusyId(documentId);
+  function inspect() {
+    const form = new FormData();
+    form.set('agentId', agentId);
+    form.set('query', query);
+    setError(null);
+    setInspection(null);
     startTransition(async () => {
-      setError(null);
       try {
-        const result = await work();
-        if (result.error) setError(result.error);
-        if (result.inspection) {
-          setInspection({
-            library,
-            query: result.inspection.query,
-            hits: result.inspection.hits,
-            embeddingMode: result.inspection.embeddingMode ?? 'openrouter',
-          });
-        } else if (!result.error && documentId !== 'access') {
-          setInspection(null);
+        const result = await inspectKnowledge(form);
+        if ('inspection' in result && result.inspection) {
+          setInspection({ library, ...result.inspection });
+        } else if (result.error) {
+          setError(result.error);
         }
       } catch {
-        setError('Unable to complete that knowledge action. Try again.');
-      } finally {
-        setBusyId(null);
-        setUploading(false);
+        setError('Unable to inspect knowledge. Try again.');
       }
     });
   }
 
-  function uploadFile(file: File) {
-    if (!storageReady) return;
-    const form = new FormData();
-    form.set('agentId', agentId);
-    form.set('file', file);
-    setUploading(true);
-    run(null, () => uploadKnowledge(form));
-  }
-
   const panels: Record<(typeof sections)[number]['id'], ReactNode> = {
     documents: (
-      <KnowledgeDocumentsSection
-        agentId={agentId}
-        documents={documents}
-        storageReady={storageReady}
-        pending={pending}
-        busyId={busyId}
-        uploading={uploading}
-        dragOver={dragOver}
-        error={error}
-        uploadInput={uploadInput}
-        onBrowse={() => uploadInput.current?.click()}
-        onUploadFile={uploadFile}
-        setDragOver={setDragOver}
-        onReprocess={(documentId) => {
-          const form = new FormData();
-          form.set('agentId', agentId);
-          form.set('documentId', documentId);
-          run(documentId, () => reprocessKnowledge(form));
-        }}
-        onReplace={(documentId, file) => {
-          const form = new FormData();
-          form.set('agentId', agentId);
-          form.set('documentId', documentId);
-          form.set('file', file);
-          run(documentId, () => replaceKnowledge(form));
-        }}
-        onRequestDelete={setDeleteTarget}
-      />
+      <div className="knowledge-workspace-sections">
+        <KnowledgeDocumentsSection
+          scope={{ kind: 'agent', id: agentId }}
+          documents={documents}
+          storageReady={storageReady}
+        />
+        <section className="access-workbench" aria-labelledby="agent-shared-libraries-title">
+          <div className="editor-section-heading">
+            <h2 id="agent-shared-libraries-title">Shared libraries</h2>
+            {!searchEnabled && sharedLibraries.length > 0 && (
+              <p className="muted">Enable knowledge search in Playground to use these libraries.</p>
+            )}
+          </div>
+          {sharedLibraries.length ? (
+            <ul className="knowledge-list">
+              {sharedLibraries.map((item) => (
+                <li className="knowledge-row" key={item.id}>
+                  <Link className="knowledge-source-link" href={`/knowledge/${item.id}`}>
+                    {item.name}
+                  </Link>
+                  <span className="library-meta">
+                    {item.readyCount} of {item.documentCount} ready
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">No shared libraries assigned.</p>
+          )}
+        </section>
+      </div>
     ),
     inspector: (
       <KnowledgeInspectorPanel
+        agentId={agentId}
         query={query}
         pending={pending}
-        searching={pending && busyId === 'inspect'}
         error={error}
         inspection={inspection?.library === library ? inspection : null}
         onQueryChange={setQuery}
-        onInspect={() => {
-          const form = new FormData();
-          form.set('agentId', agentId);
-          form.set('query', query);
-          run('inspect', () => inspectKnowledge(form));
-        }}
+        onInspect={inspect}
       />
     ),
-    playground: (
-      <KnowledgePlaygroundAccess
-        agentId={agentId}
-        searchEnabled={searchEnabled}
-        pending={pending && busyId === 'access'}
-        onToggle={(enabled) => {
-          const form = new FormData();
-          form.set('agentId', agentId);
-          form.set('enabled', String(enabled));
-          run('access', () => saveKnowledgeSearchAccess(form));
-        }}
-      />
-    ),
+    playground: <KnowledgePlaygroundAccess agentId={agentId} searchEnabled={searchEnabled} />,
   };
 
   return (
@@ -259,38 +203,6 @@ export function KnowledgeWorkbench({
           </div>
         ))}
       </div>
-
-      <AlertDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{deleteTarget?.title}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This removes the file, chunks and embeddings for this agent. You can upload it again
-              later.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (!deleteTarget) return;
-                const form = new FormData();
-                form.set('agentId', agentId);
-                form.set('documentId', deleteTarget.id);
-                run(deleteTarget.id, () => deleteKnowledge(form));
-                setDeleteTarget(null);
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

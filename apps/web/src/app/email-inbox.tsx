@@ -154,7 +154,9 @@ function SelectedThread({
                 intentId={message.review.intentId}
                 initialDraft={message.review.draft}
               />
-              {message.draft && <KnowledgeCitations sources={message.draft.sources} />}
+              {message.draft && (
+                <KnowledgeCitations agentId={agentId} sources={message.draft.sources} />
+              )}
             </section>
           )}
           {message.review?.status !== 'pending' && (message.review?.draft ?? message.draft) && (
@@ -163,7 +165,9 @@ function SelectedThread({
               <p className="preserve-text">
                 {message.review?.draft ?? message.draft?.answer ?? ''}
               </p>
-              {message.draft && <KnowledgeCitations sources={message.draft.sources} />}
+              {message.draft && (
+                <KnowledgeCitations agentId={agentId} sources={message.draft.sources} />
+              )}
             </section>
           )}
           {message.sendOutcome && <SendOutcome outcome={message.sendOutcome} />}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 
 import { saveKnowledgeSearchAccess } from '@/actions/knowledge';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
@@ -9,16 +9,12 @@ import { Switch } from '@/components/ui/switch';
 export function KnowledgePlaygroundAccess({
   agentId,
   searchEnabled,
-  pending,
-  onToggle,
 }: {
   agentId: string;
   searchEnabled: boolean;
-  pending?: boolean;
-  onToggle?: (enabled: boolean) => void;
 }) {
-  const [localPending, startTransition] = useTransition();
-  const busy = pending ?? localPending;
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <section
@@ -29,8 +25,8 @@ export function KnowledgePlaygroundAccess({
       <div className="editor-section-heading">
         <h2 id="knowledge-playground-title">Playground retrieval</h2>
         <p className="muted">
-          When enabled, Playground runs can call knowledge.search against this agent’s ready
-          documents.
+          When enabled, Playground runs can call knowledge.search against ready private documents
+          and granted libraries.
         </p>
       </div>
       <Field orientation="horizontal" className="items-center justify-between gap-4">
@@ -43,22 +39,29 @@ export function KnowledgePlaygroundAccess({
         <Switch
           id="knowledge-playground-toggle"
           checked={searchEnabled}
-          disabled={busy}
+          disabled={pending}
           aria-label="Use knowledge in Playground"
           onCheckedChange={(enabled) => {
-            if (onToggle) {
-              onToggle(enabled);
-              return;
-            }
+            setError(null);
             const form = new FormData();
             form.set('agentId', agentId);
             form.set('enabled', String(enabled));
             startTransition(async () => {
-              await saveKnowledgeSearchAccess(form);
+              try {
+                const result = await saveKnowledgeSearchAccess(form);
+                if (result.error) setError(result.error);
+              } catch {
+                setError('Unable to save knowledge search access. Try again.');
+              }
             });
           }}
         />
       </Field>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   );
 }

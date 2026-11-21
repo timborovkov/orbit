@@ -10,6 +10,7 @@ import { emailModule } from '@/lib/seed/modules/email';
 import { evaluationsModule } from '@/lib/seed/modules/evaluations';
 import { followUpsModule } from '@/lib/seed/modules/follow-ups';
 import { knowledgeModule } from '@/lib/seed/modules/knowledge';
+import { knowledgeLibrariesModule } from '@/lib/seed/modules/knowledge-libraries';
 import { runsModule } from '@/lib/seed/modules/runs';
 import { usageModule } from '@/lib/seed/modules/usage';
 import type { SeedModule } from '@/lib/seed/types';
@@ -28,6 +29,7 @@ export const seedModules: SeedModule[] = [
   consentsModule,
   approvalsModule,
   knowledgeModule,
+  knowledgeLibrariesModule,
   emailModule,
   discoveryModule,
   followUpsModule,

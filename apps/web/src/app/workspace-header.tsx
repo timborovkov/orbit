@@ -20,6 +20,7 @@ const navLinks = [
   { href: '/approvals', label: 'Approvals' },
   { href: '/evaluations', label: 'Evaluations' },
   { href: '/templates', label: 'Templates' },
+  { href: '/knowledge', label: 'Knowledge' },
   { href: '/skills', label: 'Skills' },
   { href: '/mcp', label: 'MCP' },
 ] as const;
