@@ -64,7 +64,8 @@ export const memoryModule: SeedModule = {
         fact: 'Northstar requires SSO before starting its pilot.',
         quote,
         runId,
-        emailMessageId: messageId,
+        sourceKind: 'email',
+        sourceId: messageId,
         sourceAt,
         learnedAt: sourceAt,
       })

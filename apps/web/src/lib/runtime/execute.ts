@@ -25,7 +25,7 @@ import {
   recordApprovalReviews,
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
-import { emailKnowledgeQuery, emailMemoryQuery } from '@/lib/runtime/email/input';
+import { emailKnowledgeQuery } from '@/lib/runtime/email/input';
 import {
   proposeEmailReplyFromDraft,
   recoverEmailReplyProposalIfNeeded,
@@ -467,6 +467,7 @@ export interface SimulationJobClaim {
 
 /** Playground vs email drafting semantics. Replay keeps origin=replay for safety. */
 export type SimulationBehavior = 'playground' | 'email';
+type ReplayOptions = { behavior: SimulationBehavior; recallQuery: string };
 
 async function processSimulationRun(
   runId: string,
@@ -474,12 +475,11 @@ async function processSimulationRun(
   externalSignal?: AbortSignal,
   claim?: SimulationJobClaim,
   origin: typeof runs.$inferSelect.origin = 'playground',
-  /** Drafting mode when origin is `replay` (defaults to playground). */
-  behavior?: SimulationBehavior,
+  replay?: ReplayOptions,
 ) {
   // Persisted origin gates reclaim; behavior selects email vs playground simulate paths.
   const simulationBehavior: SimulationBehavior =
-    behavior ?? (origin === 'email' ? 'email' : 'playground');
+    replay?.behavior ?? (origin === 'email' ? 'email' : 'playground');
   const claimed = await db().transaction(async (tx) => {
     // Peek without locking so we can take the agent lock before the run lock
     // (same order as enqueueSimulation and persistLifecycle) and avoid deadlocks.
@@ -722,11 +722,10 @@ async function processSimulationRun(
       return;
     }
 
-    const captureSource =
-      memoryCaptureOrigin(run.origin) &&
-      !checkpointed?.steps.some((step) => step.stage === 'evaluator')
-        ? await retryableStore(() => memoryRunSource(run))
-        : null;
+    const source = memoryCaptureOrigin(run.origin)
+      ? await retryableStore(() => memoryRunSource(run))
+      : null;
+    const recallQuery = source?.text.join('\n') ?? replay?.recallQuery ?? run.input;
     const resources = await prepareRunTools({
       agentId: run.agentId,
       policy: basePolicy,
@@ -822,8 +821,11 @@ async function processSimulationRun(
           },
           {
             origin: origin === 'discovery' ? 'discovery' : simulationBehavior,
-            verifyMemories: captureSource
-              ? (candidates) => verifiedMemoryCandidates(candidates, captureSource.text)
+            memoryCapture: source
+              ? {
+                  source: source.text,
+                  verify: (candidates) => verifiedMemoryCandidates(candidates, source.text),
+                }
               : undefined,
             recallMemory: async (requestSignal) => {
               try {
@@ -833,7 +835,7 @@ async function processSimulationRun(
                     runId: run.id,
                     actor: run.actor,
                     executionToken,
-                    query: simulationBehavior === 'email' ? emailMemoryQuery(run.input) : run.input,
+                    query: recallQuery,
                     replay: origin === 'replay',
                     signal: requestSignal,
                   }),
@@ -1432,10 +1434,10 @@ export async function processSimulationRunForOrigin(
   inference: (key: string) => ModelCall = openRouterInference,
   signal?: AbortSignal,
   claim?: SimulationJobClaim,
-  /** For origin=replay: select email vs playground drafting without changing safety origin. */
-  behavior?: SimulationBehavior,
+  /** Supplies the case's drafting behavior and recall text without changing its safety origin. */
+  replay?: ReplayOptions,
 ) {
-  await processSimulationRun(runId, inference, signal, claim, origin, behavior);
+  await processSimulationRun(runId, inference, signal, claim, origin, replay);
 }
 
 function exhaustedJobMessage(reason: string) {

@@ -1,10 +1,10 @@
 import 'server-only';
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { agentMemories, emailMessages, sourceEvents } from '@/lib/schema';
+import { agentMemories, runMemoryEvidence } from '@/lib/schema';
 
 const pageSize = 30;
 
@@ -22,7 +22,6 @@ export async function listAgentMemories(agentId: string, page: number) {
       reviewOn: agentMemories.reviewOn,
       correctedBy: agentMemories.correctedBy,
       correctedAt: agentMemories.correctedAt,
-      fromEmail: sql<boolean>`${agentMemories.emailMessageId} IS NOT NULL`,
     })
     .from(agentMemories)
     .where(eq(agentMemories.agentId, agentId))
@@ -49,36 +48,25 @@ export async function selectAgentMemoryEvidence(
       topic: agentMemories.topic,
       quote: agentMemories.quote,
       sourceAt: agentMemories.sourceAt,
-      runId: agentMemories.runId,
       correctedBy: agentMemories.correctedBy,
-      email: {
-        id: emailMessages.id,
-        threadId: emailMessages.threadId,
-        subject: emailMessages.subject,
-        sender: emailMessages.sender,
-        body: emailMessages.body,
-      },
-      event: {
-        id: sourceEvents.id,
-        author: sourceEvents.authorUsername,
-        text: sourceEvents.text,
+      source: {
+        id: runMemoryEvidence.sourceId,
+        title: runMemoryEvidence.title,
+        author: runMemoryEvidence.author,
+        body: runMemoryEvidence.body,
+        label: runMemoryEvidence.label,
+        href: runMemoryEvidence.href,
+        linkLabel: runMemoryEvidence.linkLabel,
       },
     })
     .from(agentMemories)
-    .leftJoin(
-      emailMessages,
+    .innerJoin(
+      runMemoryEvidence,
       and(
-        eq(emailMessages.id, agentMemories.emailMessageId),
-        eq(emailMessages.agentId, agentMemories.agentId),
-        eq(emailMessages.runId, agentMemories.runId),
-      ),
-    )
-    .leftJoin(
-      sourceEvents,
-      and(
-        eq(sourceEvents.id, agentMemories.sourceEventId),
-        eq(sourceEvents.agentId, agentMemories.agentId),
-        eq(sourceEvents.runId, agentMemories.runId),
+        eq(runMemoryEvidence.sourceId, agentMemories.sourceId),
+        eq(runMemoryEvidence.sourceKind, agentMemories.sourceKind),
+        eq(runMemoryEvidence.agentId, agentMemories.agentId),
+        eq(runMemoryEvidence.runId, agentMemories.runId),
       ),
     )
     .where(
@@ -88,5 +76,5 @@ export async function selectAgentMemoryEvidence(
         eq(agentMemories.revision, revision),
       ),
     );
-  return typeof row?.email?.body === 'string' || row?.event ? row : null;
+  return row ?? null;
 }

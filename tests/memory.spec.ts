@@ -35,9 +35,9 @@ test('admins can trace, correct, expire and remove an agent memory', async ({ pa
       VALUES (${messageId},${sarah},${messageId},'{}','pilot@northstar.example.test','Pilot requirements',
         now(),${run!.id},${threadId},${message})`;
     const [memory] = await sql`INSERT INTO agent_memories
-      (id,agent_id,subject_kind,subject,topic,identity_key,fact,quote,run_id,email_message_id,source_at)
+      (id,agent_id,subject_kind,subject,topic,identity_key,fact,quote,run_id,source_kind,source_id,source_at)
       VALUES(${memoryId},${sarah},'company','Northstar','SSO requirement','northstar-sso',${fact},
-        ${fact},${run!.id},${messageId},now()) RETURNING revision`;
+        ${fact},${run!.id},'email',${messageId},now()) RETURNING revision`;
     await sql`INSERT INTO simulation_runs(agent_id,configuration_id,input,actor,status,result,expires_at)
       SELECT ${sarah},id,'Does Northstar require SSO?','fixture','completed',${sql.json({
         error: null,
@@ -77,8 +77,8 @@ test('admins can trace, correct, expire and remove an agent memory', async ({ pa
     await expect(row.locator('summary')).toContainText(fact);
     await row.locator('summary').focus();
     await page.keyboard.press('Enter');
-    await expect(row.getByRole('link', { name: 'View original message' })).toBeVisible();
-    await row.getByRole('link', { name: 'View original message' }).click();
+    await expect(row.getByRole('link', { name: 'View original source' })).toBeVisible();
+    await row.getByRole('link', { name: 'View original source' }).click();
     await expect(page.getByRole('heading', { name: 'Original inbound message' })).toBeVisible();
     await expect(page.getByText('<em>Please confirm compatibility.</em>')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Open email thread' })).toHaveAttribute(

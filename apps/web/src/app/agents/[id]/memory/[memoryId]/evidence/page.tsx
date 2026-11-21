@@ -26,6 +26,8 @@ export default async function MemoryEvidence({
     getPendingApprovalCount(),
   ]);
   if (!evidence) notFound();
+  const { source } = evidence;
+  const attribution = [source.title, source.author].filter(Boolean).join(' · ');
   return (
     <div className="agent-shell">
       <WorkspaceHeader pendingApprovalCount={pendingApprovalCount} />
@@ -45,32 +47,13 @@ export default async function MemoryEvidence({
             <blockquote className="preserve-text">{evidence.quote}</blockquote>
           </section>
           <section aria-labelledby="memory-source-heading">
-            <h2 id="memory-source-heading">
-              {evidence.email ? 'Original inbound message' : 'Original discovery event'}
-            </h2>
-            {evidence.email && (
-              <p className="preserve-text">
-                {evidence.email.subject} · {evidence.email.sender}
-              </p>
-            )}
-            {evidence.event?.author && <p className="muted">@{evidence.event.author}</p>}
-            <p className="preserve-text">{evidence.email?.body ?? evidence.event?.text}</p>
+            <h2 id="memory-source-heading">{source.label}</h2>
+            {attribution && <p className="preserve-text">{attribution}</p>}
+            <p className="preserve-text">{source.body}</p>
           </section>
-          {evidence.email ? (
-            <Link
-              className="memory-link"
-              href={`/agents/${id}?tab=email&emailThread=${evidence.email.threadId}&emailMessage=${evidence.email.id}#message-${evidence.email.id}`}
-            >
-              Open email thread
-            </Link>
-          ) : (
-            <Link
-              className="memory-link"
-              href={`/agents/${id}?run=${evidence.runId}#run-${evidence.runId}`}
-            >
-              View originating run
-            </Link>
-          )}
+          <Link className="memory-link" href={source.href}>
+            {source.linkLabel}
+          </Link>
         </article>
       </main>
     </div>

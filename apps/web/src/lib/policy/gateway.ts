@@ -32,6 +32,7 @@ import {
   mcpConnections,
   type McpTransport,
   policyDecisions,
+  runMemoryEvidence,
   runs,
   usageCounters,
 } from '@/lib/schema';
@@ -57,6 +58,7 @@ export interface PolicyContext {
   /** Derived from the run origin; replay always suppresses external writes. */
   executionContext: ExecutionContext;
   runOrigin?: typeof runs.$inferSelect.origin;
+  hasMemoryEvidence?: boolean;
   lifecycle: LifecycleState;
   enabledTools: string[];
   approvalTools: string[];
@@ -204,6 +206,9 @@ export function evaluateCandidate(
     ) {
       return { decision: 'deny', reasons: ['This run can read memory only.'] };
     }
+    if (action.type === MEMORY_CAPTURE && !ctx.hasMemoryEvidence) {
+      return { decision: 'deny', reasons: ['Memory capture requires a persisted source.'] };
+    }
     return { decision: 'allow', reasons: ['Agent memory operation permitted.'] };
   }
 
@@ -346,6 +351,16 @@ export async function authorizeAction(
         );
       const owned = (await (action.type === MEMORY_CAPTURE ? query.for('update') : query)).at(0);
       if (!owned) throw new BudgetError('cancelled');
+      if (action.type === MEMORY_CAPTURE && memoryCaptureOrigin(current.runOrigin)) {
+        const sources = await tx
+          .select({ id: runMemoryEvidence.sourceId })
+          .from(runMemoryEvidence)
+          .where(
+            and(eq(runMemoryEvidence.agentId, ctx.agentId), eq(runMemoryEvidence.runId, owned.id)),
+          )
+          .limit(2);
+        current.hasMemoryEvidence = sources.length === 1;
+      }
     }
     const recipients = action.recipients ?? [];
     const consentFailure =

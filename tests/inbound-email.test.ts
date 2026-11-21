@@ -27,6 +27,8 @@ import { searchKnowledge } from '@/lib/runtime/knowledge/search';
 import { processMemoryEmbedding } from '@/lib/runtime/memory/store';
 import { MEMORY_CAPTURE } from '@/lib/runtime/memory/types';
 import { draftAnswerFromResult, type ModelCall } from '@/lib/runtime/simulation';
+import { createFixtureXSearchAdapter } from '@/lib/runtime/x/fixture';
+import { processDiscoveryPoll } from '@/lib/runtime/x/poll';
 import { setEmailEnabled } from '@/lib/server/email-mutations';
 import { persistLifecycle } from '@/lib/server/lifecycle-mutations';
 import { saveAgentMemory } from '@/lib/server/memory-mutations';
@@ -589,12 +591,13 @@ test('inbound memory commits once across a finalization retry and recalls only i
   expect(entries).toHaveLength(1);
   const [entry] = entries;
   expect(entry).toMatchObject({
-    email_message_id: original.id,
+    source_kind: 'email',
+    source_id: original.id,
     run_id: original.run_id,
     fact: ssoRequirement,
   });
   expect(await selectAgentMemoryEvidence(sarah.id, entry!.id, entry!.revision)).toMatchObject({
-    email: { id: original.id, body: ssoRequirement },
+    source: { id: original.id, body: ssoRequirement },
     quote: ssoRequirement,
   });
   expect(await selectAgentMemoryEvidence(john.id, entry!.id, entry!.revision)).toBeNull();
@@ -622,6 +625,30 @@ test('inbound memory commits once across a finalization retry and recalls only i
   expect(later!.result.memory).toEqual([{ id: entry!.id, revision: entry!.revision }]);
 
   const asked = 'Does the Northstar pilot require SSO?';
+  await sql`UPDATE agent_configurations SET config = config || '{"xSearchQuery":"*"}'::jsonb
+    WHERE id=${sarah.version}`;
+  const adapter = createFixtureXSearchAdapter([{ id: '32001', text: asked, raw: {} }]);
+  expect(
+    await processDiscoveryPoll({ payload: { agentId: sarah.id } }, signal, {
+      adapter,
+      evaluate: true,
+    }),
+  ).toMatchObject({ evaluated: 1 });
+  const [discovery] = await sql`SELECT run_id FROM source_events WHERE agent_id=${sarah.id}`;
+  await processSimulationJob({ runId: discovery!.run_id }, () =>
+    memoryInference([], (request) => {
+      const input = JSON.parse(request.input);
+      expect(input.untrustedMemorySource).toEqual([asked]);
+      expect(input.untrustedMemories).toMatchObject([{ fact: ssoRequirement }]);
+    }),
+  );
+  const [crossChannel] =
+    await sql`SELECT status,result FROM simulation_runs WHERE id=${discovery!.run_id}`;
+  expect(crossChannel).toMatchObject({
+    status: 'completed',
+    result: { memory: [{ id: entry!.id, revision: entry!.revision }] },
+  });
+
   const outside = await playgroundMemory(
     john,
     asked,
@@ -753,10 +780,10 @@ test('newer evidence updates a learned revision, corrections take precedence, an
   expect(expired!.embedding).toBeNull();
 });
 
-test('pgvector finds an owned fact without matching keywords and the gateway rejects replay capture', async () => {
+test('pgvector finds owned facts and memory capture requires a production run with evidence', async () => {
   const sarah = await createAgent('Sarah semantic memory');
   const john = await createAgent('John semantic memory');
-  await incomingMemorySource(sarah.address, ssoRequirement);
+  const original = await incomingMemorySource(sarah.address, ssoRequirement);
   await draft(memoryInference([memoryProposal(ssoRequirement)]), 1);
   const [entry] = await sql`SELECT id,revision FROM agent_memories WHERE agent_id=${sarah.id}`;
   const stub = process.env.KNOWLEDGE_EMBEDDING_STUB;
@@ -777,11 +804,15 @@ test('pgvector finds an owned fact without matching keywords and the gateway rej
   }
 
   const token = randomUUID();
-  for (const origin of ['playground', 'replay']) {
+  for (const origin of ['playground', 'replay', 'discovery']) {
     const [run] = await sql`INSERT INTO simulation_runs
       (agent_id,configuration_id,origin,input,status,actor,result,expires_at,execution_token)
       VALUES (${sarah.id},${sarah.version},${origin},'Untrusted input','running',${admin},
         '{"steps":[],"actions":[],"error":null}'::jsonb,now()+interval '5 minutes',${token}) RETURNING id`;
+    if (origin !== 'discovery') {
+      await sql`INSERT INTO source_events (agent_id, provider, provider_event_id, payload, text, run_id)
+        VALUES (${sarah.id},'x',${randomUUID()},'{}',${ssoRequirement},${run!.id})`;
+    }
     const ctx = await loadPolicyContext(sarah.id, admin, run!.id, db());
     expect(
       await authorizeAction(ctx!, {
@@ -790,5 +821,9 @@ test('pgvector finds an owned fact without matching keywords and the gateway rej
         executionToken: token,
       }),
     ).toMatchObject({ decision: 'deny' });
+    await sql`UPDATE simulation_runs SET status='completed' WHERE id=${run!.id}`;
   }
+  await sql`UPDATE email_messages SET body=NULL WHERE id=${original.id}`;
+  expect(await sql`SELECT id FROM agent_memories WHERE id=${entry!.id}`).toHaveLength(0);
+  expect((await playgroundMemory(sarah, ssoRequirement, memoryInference())).memory).toBeUndefined();
 });

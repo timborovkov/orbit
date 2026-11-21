@@ -34,7 +34,6 @@ type MemoryRow = MemoryRef & {
   reviewOn: string | null;
   correctedBy: string | null;
   correctedAt: Date | null;
-  fromEmail: boolean;
 };
 
 function RemoveMemoryButton({ agentId, item }: { agentId: string; item: MemoryRow }) {
@@ -164,7 +163,7 @@ export function MemoryWorkbench({
         <div className="follow-ups-empty">
           <p>
             {page === 1
-              ? 'No memories yet. Facts learned from inbound messages and discovery appear here.'
+              ? 'No memories yet. Facts the agent learns during runs appear here.'
               : 'No memories on this page.'}
           </p>
         </div>
@@ -197,7 +196,7 @@ export function MemoryWorkbench({
                   <dt>Source</dt>
                   <dd>
                     <Link href={memoryEvidenceHref(agentId, item)} className="memory-link">
-                      {item.fromEmail ? 'View original message' : 'View original event'}
+                      View original source
                     </Link>
                   </dd>
                 </div>

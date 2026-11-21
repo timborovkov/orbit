@@ -16,54 +16,26 @@ import {
   memoryCandidate,
   type MemoryRef,
 } from '@/lib/runtime/memory/types';
-import { actionIntents, agentMemories, emailMessages, type runs, sourceEvents } from '@/lib/schema';
+import { actionIntents, agentMemories, runMemoryEvidence, type runs } from '@/lib/schema';
 
-type MemoryRun = Pick<typeof runs.$inferSelect, 'id' | 'agentId' | 'actor' | 'origin'>;
+type MemoryRun = Pick<typeof runs.$inferSelect, 'id' | 'agentId' | 'actor'>;
 type EntryKey = MemoryRef & { agentId: string };
 
 export async function memoryRunSource(run: MemoryRun, store: Tx | ReturnType<typeof db> = db()) {
-  if (run.origin === 'email') {
-    const message = (
-      await store
-        .select({
-          id: emailMessages.id,
-          at: emailMessages.receivedAt,
-          subject: emailMessages.subject,
-          body: emailMessages.body,
-        })
-        .from(emailMessages)
-        .where(and(eq(emailMessages.agentId, run.agentId), eq(emailMessages.runId, run.id)))
-    ).at(0);
-    if (!message?.body) return null;
-    return {
-      emailMessageId: message.id,
-      sourceEventId: null,
-      sourceAt: message.at,
-      text: [message.subject, message.body.slice(0, 8_000)],
-    };
-  }
-  if (run.origin === 'discovery') {
-    const event = (
-      await store
-        .select({
-          id: sourceEvents.id,
-          at: sql<Date>`coalesce(${sourceEvents.providerCreatedAt}, ${sourceEvents.ingestedAt})`.mapWith(
-            sourceEvents.ingestedAt,
-          ),
-          text: sourceEvents.text,
-        })
-        .from(sourceEvents)
-        .where(and(eq(sourceEvents.agentId, run.agentId), eq(sourceEvents.runId, run.id)))
-    ).at(0);
-    if (!event) return null;
-    return {
-      emailMessageId: null,
-      sourceEventId: event.id,
-      sourceAt: event.at,
-      text: [event.text],
-    };
-  }
-  return null;
+  const [match, other] = await store
+    .select({
+      sourceId: runMemoryEvidence.sourceId,
+      sourceKind: runMemoryEvidence.sourceKind,
+      sourceAt: runMemoryEvidence.sourceAt,
+      title: runMemoryEvidence.title,
+      body: runMemoryEvidence.body,
+    })
+    .from(runMemoryEvidence)
+    .where(and(eq(runMemoryEvidence.agentId, run.agentId), eq(runMemoryEvidence.runId, run.id)))
+    .limit(2);
+  if (!match || other) return null;
+  const { title, body, ...source } = match;
+  return { ...source, text: title ? [title, body.slice(0, 8_000)] : [body.slice(0, 8_000)] };
 }
 
 function identityKey(candidate: Pick<MemoryCandidate, 'subject' | 'topic'>) {
@@ -142,8 +114,8 @@ export async function captureRunMemories(
         identityKey: identityKey({ subject, topic }),
         agentId: run.agentId,
         runId: run.id,
-        emailMessageId: evidence.emailMessageId,
-        sourceEventId: evidence.sourceEventId,
+        sourceKind: evidence.sourceKind,
+        sourceId: evidence.sourceId,
         sourceAt: evidence.sourceAt,
         learnedAt,
       })),
@@ -156,8 +128,8 @@ export async function captureRunMemories(
         fact: sql`excluded.fact`,
         quote: sql`excluded.quote`,
         runId: sql`excluded.run_id`,
-        emailMessageId: sql`excluded.email_message_id`,
-        sourceEventId: sql`excluded.source_event_id`,
+        sourceKind: sql`excluded.source_kind`,
+        sourceId: sql`excluded.source_id`,
         sourceAt: evidence.sourceAt,
         learnedAt,
         expiresOn: sql`excluded.expires_on`,

@@ -9,6 +9,7 @@ import {
 import { db, type Tx } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { enqueueJob } from '@/lib/queue/jobs';
+import { emailMemoryQuery } from '@/lib/runtime/email/input';
 import { buildEmailDraftInput } from '@/lib/runtime/email/receive';
 import {
   processSimulationRunForOrigin,
@@ -370,6 +371,8 @@ async function runReplaySide(
     if (!evaluationCase) return { error: 'Evaluation case not found.' as const };
 
     const behavior = behaviorForCaseSource(evaluationCase.sourceKind);
+    const recallQuery =
+      behavior === 'email' ? emailMemoryQuery(evaluationCase.input) : evaluationCase.input;
     const existingRunId = side === 'left' ? comparison.leftRunId : comparison.rightRunId;
     if (existingRunId) {
       const existing = (
@@ -377,7 +380,7 @@ async function runReplaySide(
       ).at(0);
       if (existing?.origin === 'replay' && existing.configurationId === configurationId) {
         if (existing.status === 'completed') {
-          return { runId: existing.id, behavior, skipProcess: true as const };
+          return { runId: existing.id, skipProcess: true as const };
         }
         // Resume the same run so checkpoints and paid-step burns stay effective across retries.
         if (existing.status === 'failed' || existing.status === 'interrupted') {
@@ -394,7 +397,7 @@ async function runReplaySide(
             })
             .where(eq(runs.id, existing.id));
         }
-        return { runId: existing.id, behavior, skipProcess: false as const };
+        return { runId: existing.id, behavior, recallQuery, skipProcess: false as const };
       }
     }
 
@@ -411,20 +414,16 @@ async function runReplaySide(
       .set(side === 'left' ? { leftRunId: result.runId } : { rightRunId: result.runId })
       .where(eq(evaluationComparisons.id, comparisonId));
 
-    return { ...result, behavior, skipProcess: false as const };
+    return { ...result, behavior, recallQuery, skipProcess: false as const };
   });
 
   if ('error' in admitted) return admitted;
   if ('skipped' in admitted) return admitted;
   if (!admitted.skipProcess) {
-    await processSimulationRunForOrigin(
-      admitted.runId,
-      'replay',
-      inference,
-      signal,
-      ownedClaim,
-      admitted.behavior,
-    );
+    await processSimulationRunForOrigin(admitted.runId, 'replay', inference, signal, ownedClaim, {
+      behavior: admitted.behavior,
+      recallQuery: admitted.recallQuery,
+    });
   }
   return { runId: admitted.runId };
 }

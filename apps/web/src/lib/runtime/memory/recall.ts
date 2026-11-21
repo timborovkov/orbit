@@ -26,14 +26,9 @@ type RecallInput = {
 
 const available = () => sqlClient()`
   (expires_on IS NULL OR expires_on > (now() AT TIME ZONE 'UTC')::date)
-  AND (
-    EXISTS (SELECT 1 FROM email_messages AS message
-      WHERE message.id = agent_memories.email_message_id AND message.agent_id = agent_memories.agent_id
-        AND message.run_id = agent_memories.run_id AND message.body IS NOT NULL)
-    OR EXISTS (SELECT 1 FROM source_events AS event
-      WHERE event.id = agent_memories.source_event_id AND event.agent_id = agent_memories.agent_id
-        AND event.run_id = agent_memories.run_id)
-  )
+  AND EXISTS (SELECT 1 FROM run_memory_evidence AS evidence
+    WHERE evidence.agent_id = agent_memories.agent_id AND evidence.run_id = agent_memories.run_id
+      AND evidence.source_kind = agent_memories.source_kind AND evidence.source_id = agent_memories.source_id)
 `;
 
 type RecallRow = Omit<RecalledMemory, 'learnedAt'> & { learnedAt: Date | string };

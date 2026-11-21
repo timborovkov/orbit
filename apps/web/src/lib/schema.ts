@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  pgView,
   primaryKey,
   text,
   timestamp,
@@ -633,8 +634,8 @@ export const agentMemories = pgTable(
     fact: text('fact').notNull(),
     quote: text('quote').notNull(),
     runId: uuid('run_id').notNull(),
-    emailMessageId: uuid('email_message_id'),
-    sourceEventId: uuid('source_event_id'),
+    sourceKind: text('source_kind').notNull(),
+    sourceId: uuid('source_id').notNull(),
     sourceAt: timestamp('source_at', { withTimezone: true }).notNull(),
     learnedAt: timestamp('learned_at', { withTimezone: true }).notNull().defaultNow(),
     expiresOn: date('expires_on'),
@@ -651,16 +652,22 @@ export const agentMemories = pgTable(
       columns: [table.agentId, table.runId],
       foreignColumns: [runs.agentId, runs.id],
     }).onDelete('cascade'),
-    foreignKey({
-      columns: [table.agentId, table.emailMessageId],
-      foreignColumns: [emailMessages.agentId, emailMessages.id],
-    }).onDelete('cascade'),
-    foreignKey({
-      columns: [table.agentId, table.sourceEventId],
-      foreignColumns: [sourceEvents.agentId, sourceEvents.id],
-    }).onDelete('cascade'),
   ],
 );
+
+export const runMemoryEvidence = pgView('run_memory_evidence', {
+  sourceKind: text('source_kind').notNull(),
+  sourceId: uuid('source_id').notNull(),
+  agentId: uuid('agent_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  sourceAt: timestamp('source_at', { withTimezone: true }).notNull(),
+  title: text('title'),
+  author: text('author'),
+  body: text('body').notNull(),
+  label: text('label').notNull(),
+  href: text('href').notNull(),
+  linkLabel: text('link_label').notNull(),
+}).existing();
 
 export const discoveryCursors = pgTable(
   'discovery_cursors',

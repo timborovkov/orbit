@@ -407,6 +407,7 @@ test('a discovery run can remember a project detail with evidence from its event
   const inference: ModelCall = async (request) => {
     expect(request.stage).toBe('evaluator');
     expect(request.captureMemory).toBe(true);
+    expect(JSON.parse(request.input).untrustedMemorySource).toEqual([quote]);
     return {
       inputTokens: 5,
       outputTokens: 1,
@@ -436,10 +437,17 @@ test('a discovery run can remember a project detail with evidence from its event
     else process.env.OPENROUTER_API_KEY = priorKey;
   }
   const [memory] =
-    await sql`SELECT id,revision,source_event_id,subject_kind FROM agent_memories WHERE agent_id=${agentId}`;
-  expect(memory).toMatchObject({ source_event_id: event!.id, subject_kind: 'project' });
+    await sql`SELECT id,revision,source_kind,source_id,subject_kind FROM agent_memories WHERE agent_id=${agentId}`;
+  expect(memory).toMatchObject({
+    source_kind: 'event',
+    source_id: event!.id,
+    subject_kind: 'project',
+  });
   expect(await selectAgentMemoryEvidence(agentId, memory!.id, memory!.revision)).toMatchObject({
-    event: { id: event!.id, text: quote },
+    source: { id: event!.id, body: quote },
     quote,
   });
+  await sql`DELETE FROM source_events WHERE id=${event!.id}`;
+  expect(await sql`SELECT id FROM agent_memories WHERE id=${memory!.id}`).toHaveLength(0);
+  expect(await selectAgentMemoryEvidence(agentId, memory!.id, memory!.revision)).toBeNull();
 });

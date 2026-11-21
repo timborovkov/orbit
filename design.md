@@ -342,8 +342,8 @@ source links download the original through the selected agent’s current access
 
 Use the workspace disclosure rows to list learned company and project facts.
 Keep the fact, learned timestamp and active, review due or expired state visible
-in the collapsed row. Let admins open the original message or event from the
-expanded row, correct the fact and UTC dates, or confirm removal. A corrected
+in the collapsed row. In the expanded row, use **View original source** across
+channels and let admins correct the fact and UTC dates or confirm removal. A corrected
 entry labels the original quote as the evidence for what was first learned.
 Use a single date column on phones and keep source text readable as plain text.
 Show memory evidence links alongside the corresponding answer in Playground,

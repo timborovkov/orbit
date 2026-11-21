@@ -19,7 +19,7 @@ export type RecalledMemory = MemoryRef & {
 };
 
 export function memoryCaptureOrigin(origin: typeof runs.$inferSelect.origin | null | undefined) {
-  return origin === 'email' || origin === 'discovery';
+  return Boolean(origin && origin !== 'playground' && origin !== 'replay');
 }
 
 const restrictedMemory =
