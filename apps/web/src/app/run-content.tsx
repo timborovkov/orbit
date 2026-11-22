@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 
 import { KnowledgeCitations } from '@/app/knowledge-citations';
+import { MemoryCitations } from '@/app/memory-citations';
 import { formatUtcTimestamp } from '@/lib/format';
 import { draftAnswerFromResult, groundedAnswerFromResult } from '@/lib/runtime/simulation';
 import type { runs } from '@/lib/schema';
@@ -77,9 +78,10 @@ export function RunContent({
       )}
       {grounded && (
         <section>
-          <h3>Answer from knowledge</h3>
+          <h3>{grounded.memories.length ? 'Answer' : 'Answer from knowledge'}</h3>
           <p className="preserve-text">{grounded.answer}</p>
           <KnowledgeCitations agentId={run.agentId} sources={grounded.sources} />
+          <MemoryCitations agentId={run.agentId} references={grounded.memories} />
         </section>
       )}
       {draft && (

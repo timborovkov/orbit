@@ -14,6 +14,7 @@ import { FollowUpsWorkbench } from '@/app/follow-ups-workbench';
 import { HistoryWorkbench } from '@/app/history-workbench';
 import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
 import { LoadingStatus } from '@/app/loading-status';
+import { MemoryWorkbench } from '@/app/memory-workbench';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { PlaygroundPanel } from '@/app/playground-panel';
 import { ProposalReview } from '@/app/policy-settings';
@@ -35,6 +36,7 @@ import {
   listKnowledgeDocuments,
 } from '@/lib/server/knowledge-queries';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
+import { listAgentMemories } from '@/lib/server/memory-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
@@ -45,6 +47,7 @@ interface WorkspaceSearch {
   emailMessage?: string;
   emailPage?: string;
   messagePage?: string;
+  memoryPage?: string;
 }
 
 function workspaceLocation(search: WorkspaceSearch) {
@@ -54,6 +57,7 @@ function workspaceLocation(search: WorkspaceSearch) {
   return {
     focusRunId,
     selectedThread,
+    memoryPage: pageNumber.safeParse(search.memoryPage).data ?? 1,
     focusMessageId: z.uuid().safeParse(search.emailMessage).data,
     emailPage: pageNumber.safeParse(search.emailPage).data ?? 1,
     messagePage: pageNumber.safeParse(search.messagePage).data ?? 1,
@@ -71,9 +75,8 @@ export default async function AgentWorkspace({
   const email = await requireAdmin();
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
-  const { focusRunId, selectedThread, focusMessageId, emailPage, messagePage } = workspaceLocation(
-    await searchParams,
-  );
+  const { focusRunId, selectedThread, focusMessageId, emailPage, messagePage, memoryPage } =
+    workspaceLocation(await searchParams);
   const workspace = await getAgentWorkspace(id, focusRunId);
   if (!workspace) notFound();
   const {
@@ -98,6 +101,7 @@ export default async function AgentWorkspace({
     inbox,
     followUps,
     activityEvents,
+    memory,
   ] = await Promise.all([
     listKnowledgeDocuments(id),
     listGrantedKnowledgeLibraries(id),
@@ -106,13 +110,16 @@ export default async function AgentWorkspace({
     getEmailInbox(id, selectedThread, emailPage, messagePage, focusMessageId),
     listFollowUpsForAgent(id),
     listActivityEventsForAgent(id),
+    listAgentMemories(id, memoryPage),
   ]);
   const lifecycle = agent.lifecycle;
   const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const latestRun = latestPersistedRun(history);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
   const followUpRefresh = followUpWorkspaceRefresh({
-    now: new Date(),
+    now,
     scheduled: followUps
       .filter((item) => item.status === 'scheduled')
       .map((item) => ({ dueAt: item.dueAt, jobStatus: item.jobStatus })),
@@ -273,6 +280,19 @@ export default async function AgentWorkspace({
                     sharedLibraries={sharedLibraries}
                     storageReady={storageConfigured()}
                     searchEnabled={agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)}
+                  />
+                ),
+              },
+              {
+                id: 'memory',
+                label: 'Memory',
+                content: (
+                  <MemoryWorkbench
+                    agentId={id}
+                    rows={memory.rows}
+                    page={memoryPage}
+                    hasMore={memory.hasMore}
+                    today={today}
                   />
                 ),
               },

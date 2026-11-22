@@ -32,6 +32,7 @@ export default defineConfig({
     'runtime-safety.spec.ts',
     'knowledge.spec.ts',
     'inbound-email.spec.ts',
+    'memory.spec.ts',
     'people.spec.ts',
   ],
   workers: 1,

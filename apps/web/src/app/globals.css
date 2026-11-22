@@ -4411,6 +4411,81 @@ details[open] > summary > .disclosure-chevron {
   }
 }
 
+.memory-workbench,
+.memory-evidence {
+  max-width: 52rem;
+}
+
+.memory-detail > summary {
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.memory-detail > summary > div {
+  flex: 1 1 18ch;
+}
+
+.memory-detail .follow-up-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.memory-fact {
+  display: block;
+  margin-block: 4px 8px;
+  font-size: 0.875rem;
+}
+
+.memory-detail .state-label {
+  white-space: nowrap;
+}
+
+.memory-detail-body,
+.memory-evidence,
+.memory-evidence section {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-detail-body {
+  padding-block-end: 18px;
+  justify-items: start;
+}
+
+.memory-detail-body .workspace-form {
+  width: 100%;
+}
+
+.memory-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.memory-link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.memory-evidence {
+  margin-block-start: 20px;
+  gap: 20px;
+  overflow-wrap: anywhere;
+}
+
+.memory-evidence blockquote {
+  margin: 0;
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 16px;
+}
+
+@media (max-width: 600px) {
+  .memory-dates {
+    grid-template-columns: 1fr;
+  }
+}
+
 .people-workspace {
   display: grid;
   gap: 16px;

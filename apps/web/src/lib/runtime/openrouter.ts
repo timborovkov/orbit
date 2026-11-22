@@ -3,9 +3,12 @@ import { generateText, isStepCount, Output } from 'ai';
 import { z } from 'zod';
 
 import {
+  captureAndRelationshipDecisionSchema,
+  captureDecisionSchema,
   decisionSchema,
   groundedDecisionSchema,
   type InferenceQuote,
+  memoryGroundedDecisionSchema,
   type ModelCall,
   relationshipDecisionSchema,
 } from '@/lib/runtime/simulation';
@@ -102,11 +105,17 @@ export function openRouterInference(apiKey: string): ModelCall {
     } = request;
     const hasTools = Boolean(tools && Object.keys(tools).length);
     const toolSteps = maxToolSteps ?? 10;
-    const schema = summarizeRelationship
-      ? relationshipDecisionSchema
-      : request.grounded
-        ? groundedDecisionSchema
-        : decisionSchema;
+    const schema = request.captureMemory
+      ? summarizeRelationship
+        ? captureAndRelationshipDecisionSchema
+        : captureDecisionSchema
+      : summarizeRelationship
+        ? relationshipDecisionSchema
+        : request.grounded
+          ? request.useMemory
+            ? memoryGroundedDecisionSchema
+            : groundedDecisionSchema
+          : decisionSchema;
     const response = await generateText({
       model: provider(model, {
         usage: { include: true },
@@ -135,11 +144,14 @@ export function openRouterInference(apiKey: string): ModelCall {
       abortSignal: signal,
       telemetry: telemetry ?? { isEnabled: false },
     });
-    const { relationshipNote, ...decision } = response.output as typeof response.output & {
-      relationshipNote?: ReturnType<typeof relationshipDecisionSchema.parse>['relationshipNote'];
-    };
+    const { relationshipNote, memoryCandidates, ...decision } =
+      response.output as typeof response.output & {
+        relationshipNote?: ReturnType<typeof relationshipDecisionSchema.parse>['relationshipNote'];
+        memoryCandidates?: unknown[];
+      };
     return {
       decision,
+      memoryCandidates,
       relationshipNote,
       inputTokens: response.usage.inputTokens ?? 0,
       outputTokens: response.usage.outputTokens ?? 0,

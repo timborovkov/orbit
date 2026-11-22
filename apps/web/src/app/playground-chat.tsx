@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 import { KnowledgeToolResult } from '@/app/knowledge-citations';
+import { MemoryToolResult } from '@/app/memory-citations';
 import {
   Conversation,
   ConversationContent,
@@ -484,13 +485,21 @@ function PlaygroundReasoningPart({ text, state }: { text: string; state?: 'strea
 }
 
 function PlaygroundToolPart({
+  agentId,
   part,
 }: {
+  agentId: string;
   part: Extract<
     PlaygroundUIMessage['parts'][number],
     { type: `tool-${string}` } | { type: 'dynamic-tool' }
   >;
 }) {
+  if ('output' in part) {
+    if (part.type === 'tool-knowledge.search')
+      return <KnowledgeToolResult agentId={agentId} output={part.output} />;
+    if (part.type === 'tool-memory.search')
+      return <MemoryToolResult agentId={agentId} output={part.output} />;
+  }
   const title = part.type.replace(/^tool-/, '');
   const toolType: `tool-${string}` =
     part.type === 'dynamic-tool' ? `tool-${title || 'action'}` : part.type;
@@ -548,9 +557,7 @@ function PlaygroundMessagePart({
     return <PlaygroundReasoningPart text={part.text} state={part.state} />;
   }
   if (!isToolUIPart(part)) return null;
-  if (part.type === 'tool-knowledge.search' && 'output' in part)
-    return <KnowledgeToolResult agentId={agentId} output={part.output} />;
-  return <PlaygroundToolPart part={part} />;
+  return <PlaygroundToolPart agentId={agentId} part={part} />;
 }
 
 function PlaygroundMessage({

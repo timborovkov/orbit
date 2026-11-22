@@ -21,6 +21,7 @@ import { type ExecutionContext, executionContextForOrigin } from '@/lib/policy/e
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import { retryableStore } from '@/lib/runtime/errors';
+import { MEMORY_CAPTURE, MEMORY_SEARCH, memoryCaptureOrigin } from '@/lib/runtime/memory/types';
 import { hasWriteAdapter } from '@/lib/runtime/outbound/types';
 import {
   actionIntents,
@@ -31,6 +32,7 @@ import {
   mcpConnections,
   type McpTransport,
   policyDecisions,
+  runMemoryEvidence,
   runs,
   usageCounters,
 } from '@/lib/schema';
@@ -55,6 +57,8 @@ export interface PolicyContext {
   runId?: string | null;
   /** Derived from the run origin; replay always suppresses external writes. */
   executionContext: ExecutionContext;
+  runOrigin?: typeof runs.$inferSelect.origin;
+  hasMemoryEvidence?: boolean;
   lifecycle: LifecycleState;
   enabledTools: string[];
   approvalTools: string[];
@@ -138,6 +142,7 @@ export async function loadPolicyContext(
     agentId,
     runId: runId ?? null,
     executionContext,
+    runOrigin: runRow?.origin,
     lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
     approvalTools: mergeApprovalTools(approval.approvalTools, global?.approvalTools),
@@ -187,6 +192,24 @@ export function evaluateCandidate(
   if (ctx.lifecycle === 'paused') {
     reasons.push('Agent is paused.');
     return { decision: 'deny', reasons };
+  }
+
+  // Internal memory operations are tied to a persisted, owned run. Capture does
+  // not dispatch outbound actions or change any configuration or permissions.
+  if (action.type === MEMORY_CAPTURE || action.type === MEMORY_SEARCH) {
+    if (!ctx.runId || !ctx.runOrigin || !action.executionToken) {
+      return { decision: 'deny', reasons: ['Memory requires an owned run.'] };
+    }
+    if (
+      action.type === MEMORY_CAPTURE &&
+      (ctx.executionContext === 'replay' || !memoryCaptureOrigin(ctx.runOrigin))
+    ) {
+      return { decision: 'deny', reasons: ['This run can read memory only.'] };
+    }
+    if (action.type === MEMORY_CAPTURE && !ctx.hasMemoryEvidence) {
+      return { decision: 'deny', reasons: ['Memory capture requires a persisted source.'] };
+    }
+    return { decision: 'allow', reasons: ['Agent memory operation permitted.'] };
   }
 
   if (!action.readOnly && !canAcceptBackgroundWork(ctx.lifecycle)) {
@@ -300,8 +323,9 @@ export function evaluateCandidate(
 export async function authorizeAction(
   ctx: PolicyContext,
   action: CandidateAction,
+  store?: Tx,
 ): Promise<PolicyResult> {
-  return await db().transaction(async (tx) => {
+  const authorize = async (tx: Tx): Promise<PolicyResult> => {
     // Serialize against lifecycle changes, consent changes, and competing reviews.
     const agent = (
       await tx
@@ -313,32 +337,42 @@ export async function authorizeAction(
     const current = agent && (await loadPolicyContext(ctx.agentId, ctx.actor, ctx.runId, tx));
     if (!current) throw new BudgetError('cancelled');
     if (action.executionToken && ctx.runId) {
-      const owned = (
-        await tx
-          .select({ id: runs.id })
-          .from(runs)
-          .where(
-            and(
-              eq(runs.id, ctx.runId),
-              eq(runs.agentId, ctx.agentId),
-              eq(runs.executionToken, action.executionToken),
-              eq(runs.status, 'running'),
-              sql`${runs.expiresAt} > now()`,
-            ),
-          )
-      ).at(0);
+      const query = tx
+        .select({ id: runs.id })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.id, ctx.runId),
+            eq(runs.agentId, ctx.agentId),
+            eq(runs.executionToken, action.executionToken),
+            eq(runs.status, 'running'),
+            sql`${runs.expiresAt} > now()`,
+          ),
+        );
+      const owned = (await (action.type === MEMORY_CAPTURE ? query.for('update') : query)).at(0);
       if (!owned) throw new BudgetError('cancelled');
+      if (action.type === MEMORY_CAPTURE && memoryCaptureOrigin(current.runOrigin)) {
+        const sources = await tx
+          .select({ id: runMemoryEvidence.sourceId })
+          .from(runMemoryEvidence)
+          .where(
+            and(eq(runMemoryEvidence.agentId, ctx.agentId), eq(runMemoryEvidence.runId, owned.id)),
+          )
+          .limit(2);
+        current.hasMemoryEvidence = sources.length === 1;
+      }
     }
     const recipients = action.recipients ?? [];
-    const consentFailure = action.readOnly
-      ? null
-      : await recipientConsentFailure(
-          tx,
-          current.agentId,
-          action.type,
-          recipients,
-          current.consentRequiredTools,
-        );
+    const consentFailure =
+      action.readOnly || action.type === MEMORY_CAPTURE
+        ? null
+        : await recipientConsentFailure(
+            tx,
+            current.agentId,
+            action.type,
+            recipients,
+            current.consentRequiredTools,
+          );
     const mcp = action.type.startsWith('mcp:') && action.readOnly ? action.mcp : undefined;
     const grant =
       mcp &&
@@ -477,7 +511,8 @@ export async function authorizeAction(
       payload: intent.payload,
       violation: evaluated.violation,
     };
-  });
+  };
+  return store ? authorize(store) : db().transaction(authorize);
 }
 
 /** Record a dispatch blocked after authorization, such as a concurrent budget reservation. */

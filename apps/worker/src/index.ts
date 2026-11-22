@@ -46,6 +46,8 @@ import {
   resolveKnowledgeEmbedders,
   resolveWorkspaceKnowledgeEmbedders,
 } from '@/lib/runtime/knowledge/provider';
+import { processMemoryEmbedding } from '@/lib/runtime/memory/store';
+import { MEMORY_EMBED_JOB } from '@/lib/runtime/memory/types';
 import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
 import { createXSearchAdapter } from '@/lib/runtime/x/adapter';
 import { processDiscoveryPoll } from '@/lib/runtime/x/poll';
@@ -183,6 +185,7 @@ const worker = startJobWorker({
         throw error;
       }
     },
+    [MEMORY_EMBED_JOB]: (job, signal) => processMemoryEmbedding(job.payload, signal),
     [KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
     [SHARED_KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
     [FOLLOW_UP_JOB_TYPE]: async (job) => {

@@ -45,6 +45,13 @@ import {
   consumeKnowledgeToolStep,
   recordKnowledgeToolCall,
 } from '@/lib/runtime/knowledge/tool-step';
+import { recallRunMemories } from '@/lib/runtime/memory/recall';
+import {
+  captureRunMemories,
+  memoryRunSource,
+  verifiedMemoryCandidates,
+} from '@/lib/runtime/memory/store';
+import { type MemoryCandidate, memoryCaptureOrigin } from '@/lib/runtime/memory/types';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { loadRelationshipContext, storeRelationshipNote } from '@/lib/runtime/people/history';
@@ -460,6 +467,7 @@ export interface SimulationJobClaim {
 
 /** Playground vs email drafting semantics. Replay keeps origin=replay for safety. */
 export type SimulationBehavior = 'playground' | 'email';
+type ReplayOptions = { behavior: SimulationBehavior; recallQuery: string };
 
 async function processSimulationRun(
   runId: string,
@@ -467,12 +475,11 @@ async function processSimulationRun(
   externalSignal?: AbortSignal,
   claim?: SimulationJobClaim,
   origin: typeof runs.$inferSelect.origin = 'playground',
-  /** Drafting mode when origin is `replay` (defaults to playground). */
-  behavior?: SimulationBehavior,
+  replay?: ReplayOptions,
 ) {
   // Persisted origin gates reclaim; behavior selects email vs playground simulate paths.
   const simulationBehavior: SimulationBehavior =
-    behavior ?? (origin === 'email' ? 'email' : 'playground');
+    replay?.behavior ?? (origin === 'email' ? 'email' : 'playground');
   const claimed = await db().transaction(async (tx) => {
     // Peek without locking so we can take the agent lock before the run lock
     // (same order as enqueueSimulation and persistLifecycle) and avoid deadlocks.
@@ -693,7 +700,7 @@ async function processSimulationRun(
             updateIfOwned(run.id, executionToken, {
               status: 'failed',
               finishedAt: new Date(),
-              result: { ...checkpointed, traceId: telemetry.traceId },
+              result: { ...checkpointed, pendingMemories: undefined, traceId: telemetry.traceId },
             }),
           );
         },
@@ -715,6 +722,10 @@ async function processSimulationRun(
       return;
     }
 
+    const source = memoryCaptureOrigin(run.origin)
+      ? await retryableStore(() => memoryRunSource(run))
+      : null;
+    const recallQuery = source?.text.join('\n') ?? replay?.recallQuery ?? run.input;
     const resources = await prepareRunTools({
       agentId: run.agentId,
       policy: basePolicy,
@@ -809,7 +820,33 @@ async function processSimulationRun(
             if (!updated.length) throw new BudgetError('cancelled');
           },
           {
-            origin: simulationBehavior,
+            origin: origin === 'discovery' ? 'discovery' : simulationBehavior,
+            memoryCapture: source
+              ? {
+                  source: source.text,
+                  verify: (candidates) => verifiedMemoryCandidates(candidates, source.text),
+                }
+              : undefined,
+            recallMemory: async (requestSignal) => {
+              try {
+                return await retryableStore(() =>
+                  recallRunMemories({
+                    agentId: run.agentId,
+                    runId: run.id,
+                    actor: run.actor,
+                    executionToken,
+                    query: recallQuery,
+                    replay: origin === 'replay',
+                    signal: requestSignal,
+                  }),
+                );
+              } catch (error) {
+                if (isBudgetError(error) || requestSignal.aborted || origin === 'replay')
+                  throw error;
+                reportFailure('worker.runtime', failureCorrelation(), error);
+                return [];
+              }
+            },
             summarizeRelationship: origin === 'email' || origin === 'discovery',
             loadRelationshipContext:
               origin === 'email' || origin === 'discovery'
@@ -1059,7 +1096,8 @@ async function processSimulationRun(
       if (result.error && isTrustedBudgetMessage(result.error)) statusMessage = result.error;
       else if (result.error === PAID_STEP_BURN_MESSAGE) statusMessage = 'paid-step-burn';
       try {
-        const traceResult = { ...result, traceId: telemetry.traceId };
+        const { pendingMemories, ...completedResult } = result;
+        const traceResult = { ...completedResult, traceId: telemetry.traceId };
         // Propose before flipping the run to completed so a transient failure
         // leaves the run running and the job can retry. Wrap with retryableStore so
         // ordinary DB errors become RetryableInfrastructureError (outer catch rethrows)
@@ -1084,17 +1122,13 @@ async function processSimulationRun(
                 deferReason: isTrustedBudgetMessage(result.error) ? result.error : null,
               })
             : simulationBehavior === 'email'
-              ? updateIfOwned(run.id, executionToken, {
-                  status: 'completed',
-                  finishedAt: new Date(),
-                  result: traceResult,
-                  deferReason: null,
-                })
+              ? completeSimulation(run, executionToken, traceResult, pendingMemories)
               : finishSimulationWithApprovals(
                   run,
                   executionToken,
                   traceResult,
                   config.approvalSettings?.approvalOnReject,
+                  pendingMemories,
                   claim,
                 ),
         );
@@ -1106,6 +1140,7 @@ async function processSimulationRun(
         if (isRetryableInfrastructureError(error) && result.error === PAID_STEP_BURN_MESSAGE) {
           const burned: SimulationResult = {
             ...result,
+            pendingMemories: undefined,
             traceId: telemetry.traceId,
             error: PAID_STEP_BURN_MESSAGE,
           };
@@ -1266,11 +1301,37 @@ async function processSimulationRun(
   }
 }
 
+async function completeSimulation(
+  run: typeof runs.$inferSelect,
+  executionToken: string,
+  result: SimulationResult,
+  candidates?: MemoryCandidate[],
+  transaction?: Tx,
+) {
+  const values = {
+    status: 'completed' as const,
+    finishedAt: new Date(),
+    result,
+    deferReason: null,
+  };
+  if (!candidates?.length) return updateIfOwned(run.id, executionToken, values, transaction);
+  const complete = async (tx: Tx) => {
+    await captureRunMemories(tx, run, executionToken, candidates);
+    return updateIfOwned(run.id, executionToken, values, tx);
+  };
+  if (transaction) return complete(transaction);
+  return db().transaction(async (tx) => {
+    if (!(await lockApprovalAgent(tx, run.agentId))) return [];
+    return complete(tx);
+  });
+}
+
 async function finishSimulationWithApprovals(
   run: typeof runs.$inferSelect,
   executionToken: string,
   result: SimulationResult,
   onReject: ApprovalOnReject | undefined,
+  candidates: MemoryCandidate[] | undefined,
   claim?: SimulationJobClaim,
 ) {
   return db().transaction(async (tx) => {
@@ -1294,17 +1355,7 @@ async function finishSimulationWithApprovals(
     ).at(0);
 
     if (!review && !result.actions.some((action) => action.policy === 'needs-approval')) {
-      return updateIfOwned(
-        run.id,
-        executionToken,
-        {
-          status: 'completed',
-          finishedAt: new Date(),
-          result,
-          deferReason: null,
-        },
-        tx,
-      );
+      return completeSimulation(run, executionToken, result, candidates, tx);
     }
 
     if (run.jobId) {
@@ -1320,6 +1371,7 @@ async function finishSimulationWithApprovals(
         : job?.status === 'pending';
       if (!ownsJob) return [];
     }
+    await captureRunMemories(tx, run, executionToken, candidates);
     const owned = await updateIfOwned(
       run.id,
       executionToken,
@@ -1382,10 +1434,10 @@ export async function processSimulationRunForOrigin(
   inference: (key: string) => ModelCall = openRouterInference,
   signal?: AbortSignal,
   claim?: SimulationJobClaim,
-  /** For origin=replay: select email vs playground drafting without changing safety origin. */
-  behavior?: SimulationBehavior,
+  /** Supplies the case's drafting behavior and recall text without changing its safety origin. */
+  replay?: ReplayOptions,
 ) {
-  await processSimulationRun(runId, inference, signal, claim, origin, behavior);
+  await processSimulationRun(runId, inference, signal, claim, origin, replay);
 }
 
 function exhaustedJobMessage(reason: string) {
