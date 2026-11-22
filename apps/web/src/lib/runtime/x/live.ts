@@ -16,6 +16,7 @@ interface TweetPayload {
   id?: string;
   text?: string;
   author_id?: string;
+  conversation_id?: string;
   created_at?: string;
 }
 
@@ -62,6 +63,7 @@ function mapPage(body: SearchResponse): XSearchPost[] {
       return {
         id: tweet.id,
         text: tweet.text,
+        conversationId: tweet.conversation_id,
         authorId: tweet.author_id,
         authorUsername: author?.username,
         authorName: author?.name,
@@ -111,7 +113,7 @@ export function createLiveXSearchAdapter(
         const url = new URL(RECENT_SEARCH_URL);
         url.searchParams.set('query', query);
         url.searchParams.set('max_results', String(maxResults));
-        url.searchParams.set('tweet.fields', 'created_at,author_id');
+        url.searchParams.set('tweet.fields', 'created_at,author_id,conversation_id');
         url.searchParams.set('expansions', 'author_id');
         url.searchParams.set('user.fields', 'username,name');
         if (request.sinceId) url.searchParams.set('since_id', request.sinceId);

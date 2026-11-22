@@ -26,6 +26,7 @@ import {
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
 import { channelAction, channelForRun, channelRunJobTypes } from '@/lib/runtime/channels/registry';
+import { loadChannelThread } from '@/lib/runtime/channels/thread';
 import {
   isRetryableInfrastructureError,
   isUnrecoverablePaidStepFinalizationError,
@@ -374,6 +375,7 @@ export async function admitRun(
     return {
       error: budgetViolationMessage('concurrency'),
       waitForCapacity: true as const,
+      budgetViolation: 'concurrency' as const,
     };
   }
 
@@ -398,7 +400,7 @@ export async function admitRun(
   };
   const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
   if (violation && violation !== 'concurrency') {
-    return { error: budgetViolationMessage(violation) };
+    return { error: budgetViolationMessage(violation), budgetViolation: violation };
   }
 
   const config = (
@@ -743,6 +745,10 @@ async function processSimulationRun(
     const source = memoryCaptureOrigin(run.origin)
       ? await retryableStore(() => memoryRunSource(run))
       : null;
+    const channelThread =
+      source?.sourceKind === 'event'
+        ? await retryableStore(() => loadChannelThread(run.agentId, run.id))
+        : undefined;
     const recallQuery = source?.text.join('\n') ?? replay?.recallQuery ?? run.input;
     const resources = await prepareRunTools({
       agentId: run.agentId,
@@ -860,6 +866,7 @@ async function processSimulationRun(
           },
           {
             channelMode,
+            channelThread,
             actionTypes:
               channelMode === 'evaluate'
                 ? (profile?.proposalTypes ?? adapter?.actions?.map(({ type }) => type) ?? [])

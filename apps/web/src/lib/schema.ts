@@ -593,6 +593,12 @@ export const sourceEvents = pgTable(
       .references(() => agents.id, { onDelete: 'cascade' }),
     provider: text('provider').$type<SourceEventProvider>().notNull(),
     providerEventId: text('provider_event_id').notNull(),
+    accountId: text('account_id'),
+    threadId: text('thread_id'),
+    admissionStatus: text('admission_status').$type<
+      'pending' | 'deferred' | 'admitted' | 'rejected'
+    >(),
+    admissionReason: text('admission_reason'),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
     text: text('text').notNull(),
     authorId: text('author_id'),
@@ -607,7 +613,9 @@ export const sourceEvents = pgTable(
       .references(() => runs.id, { onDelete: 'set null' }),
   },
   (table) => [
-    unique().on(table.agentId, table.provider, table.providerEventId),
+    unique('source_events_delivery_key')
+      .on(table.agentId, table.provider, table.accountId, table.providerEventId)
+      .nullsNotDistinct(),
     unique().on(table.agentId, table.id),
   ],
 );
@@ -666,12 +674,27 @@ export const agentMemories = pgTable(
   },
   (table) => [
     unique().on(table.agentId, table.subjectKind, table.identityKey),
+    unique().on(table.agentId, table.id),
     foreignKey({
       columns: [table.agentId, table.runId],
       foreignColumns: [runs.agentId, runs.id],
     }).onDelete('cascade'),
   ],
 );
+
+export const agentMemoryEvidenceVersions = pgView('agent_memory_evidence_versions', {
+  agentId: uuid('agent_id').notNull(),
+  id: uuid('id').notNull(),
+  revision: uuid('revision').notNull(),
+  subject: text('subject').notNull(),
+  topic: text('topic').notNull(),
+  quote: text('quote').notNull(),
+  sourceAt: timestamp('source_at', { withTimezone: true }).notNull(),
+  correctedBy: text('corrected_by'),
+  runId: uuid('run_id').notNull(),
+  sourceKind: text('source_kind').notNull(),
+  sourceId: uuid('source_id').notNull(),
+}).existing();
 
 const memoryEvidenceColumns = () => ({
   sourceKind: text('source_kind').notNull(),

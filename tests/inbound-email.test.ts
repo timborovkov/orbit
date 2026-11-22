@@ -742,7 +742,7 @@ test('inbound memory commits once across a finalization retry and recalls only i
 test('newer evidence updates a learned revision, corrections take precedence, and replay shares one snapshot', async () => {
   const sarah = await createAgent('Sarah memory revisions');
   const older = new Date(Date.now() - 60_000);
-  await incomingMemorySource(sarah.address, ssoRequirement, older);
+  const original = await incomingMemorySource(sarah.address, ssoRequirement, older);
   await draft(memoryInference([memoryProposal(ssoRequirement)]), 1);
   const [initial] = await sql`SELECT id,revision FROM agent_memories WHERE agent_id=${sarah.id}`;
   const newest = 'Northstar no longer requires SSO for its pilot.';
@@ -752,7 +752,19 @@ test('newer evidence updates a learned revision, corrections take precedence, an
     await sql`SELECT id,revision,fact FROM agent_memories WHERE agent_id=${sarah.id}`;
   expect(learned).toMatchObject({ id: initial!.id, fact: newest });
   expect(learned!.revision).not.toBe(initial!.revision);
+  expect(await selectAgentMemoryEvidence(sarah.id, initial!.id, initial!.revision)).toMatchObject({
+    quote: ssoRequirement,
+    source: { id: original.id, body: ssoRequirement },
+  });
+  expect(await selectAgentMemoryEvidence(sarah.id, learned!.id, learned!.revision)).toMatchObject({
+    quote: newest,
+    source: { body: newest },
+  });
+  const otherAgent = await createAgent('Other evidence reader');
+  expect(await selectAgentMemoryEvidence(otherAgent.id, initial!.id, initial!.revision)).toBeNull();
+  await sql`UPDATE email_messages SET body='Redacted' WHERE id=${original.id}`;
   expect(await selectAgentMemoryEvidence(sarah.id, initial!.id, initial!.revision)).toBeNull();
+  expect(await selectAgentMemoryEvidence(sarah.id, learned!.id, learned!.revision)).not.toBeNull();
   await incomingMemorySource(sarah.address, ssoRequirement, older);
   await draft(memoryInference([memoryProposal(ssoRequirement)]), 1);
   expect([

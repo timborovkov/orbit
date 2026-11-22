@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
-import { claimJobs, completeJob } from '@/lib/queue/jobs';
+import { claimJobs, completeJob, releaseClaim } from '@/lib/queue/jobs';
 import {
   CHANNEL_EVENT_JOB,
   ingestChannelEvent,
@@ -373,6 +373,157 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
   } finally {
     unregister();
     await sql`UPDATE controls SET paused=${controls?.paused ?? true} WHERE id=1`;
+    if (encryptionKey === undefined) delete process.env.ORBIT_ENCRYPTION_KEY;
+    else process.env.ORBIT_ENCRYPTION_KEY = encryptionKey;
+  }
+});
+
+test('accepted channel events retry admission when quota returns and persist rejection reasons', async () => {
+  const unregister = registerChannel({
+    id: channel,
+    label: 'Fixture chat',
+    run: { mode: 'draft' },
+  });
+  const encryptionKey = process.env.ORBIT_ENCRYPTION_KEY;
+  try {
+    process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
+    const agent = await seedAgent([]);
+    const inbound = {
+      agentId: agent.id,
+      channel,
+      externalId: 'deferred',
+      text: 'Please follow up.',
+    };
+    await sql`UPDATE agents SET budgets=${sql.json({ ...budgets, dailyRequests: 0 })} WHERE id=${agent.id}`;
+    const event = (await ingestChannelEvent(inbound))!;
+    const claimed = await claim(CHANNEL_EVENT_JOB, agent.id);
+    const deferred = await processChannelEventJob(claimed);
+    expect(deferred?.deferUntil.getTime()).toBeGreaterThan(Date.now());
+    const [waiting] =
+      await sql`SELECT run_id,admission_status,admission_reason FROM source_events WHERE id=${event.sourceId}`;
+    expect(waiting).toEqual({
+      run_id: null,
+      admission_status: 'deferred',
+      admission_reason: 'Daily request quota reached. Work was deferred.',
+    });
+    // Release as the worker does. Advance the retry date in the fixture.
+    expect(await releaseClaim(claimed.id, workerId, undefined, deferred!.deferUntil)).toMatchObject(
+      {
+        status: 'pending',
+        attempts: 0,
+      },
+    );
+    await sql`UPDATE agents SET budgets=${sql.json(budgets)} WHERE id=${agent.id}`;
+    await sql`UPDATE jobs SET available_at=now() WHERE id=${claimed.id}`;
+    expect(await ingestChannelEvent(inbound)).toBeNull();
+    const retry = await claim(CHANNEL_EVENT_JOB, agent.id);
+    await processChannelEventJob(retry);
+    await processChannelEventJob(retry);
+    await completeJob(retry.id, workerId);
+    const [admitted] =
+      await sql`SELECT run_id,admission_status,admission_reason FROM source_events WHERE id=${event.sourceId}`;
+    expect(admitted).toEqual({
+      run_id: expect.any(String),
+      admission_status: 'admitted',
+      admission_reason: null,
+    });
+    expect(await sql`SELECT id FROM simulation_runs WHERE agent_id=${agent.id}`).toHaveLength(1);
+
+    const rejected = (await ingestChannelEvent({ ...inbound, externalId: 'unavailable' }))!;
+    await sql`UPDATE simulation_runs SET status='completed' WHERE id=${admitted!.run_id}`;
+    await sql`UPDATE jobs SET payload=payload || ${sql.json({ configurationId: randomUUID() })}
+      WHERE id=${rejected.jobId}`;
+    const missing = await claim(CHANNEL_EVENT_JOB, agent.id);
+    expect(await processChannelEventJob(missing)).toBeUndefined();
+    await completeJob(missing.id, workerId);
+    const [recorded] =
+      await sql`SELECT run_id,admission_status,admission_reason FROM source_events WHERE id=${rejected.sourceId}`;
+    expect(recorded).toEqual({
+      run_id: null,
+      admission_status: 'rejected',
+      admission_reason: 'The configuration is unavailable. Refresh and try again.',
+    });
+  } finally {
+    unregister();
+    if (encryptionKey === undefined) delete process.env.ORBIT_ENCRYPTION_KEY;
+    else process.env.ORBIT_ENCRYPTION_KEY = encryptionKey;
+  }
+});
+
+test('a channel run keeps conversation context within its own agent, account and thread', async () => {
+  const unregister = registerChannel({
+    id: channel,
+    label: 'Fixture chat',
+    run: { mode: 'draft' },
+  });
+  const encryptionKey = process.env.ORBIT_ENCRYPTION_KEY;
+  try {
+    process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
+    const agent = await seedAgent([]);
+    const other = await seedAgent([]);
+    const inbound = {
+      agentId: agent.id,
+      channel,
+      accountId: 'workspace-a',
+      threadId: 'pilot',
+      externalId: '1',
+      text: 'The pilot starts Friday.',
+      authorId: randomUUID(),
+      authorName: 'Riley',
+    };
+    for (const event of [
+      inbound,
+      { ...inbound, externalId: '2', threadId: 'billing', text: 'Billing thread secret' },
+      { ...inbound, accountId: 'workspace-b', text: 'Other account secret' },
+      { ...inbound, agentId: other.id, text: 'Other agent secret' },
+    ]) {
+      const source = await ingestChannelEvent(event);
+      expect(source).not.toBeNull();
+      // Mark the prior event admitted so both conversation and person history would see it.
+      const [run] =
+        await sql`INSERT INTO simulation_runs (agent_id,configuration_id,actor,input,origin,channel,status,result,expires_at)
+        VALUES (${event.agentId}, ${event.agentId === agent.id ? agent.second : other.second}, ${admin}, ${event.text},
+          'channel', ${channel}, 'completed', '{"steps":[],"actions":[],"error":null}', now()) RETURNING id`;
+      await sql`UPDATE source_events SET run_id=${run!.id},admission_status='admitted' WHERE id=${source!.sourceId}`;
+      await sql`UPDATE jobs SET status='completed' WHERE id=${source!.jobId}`;
+    }
+    const now = (await ingestChannelEvent({
+      ...inbound,
+      externalId: '3',
+      text: 'When does it start?',
+    }))!;
+    const intake = await claim(CHANNEL_EVENT_JOB, agent.id);
+    await processChannelEventJob(intake);
+    await completeJob(intake.id, workerId);
+    const [source] = await sql`SELECT run_id FROM source_events WHERE id=${now.sourceId}`;
+    const runJob = await claim(SIMULATION_JOB_TYPE, agent.id);
+    const stages: string[] = [];
+    const model: ModelCall = async (request) => {
+      stages.push(request.stage!);
+      const input = JSON.parse(request.input);
+      expect(input.untrustedChannelThread).toEqual([{ author: 'Riley', text: inbound.text }]);
+      expect(input.untrustedInput).toBe('When does it start?');
+      expect(request.input).not.toContain('secret');
+      return {
+        decision: {
+          relevant: true,
+          priority: 1,
+          reason: 'Pilot',
+          actions: [],
+          answer: 'Friday',
+          citations: [],
+        },
+        inputTokens: 1,
+        outputTokens: 1,
+        costMicros: 0,
+      };
+    };
+    await processSimulationJob(runJob.payload, () => model, signal, { jobId: runJob.id, workerId });
+    expect(stages).toEqual(['evaluator', 'main']);
+    const [result] = await sql`SELECT status FROM simulation_runs WHERE id=${source!.run_id}`;
+    expect(result).toEqual({ status: 'completed' });
+  } finally {
+    unregister();
     if (encryptionKey === undefined) delete process.env.ORBIT_ENCRYPTION_KEY;
     else process.env.ORBIT_ENCRYPTION_KEY = encryptionKey;
   }

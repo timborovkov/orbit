@@ -4,7 +4,12 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { agentMemories, memoryEvidence, personMemoryEvidence } from '@/lib/schema';
+import {
+  agentMemories,
+  agentMemoryEvidenceVersions,
+  memoryEvidence,
+  personMemoryEvidence,
+} from '@/lib/schema';
 
 const pageSize = 30;
 
@@ -83,11 +88,11 @@ export async function selectAgentMemoryEvidence(
 ) {
   const [row] = await db()
     .select({
-      subject: agentMemories.subject,
-      topic: agentMemories.topic,
-      quote: agentMemories.quote,
-      sourceAt: agentMemories.sourceAt,
-      correctedBy: agentMemories.correctedBy,
+      subject: agentMemoryEvidenceVersions.subject,
+      topic: agentMemoryEvidenceVersions.topic,
+      quote: agentMemoryEvidenceVersions.quote,
+      sourceAt: agentMemoryEvidenceVersions.sourceAt,
+      correctedBy: agentMemoryEvidenceVersions.correctedBy,
       source: {
         id: memoryEvidence.sourceId,
         title: memoryEvidence.title,
@@ -98,21 +103,21 @@ export async function selectAgentMemoryEvidence(
         linkLabel: memoryEvidence.linkLabel,
       },
     })
-    .from(agentMemories)
+    .from(agentMemoryEvidenceVersions)
     .innerJoin(
       memoryEvidence,
       and(
-        eq(memoryEvidence.sourceId, agentMemories.sourceId),
-        eq(memoryEvidence.sourceKind, agentMemories.sourceKind),
-        eq(memoryEvidence.agentId, agentMemories.agentId),
-        eq(memoryEvidence.runId, agentMemories.runId),
+        eq(memoryEvidence.sourceId, agentMemoryEvidenceVersions.sourceId),
+        eq(memoryEvidence.sourceKind, agentMemoryEvidenceVersions.sourceKind),
+        eq(memoryEvidence.agentId, agentMemoryEvidenceVersions.agentId),
+        eq(memoryEvidence.runId, agentMemoryEvidenceVersions.runId),
       ),
     )
     .where(
       and(
-        eq(agentMemories.agentId, agentId),
-        eq(agentMemories.id, entryId),
-        eq(agentMemories.revision, revision),
+        eq(agentMemoryEvidenceVersions.agentId, agentId),
+        eq(agentMemoryEvidenceVersions.id, entryId),
+        eq(agentMemoryEvidenceVersions.revision, revision),
       ),
     );
   return row ?? null;
