@@ -43,6 +43,11 @@ import {
   resolveKnowledgeEmbedders,
   resolveWorkspaceKnowledgeEmbedders,
 } from '@/lib/runtime/knowledge/provider';
+import {
+  MEMORY_MAINTENANCE_JOB,
+  processMemoryMaintenance,
+  scheduleMemoryMaintenance,
+} from '@/lib/runtime/memory/retention';
 import { processMemoryEmbedding } from '@/lib/runtime/memory/store';
 import { MEMORY_EMBED_JOB } from '@/lib/runtime/memory/types';
 import {
@@ -110,6 +115,7 @@ const providerJobs = channelJobs(workerId, [
   CHANNEL_EVENT_JOB,
   EVALUATION_REPLAY_JOB,
   MEMORY_EMBED_JOB,
+  MEMORY_MAINTENANCE_JOB,
   KNOWLEDGE_JOB_TYPE,
   SHARED_KNOWLEDGE_JOB_TYPE,
   FOLLOW_UP_JOB_TYPE,
@@ -177,6 +183,11 @@ const worker = startJobWorker({
         throw error;
       }
     },
+    [MEMORY_MAINTENANCE_JOB]: async (job) => {
+      if (typeof job.payload.agentId !== 'string')
+        throw new Error('Memory maintenance job is missing its agent');
+      await processMemoryMaintenance(job.payload.agentId);
+    },
     [MEMORY_EMBED_JOB]: (job, signal) => processMemoryEmbedding(job.payload, signal),
     [KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
     [SHARED_KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
@@ -218,6 +229,7 @@ const worker = startJobWorker({
       reconcileDeadKnowledgeJobs(),
       reconcileDeadFollowUpJobs(),
       reconcileDeadOutboundJobs(),
+      scheduleMemoryMaintenance(),
       expireStaleApprovals(),
       reconcileSuspendedApprovals(),
     ]);

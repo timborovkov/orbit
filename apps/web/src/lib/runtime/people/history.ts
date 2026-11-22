@@ -200,3 +200,74 @@ export async function storeRelationshipNote(
     ON CONFLICT DO NOTHING
   `);
 }
+
+// Scope before search. A replay or admin prompt without a current verified
+// channel identity cannot search a person's conversation history.
+export async function searchRunHistory(
+  agentId: string,
+  runId: string,
+  query: string,
+  limit: number,
+) {
+  return db().execute<{
+    title: string | null;
+    excerpt: string;
+    channel: string;
+    observedAt: Date;
+  }>(sql`
+    WITH current_source AS (
+      SELECT evidence.source_id, evidence.observed_at, identity.person_id,
+        event.provider, event.account_id, event.thread_id
+      FROM run_memory_evidence evidence
+      JOIN person_identities identity ON identity.id = evidence.person_identity_id
+      LEFT JOIN source_events event ON evidence.source_kind = 'event' AND event.id = evidence.source_id
+        AND event.agent_id = evidence.agent_id
+      WHERE evidence.agent_id = ${agentId} AND evidence.run_id = ${runId}
+      AND (SELECT count(*) FROM run_memory_evidence WHERE agent_id = ${agentId} AND run_id = ${runId}) = 1
+    ), history AS MATERIALIZED (
+      SELECT previous.title, previous.body, previous.channel, previous.observed_at, previous.source_id
+      FROM current_source current
+      JOIN person_identities peer ON peer.person_id = current.person_id
+      JOIN run_memory_evidence previous ON previous.person_identity_id = peer.id
+      LEFT JOIN source_events event ON previous.source_kind = 'event' AND event.id = previous.source_id
+        AND event.agent_id = previous.agent_id
+      WHERE (current.provider IS NULL OR previous.channel <> current.provider
+          OR (event.thread_id IS NOT DISTINCT FROM current.thread_id
+            AND event.account_id IS NOT DISTINCT FROM current.account_id))
+        AND previous.agent_id = ${agentId} AND previous.source_id <> current.source_id
+        AND previous.observed_at <= current.observed_at
+      UNION ALL
+      SELECT delivery.action_type, delivery.body, evidence.channel, evidence.observed_at, evidence.source_id
+      FROM current_source current
+      JOIN person_identities peer ON peer.person_id = current.person_id
+      JOIN memory_evidence evidence ON evidence.person_identity_id = peer.id
+        AND evidence.source_kind = 'outcome' AND evidence.agent_id = ${agentId}
+      JOIN outbound_actions delivery ON delivery.id = evidence.source_id AND delivery.agent_id = evidence.agent_id
+      LEFT JOIN source_events event ON event.run_id = evidence.run_id AND event.agent_id = evidence.agent_id
+      WHERE (current.provider IS NULL OR evidence.channel <> current.provider
+          OR (event.thread_id IS NOT DISTINCT FROM current.thread_id
+            AND event.account_id IS NOT DISTINCT FROM current.account_id))
+        AND evidence.run_id <> ${runId} AND evidence.observed_at <= current.observed_at
+    ), terms AS (
+      SELECT CASE WHEN ${Boolean(query)} THEN websearch_to_tsquery('english', ${query}) END AS value
+    ), matches AS MATERIALIZED (
+      SELECT history.*, terms.value, ts_rank_cd(document, terms.value) AS rank
+      FROM history CROSS JOIN terms
+      CROSS JOIN LATERAL (SELECT to_tsvector('english', coalesce(title, '') || ' ' || body) AS document) search
+      WHERE ${!query} OR document @@ terms.value
+      ORDER BY rank DESC, observed_at DESC, source_id
+      LIMIT ${limit}
+    ), snippets AS (
+      SELECT *, CASE WHEN value IS NULL OR char_length(body) <= 400 THEN left(body, 400) ELSE
+        ts_headline('english', replace(replace(body, chr(1), ''), chr(2), ''), value,
+          'MaxWords=24, MinWords=1, MaxFragments=1, StartSel=' || chr(1) || ', StopSel=' || chr(2)) END AS snippet
+      FROM matches
+    )
+    SELECT title,
+      replace(replace(substring(snippet from greatest(strpos(snippet, chr(1)) - 100, 1) for 400),
+        chr(1), ''), chr(2), '') AS excerpt,
+      channel, observed_at AS "observedAt"
+    FROM snippets
+    ORDER BY rank DESC, observed_at DESC, source_id
+  `);
+}

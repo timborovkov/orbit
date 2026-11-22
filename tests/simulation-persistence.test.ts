@@ -6,6 +6,7 @@ import postgres from 'postgres';
 import { budgetDefaults } from '@/lib/budgets';
 import { executeSimulation } from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
+import type { ModelCall } from '@/lib/runtime/simulation';
 
 // Disposable PostgreSQL database only. Inference is deliberately mocked, never a live API call.
 const databaseUrl =
@@ -196,5 +197,92 @@ test('DeepSeek defaults migration preserves customized models and saved agent ve
     });
   } catch (error) {
     if (error !== rollback) throw error;
+  }
+});
+
+test('optional retrieval falls back to one provider call while keeping recalled evidence', async () => {
+  for (const cap of ['requests', 'spend'] as const) {
+    const id = randomUUID();
+    ids.push(id);
+    const budgets =
+      cap === 'requests' ? { ...uncapped, dailyRequests: 2 } : { ...uncapped, dailySpendCents: 1 };
+    await sql`INSERT INTO agents(id,name,mission,budgets) VALUES (${id},'Retrieval fixture','Help',${sql.json(budgets)})`;
+    const [version] =
+      await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) SELECT ${id},1,config,'test' FROM templates WHERE id='support' RETURNING id`;
+    await sql`INSERT INTO agent_credentials VALUES (${id},${encryptCredential(id, 'fixture-key')})`;
+    const message = 'The SSO deadline for the Northstar pilot is Friday.';
+    const [prior] = await sql`INSERT INTO simulation_runs
+      (agent_id,configuration_id,input,origin,channel,actor,result,expires_at,status)
+      VALUES (${id},${version!.id},${message},'channel','fixture-chat','test','{}',now(),'completed') RETURNING id`;
+    const [source] =
+      await sql`INSERT INTO source_events (agent_id,provider,provider_event_id,payload,text,run_id)
+      VALUES (${id},'fixture-chat','previous','{}',${message},${prior!.id}) RETURNING id`;
+    const [memory] =
+      await sql`INSERT INTO agent_memories (agent_id,subject_kind,subject,topic,identity_key,fact,quote,run_id,source_kind,source_id,source_at)
+      VALUES (${id},'project','Northstar pilot','SSO deadline','fixture',${message},${message},${prior!.id},'event',${source!.id},now()) RETURNING id, revision`;
+    const stages: string[] = [];
+    const toolPricing: boolean[] = [];
+    const result = await executeSimulation(
+      {
+        actor: 'test',
+        agentId: id,
+        configurationId: version!.id,
+        input: 'What is the SSO deadline for the Northstar pilot?',
+      },
+      () =>
+        Object.assign(
+          async (request: Parameters<ModelCall>[0]) => {
+            stages.push(request.stage!);
+            expect(Object.keys(request.tools ?? {})).toEqual([]);
+            expect(request.system).not.toContain('Use the retrieval tools available');
+            expect(JSON.parse(request.input).untrustedMemories).toMatchObject([{ fact: message }]);
+            return {
+              decision: {
+                relevant: true,
+                priority: 1,
+                reason: 'Help with the pilot',
+                actions: [{ type: 'reply', reason: 'Reply', draft: null }],
+                ...(request.stage === 'main'
+                  ? { answer: 'Friday.', citations: [], memoryCitations: [1] }
+                  : {}),
+              },
+              inputTokens: 1,
+              outputTokens: 1,
+              costMicros: 2_000,
+            };
+          },
+          {
+            quote: async (
+              _model: string,
+              _signal: AbortSignal,
+              options?: { requireTools?: boolean },
+            ) => {
+              toolPricing.push(Boolean(options?.requireTools));
+              return {
+                endpoint: 'fixture',
+                upperBoundMicros: 6_000,
+                maxPrice: { prompt: 1, completion: 1, request: 0 },
+              };
+            },
+          },
+        ),
+    );
+    expect(stages).toEqual(['evaluator', 'main']);
+    expect(toolPricing).toEqual(cap === 'spend' ? [false, true, false] : []);
+    if (!result.runId) throw new Error('Expected an admitted run.');
+    const [run] = await sql`SELECT status,result FROM simulation_runs WHERE id=${result.runId}`;
+    expect(run).toMatchObject({
+      status: 'completed',
+      result: {
+        memory: [memory!],
+        steps: [
+          { stage: 'evaluator' },
+          { stage: 'main', decision: { answer: 'Friday.', memoryCitations: [1] } },
+        ],
+      },
+    });
+    const [day] =
+      await sql`SELECT requests,spend_micros FROM usage_counters WHERE agent_id=${id} AND period='day'`;
+    expect(day).toMatchObject({ requests: 2, spend_micros: '4000' });
   }
 });

@@ -6,7 +6,7 @@ import Link from 'next/link';
 
 import { ChevronDown } from 'lucide-react';
 
-import { correctMemory, removeMemory } from '@/actions/memory';
+import { configureMemoryRetention, correctMemory, removeMemory } from '@/actions/memory';
 import { WorkspaceForm } from '@/app/workspace-form';
 import {
   AlertDialog,
@@ -21,14 +21,30 @@ import {
 import { Button } from '@/components/ui/button';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatUtcTimestamp } from '@/lib/format';
-import { memoryEvidenceHref, type MemoryRef } from '@/lib/runtime/memory/types';
+import {
+  memoryEvidenceHref,
+  type MemoryRef,
+  type PersonMemoryField,
+  personMemoryLabels,
+} from '@/lib/runtime/memory/types';
 
 type MemoryRow = MemoryRef & {
   subject: string;
   topic: string;
   fact: string;
+  noteKind: string | null;
+  personField: PersonMemoryField | null;
+  personValue: string | null;
+  personId: string | null;
   learnedAt: Date;
   expiresOn: string | null;
   reviewOn: string | null;
@@ -105,15 +121,27 @@ function MemoryCorrection({ agentId, item }: { agentId: string; item: MemoryRow 
       <input type="hidden" name="revision" value={item.revision} />
       <FieldGroup className="form-fields">
         <Field>
-          <FieldLabel htmlFor={`${formId}-fact`}>Fact or note</FieldLabel>
-          <Textarea
-            id={`${formId}-fact`}
-            name="fact"
-            rows={3}
-            maxLength={500}
-            required
-            defaultValue={item.fact}
-          />
+          <FieldLabel htmlFor={`${formId}-fact`}>
+            {item.personField ? personMemoryLabels[item.personField] : 'Fact or note'}
+          </FieldLabel>
+          {item.personField ? (
+            <Input
+              id={`${formId}-fact`}
+              name="personValue"
+              maxLength={120}
+              required
+              defaultValue={item.personValue ?? ''}
+            />
+          ) : (
+            <Textarea
+              id={`${formId}-fact`}
+              name="fact"
+              rows={3}
+              maxLength={500}
+              required
+              defaultValue={item.fact}
+            />
+          )}
         </Field>
         <div className="memory-dates">
           <Field>
@@ -140,18 +168,81 @@ function MemoryCorrection({ agentId, item }: { agentId: string; item: MemoryRow 
   );
 }
 
+type RetentionSettings = {
+  factDays: number | null;
+  noteDays: number | null;
+  outcomeDays: number | null;
+  intervalDays: 1 | 7;
+};
+
+function RetentionForm({ agentId, retention }: { agentId: string; retention: RetentionSettings }) {
+  const id = useId();
+  const fields = [
+    ['factDays', 'Facts'],
+    ['noteDays', 'Notes'],
+    ['outcomeDays', 'Outcomes'],
+  ] as const;
+  return (
+    <details className="follow-up-detail">
+      <summary>
+        <span className="follow-up-title">Retention</span>
+        <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
+      </summary>
+      <div className="memory-detail-body">
+        <WorkspaceForm action={configureMemoryRetention} label="Save retention">
+          <input type="hidden" name="agentId" value={agentId} />
+          <p className="muted" id={`${id}-days`}>
+            Automatically remove older memories after this many days. Blank keeps entries until
+            removed.
+          </p>
+          <FieldGroup className="memory-dates">
+            {fields.map(([field, label]) => (
+              <Field key={field}>
+                <FieldLabel htmlFor={`${id}-${field}`}>{label} (days)</FieldLabel>
+                <Input
+                  id={`${id}-${field}`}
+                  name={field}
+                  type="number"
+                  min={1}
+                  max={3650}
+                  defaultValue={retention[field] ?? ''}
+                  aria-describedby={`${id}-days`}
+                />
+              </Field>
+            ))}
+            <Field>
+              <FieldLabel htmlFor={`${id}-schedule`}>Maintenance schedule</FieldLabel>
+              <Select name="intervalDays" defaultValue={String(retention.intervalDays)}>
+                <SelectTrigger id={`${id}-schedule`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Daily</SelectItem>
+                  <SelectItem value="7">Weekly</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </FieldGroup>
+        </WorkspaceForm>
+      </div>
+    </details>
+  );
+}
+
 export function MemoryWorkbench({
   agentId,
   rows,
   page,
   hasMore,
   today,
+  retention,
 }: {
   agentId: string;
   rows: MemoryRow[];
   page: number;
   hasMore: boolean;
   today: string;
+  retention: RetentionSettings;
 }) {
   const href = (pageNumber: number) => `/agents/${agentId}?tab=memory&memoryPage=${pageNumber}`;
   return (
@@ -159,6 +250,7 @@ export function MemoryWorkbench({
       <div className="editor-section-heading">
         <h2 id="memory-heading">Memory</h2>
       </div>
+      <RetentionForm agentId={agentId} retention={retention} />
       {rows.length === 0 && (
         <div className="follow-ups-empty">
           <p>
@@ -181,6 +273,7 @@ export function MemoryWorkbench({
               <div>
                 <span className="follow-up-title">
                   {item.subject} · {item.topic}
+                  {item.noteKind ? ` · ${item.noteKind}` : ''}
                 </span>
                 <span className="memory-fact preserve-text">{item.fact}</span>
                 <time dateTime={item.learnedAt.toISOString()}>
@@ -200,6 +293,19 @@ export function MemoryWorkbench({
                     </Link>
                   </dd>
                 </div>
+                {item.personId && (
+                  <div>
+                    <dt>Person</dt>
+                    <dd>
+                      <Link
+                        href={`/people/${item.personId}?agent=${agentId}`}
+                        className="memory-link"
+                      >
+                        View person
+                      </Link>
+                    </dd>
+                  </div>
+                )}
                 {item.correctedBy && item.correctedAt && (
                   <div>
                     <dt>Corrected</dt>

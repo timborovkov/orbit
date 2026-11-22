@@ -18,11 +18,17 @@ import {
   startEvaluationComparison,
 } from '@/lib/runtime/evaluation';
 import { processSimulationJob, SIMULATION_JOB_TYPE } from '@/lib/runtime/execute';
+import {
+  MEMORY_MAINTENANCE_JOB,
+  processMemoryMaintenance,
+  scheduleMemoryMaintenance,
+} from '@/lib/runtime/memory/retention';
 import { processOutboundJob } from '@/lib/runtime/outbound/process';
 import { CHANNEL_OUTBOUND_JOB } from '@/lib/runtime/outbound/types';
 import { getPersonContextForAgent } from '@/lib/runtime/people/history';
 import { encryptCredential } from '@/lib/runtime/secrets';
 import type { ModelCall } from '@/lib/runtime/simulation';
+import { saveMemoryRetention } from '@/lib/server/memory-mutations';
 import { selectAgentMemoryEvidence } from '@/lib/server/memory-queries';
 import { persistChannelGrant, reviewProposedAction } from '@/lib/server/policy-mutations';
 
@@ -210,7 +216,7 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
     await completeJob(sendJob.id, workerId);
     expect(deliveries).toEqual([{ body: 'Thanks. We support SSO.', key: expect.any(String) }]);
     const [delivery] =
-      await sql`SELECT status, provider_message_id FROM outbound_actions WHERE intent_id=${intent!.id}`;
+      await sql`SELECT id, status, provider_message_id FROM outbound_actions WHERE intent_id=${intent!.id}`;
     expect(delivery).toMatchObject({ status: 'sent', provider_message_id: 'fixture-delivery' });
 
     const history = await getPersonContextForAgent(owner.id, identity!.person_id);
@@ -223,7 +229,7 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
       [],
     );
     const memories =
-      await sql`SELECT id, revision, source_id FROM agent_memories WHERE agent_id=${owner.id}`;
+      await sql`SELECT id, revision, source_id FROM agent_memories WHERE agent_id=${owner.id} AND subject_kind='company'`;
     expect(memories).toHaveLength(1);
     expect(memories[0]?.source_id).toBe(received!.sourceId);
     expect(
@@ -232,6 +238,16 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
     expect(
       await selectAgentMemoryEvidence(other.id, memories[0]!.id, memories[0]!.revision),
     ).toBeNull();
+
+    const [outcome] = await sql`SELECT id, revision FROM agent_memories
+      WHERE agent_id=${owner.id} AND subject_kind='outcome'`;
+    expect(await selectAgentMemoryEvidence(owner.id, outcome!.id, outcome!.revision)).toMatchObject(
+      {
+        quote: 'Provider accepted (fixture-chat.reply).',
+        source: { id: delivery!.id, label: 'Recorded send' },
+      },
+    );
+    expect(await selectAgentMemoryEvidence(other.id, outcome!.id, outcome!.revision)).toBeNull();
 
     const later = await ingestChannelEvent({
       ...inbound,
@@ -348,7 +364,7 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
     expect(replayPolicy.length).toBeGreaterThan(0);
     expect(replayPolicy.every(({ decision }) => decision === 'suppressed')).toBe(true);
     expect(await sql`SELECT id FROM outbound_actions WHERE agent_id=${owner.id}`).toHaveLength(2);
-    expect(await sql`SELECT id FROM agent_memories WHERE agent_id=${owner.id}`).toHaveLength(1);
+    expect(await sql`SELECT id FROM agent_memories WHERE agent_id=${owner.id}`).toHaveLength(3);
 
     const otherEvent = await ingestChannelEvent({ ...inbound, agentId: other.id });
     const otherIntake = await claim(CHANNEL_EVENT_JOB, other.id);
@@ -371,6 +387,48 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
       });
     }
     expect(await sql`SELECT id FROM outbound_actions WHERE agent_id=${other.id}`).toHaveLength(0);
+    const [fact] =
+      await sql`SELECT id,revision FROM agent_memories WHERE agent_id=${owner.id} AND subject_kind='company'`;
+    await sql`UPDATE agent_memories SET learned_at=now()-interval '2 days' WHERE id=${fact!.id}`;
+    const [replacement] =
+      await sql`UPDATE agent_memories SET revision=gen_random_uuid(),learned_at=now()
+      WHERE id=${fact!.id} RETURNING revision`;
+    expect(await selectAgentMemoryEvidence(owner.id, fact!.id, fact!.revision)).not.toBeNull();
+    await sql`UPDATE agent_memories SET learned_at=now()-interval '2 days' WHERE agent_id IN (${owner.id},${other.id}) AND id<>${fact!.id}`;
+    await sql`UPDATE person_relationship_notes SET created_at=now()-interval '2 days' WHERE agent_id=${owner.id}`;
+    expect(
+      await saveMemoryRetention(admin, owner.id, {
+        factDays: 1,
+        noteDays: 1,
+        outcomeDays: 1,
+        intervalDays: 7,
+      }),
+    ).toHaveProperty('message');
+    await Promise.all([scheduleMemoryMaintenance(), scheduleMemoryMaintenance()]);
+    const maintenance = await claim(MEMORY_MAINTENANCE_JOB, owner.id);
+    expect(
+      await sql`SELECT id FROM jobs WHERE type=${MEMORY_MAINTENANCE_JOB} AND payload->>'agentId'=${owner.id}`,
+    ).toHaveLength(1);
+    await processMemoryMaintenance(owner.id);
+    await processMemoryMaintenance(owner.id);
+    await completeJob(maintenance.id, workerId);
+    expect(await selectAgentMemoryEvidence(owner.id, fact!.id, fact!.revision)).toBeNull();
+    expect(
+      await selectAgentMemoryEvidence(owner.id, fact!.id, replacement!.revision),
+    ).not.toBeNull();
+    expect([
+      ...(await sql`SELECT subject_kind FROM agent_memories WHERE agent_id=${owner.id}`),
+    ]).toEqual([{ subject_kind: 'company' }]);
+    expect([
+      ...(await sql`SELECT subject_kind FROM agent_memories WHERE agent_id=${other.id}`),
+    ]).toEqual([{ subject_kind: 'company' }]);
+    expect(
+      await sql`SELECT 1 FROM person_relationship_notes WHERE agent_id=${owner.id}`,
+    ).toHaveLength(0);
+    expect(await sql`SELECT 1 FROM outbound_actions WHERE id=${delivery!.id}`).toHaveLength(1);
+    expect(
+      await sql`SELECT 1 FROM agents WHERE id=${owner.id} AND memory_next_maintenance_at > now()+interval '6 days'`,
+    ).toHaveLength(1);
   } finally {
     unregister();
     await sql`UPDATE controls SET paused=${controls?.paused ?? true} WHERE id=1`;

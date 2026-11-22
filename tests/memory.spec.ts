@@ -73,7 +73,7 @@ test('admins can trace, correct, expire and remove an agent memory', async ({ pa
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`/agents/${sarah}`);
     await openWorkspaceTab(page, 'Memory');
-    const row = page.locator('.memory-detail');
+    const row = page.locator('.memory-detail').filter({ hasText: 'SSO requirement' });
     await expect(row.locator('summary')).toContainText(fact);
     await row.locator('summary').focus();
     await page.keyboard.press('Enter');
@@ -122,6 +122,21 @@ test('admins can trace, correct, expire and remove an agent memory', async ({ pa
     }
     const axe = await new AxeBuilder({ page }).analyze();
     expect(axe.violations).toEqual([]);
+
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Retention$/ })
+      .click();
+    await page.getByLabel('Facts (days)').fill('365');
+    await page.getByLabel('Notes (days)').fill('30');
+    await page.getByRole('combobox', { name: 'Maintenance schedule' }).click();
+    await page.getByRole('option', { name: 'Weekly' }).click();
+    await page.getByRole('button', { name: 'Save retention' }).click();
+    await expect(page.getByRole('status')).toContainText('Memory retention saved.');
+    expect(
+      await sql`SELECT memory_fact_retention_days AS fact_days, memory_note_retention_days AS note_days, memory_outcome_retention_days AS outcome_days, memory_maintenance_interval_days AS interval_days FROM agents WHERE id=${sarah}`,
+    ).toEqual([{ fact_days: 365, note_days: 30, outcome_days: null, interval_days: 7 }]);
+    await page.screenshot({ path: test.info().outputPath('memory-retention.png') });
 
     const remove = row.getByRole('button', { name: 'Remove memory' });
     await remove.click();

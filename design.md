@@ -340,7 +340,7 @@ source links download the original through the selected agent’s current access
 
 ### Memory
 
-Use the workspace disclosure rows to list learned company and project facts.
+Use the workspace disclosure rows to list learned company, project and person facts.
 Keep the fact, learned timestamp and active, review due or expired state visible
 in the collapsed row. In the expanded row, use **View original source** across
 channels and let admins correct the fact and UTC dates or confirm removal. A corrected
@@ -350,8 +350,19 @@ Show memory evidence links alongside the corresponding answer in Playground,
 History and replay comparisons. Keep Knowledge citations alongside their
 quoted passages.
 
+For person facts, label the controlled field (Company or Job title), use a
+single-line correction input, and link to the current person in the owning
+agent’s view. Keep the original evidence link on the same row.
+
+Use a **Retention** disclosure above the entries. Provide independent day limits
+for facts, notes and outcomes, plus a daily or weekly maintenance schedule. Keep
+review due and expired labels on individual entries. Show the original evidence
+for a note or a recorded send using the same evidence view.
+
 Playwright verified evidence access at 1440px and correction, expiry and removal
 at 390px in Dark mode, including keyboard focus and mobile overflow checks.
+The mobile flow also saved separate fact and note retention periods with a weekly
+maintenance schedule.
 
 ### Email
 
@@ -394,9 +405,14 @@ shows the observing agents. Choosing one agent narrows the timeline and
 reveals only that agent’s private notes and their supporting excerpts. Manage
 identities and contacts from the all-agents view.
 
+Show active private memory facts with source links below the timeline when an
+agent is selected. Place each fact on the current person of its source identity.
+
 Playwright exercised the link and unlink flow at desktop and phone widths,
 opened the supporting email from a private note, and checked keyboard access,
 overflow, and automated accessibility in both themes at 390px.
+Chromium also verified the structured Company correction, the return from
+Memory to the agent’s People view, and the fact’s placement after unlinking.
 
 ## Workspace libraries and approvals
 

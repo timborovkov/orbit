@@ -41,7 +41,7 @@ import {
   consumeKnowledgeToolStep,
   recordKnowledgeToolCall,
 } from '@/lib/runtime/knowledge/tool-step';
-import { recallRunMemories } from '@/lib/runtime/memory/recall';
+import { hasSearchableMemory, recallRunMemories } from '@/lib/runtime/memory/recall';
 import {
   captureRunMemories,
   memoryRunSource,
@@ -51,7 +51,11 @@ import { type MemoryCandidate, memoryCaptureOrigin } from '@/lib/runtime/memory/
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
 import { enqueueOutbound } from '@/lib/runtime/outbound/dispatch';
-import { loadRelationshipContext, storeRelationshipNote } from '@/lib/runtime/people/history';
+import {
+  loadRelationshipContext,
+  searchRunHistory,
+  storeRelationshipNote,
+} from '@/lib/runtime/people/history';
 import { prepareRunTools } from '@/lib/runtime/resources';
 import {
   hasSimulationProgress,
@@ -61,6 +65,7 @@ import {
 } from '@/lib/runtime/simulation';
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
 import { nativeTools } from '@/lib/runtime/tools/native';
+import { retrievalTools } from '@/lib/runtime/tools/retrieval';
 import {
   actionIntents,
   agents,
@@ -753,6 +758,28 @@ async function processSimulationRun(
       maxToolSteps: budgets.maxToolStepsPerRun,
     });
     try {
+      const recallScope = {
+        agentId: run.agentId,
+        runId: run.id,
+        actor: run.actor,
+        executionToken,
+        replay: origin === 'replay',
+        workspaceReview: origin === 'playground' || origin === 'replay',
+      };
+      const knowledgeEnabled = agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL);
+      const [deepMemory, deepHistory] =
+        budgets.maxToolStepsPerRun > 0 && origin !== 'replay'
+          ? await retryableStore(() =>
+              Promise.all([
+                hasSearchableMemory(recallScope),
+                source?.personIdentityId
+                  ? searchRunHistory(run.agentId, run.id, '', 1).then((rows) => rows.length > 0)
+                  : false,
+              ]),
+            )
+          : [false, false];
+      const deepKnowledge =
+        budgets.maxToolStepsPerRun > 0 && knowledgeEnabled && origin !== 'replay';
       let settle!: ((billedMicros: number, actualProviderCalls?: number) => Promise<void>) & {
         reservedMicros?: bigint;
       };
@@ -847,19 +874,16 @@ async function processSimulationRun(
             memoryCapture: source
               ? {
                   source: source.text,
-                  verify: (candidates) => verifiedMemoryCandidates(candidates, source.text),
+                  hasAuthor: source.personIdentityId !== null,
+                  verify: (candidates) => verifiedMemoryCandidates(candidates, source),
                 }
               : undefined,
             recallMemory: async (requestSignal) => {
               try {
                 return await retryableStore(() =>
                   recallRunMemories({
-                    agentId: run.agentId,
-                    runId: run.id,
-                    actor: run.actor,
-                    executionToken,
+                    ...recallScope,
                     query: recallQuery,
-                    replay: origin === 'replay',
                     signal: requestSignal,
                   }),
                 );
@@ -879,10 +903,25 @@ async function processSimulationRun(
             initial: checkpointed,
             skillCatalog: resources.skillCatalog,
             tools: resources.tools,
+            retrievalTools:
+              deepMemory || deepHistory || deepKnowledge
+                ? (result, requestSignal) =>
+                    retrievalTools({
+                      run: recallScope,
+                      policy: basePolicy,
+                      result,
+                      signal: requestSignal,
+                      memory: deepMemory,
+                      history: deepHistory,
+                      knowledge: deepKnowledge,
+                      gate: resources.toolSteps,
+                      calls: resources.toolCalls,
+                    })
+                : undefined,
             skillVersions: resources.skillVersions,
             mcpConnections: resources.mcpConnections,
             toolCalls: resources.toolCalls,
-            retrieveKnowledge: agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
+            retrieveKnowledge: knowledgeEnabled
               ? async (requestSignal) => {
                   const query = (
                     profile?.knowledgeQuery?.(run.input) ??
