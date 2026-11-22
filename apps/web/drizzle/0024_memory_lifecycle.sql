@@ -18,14 +18,14 @@ ALTER TABLE agent_memories ADD CONSTRAINT agent_memories_subject_check CHECK (
       AND person_value IS NOT NULL AND char_length(btrim(person_value)) BETWEEN 1 AND 120)
 );
 
--- Only a confirmed delivery recorded against an owned, real source is a learning outcome.
+-- Only a provider-accepted send recorded against an owned, real source is a learning outcome.
 -- Keep provider response bodies, recipient details and outbound message text out of memory.
 CREATE VIEW memory_evidence AS
 SELECT * FROM run_memory_evidence
 UNION ALL
 SELECT 'outcome', delivery.id, delivery.agent_id, intent.run_id, delivery.completed_at,
-  delivery.action_type, NULL, 'Delivery confirmed (' || delivery.action_type || ').',
-  'Recorded delivery', source.href, source.link_label, source.channel, source.person_identity_id,
+  delivery.action_type, NULL, 'Provider accepted (' || delivery.action_type || ').',
+  'Recorded send', source.href, source.link_label, source.channel, source.person_identity_id,
   delivery.completed_at
 FROM outbound_actions delivery
 JOIN action_intents intent ON intent.id = delivery.intent_id AND intent.agent_id = delivery.agent_id
@@ -47,7 +47,7 @@ BEGIN
     OR OLD.provider_message_id IS NULL OR OLD.completed_at IS NULL THEN
     INSERT INTO agent_memories (agent_id, subject_kind, subject, topic, identity_key, fact, quote,
       run_id, source_kind, source_id, source_at)
-    SELECT agent_id, 'outcome', title, 'Delivery', source_id::text, body, body,
+    SELECT agent_id, 'outcome', title, 'Send', source_id::text, body, body,
       run_id, source_kind, source_id, source_at
     FROM memory_evidence WHERE source_kind = 'outcome' AND agent_id = NEW.agent_id AND source_id = NEW.id
     ON CONFLICT (agent_id, subject_kind, identity_key) DO NOTHING;

@@ -240,8 +240,8 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
       WHERE agent_id=${owner.id} AND subject_kind='outcome'`;
     expect(await selectAgentMemoryEvidence(owner.id, outcome!.id, outcome!.revision)).toMatchObject(
       {
-        quote: 'Delivery confirmed (fixture-chat.reply).',
-        source: { id: delivery!.id, label: 'Recorded delivery' },
+        quote: 'Provider accepted (fixture-chat.reply).',
+        source: { id: delivery!.id, label: 'Recorded send' },
       },
     );
     expect(await selectAgentMemoryEvidence(other.id, outcome!.id, outcome!.revision)).toBeNull();
