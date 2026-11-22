@@ -1,6 +1,11 @@
 import { Inbox } from 'lucide-react';
 
-import { reviewProposal, saveConsent, saveConsentRequirements } from '@/actions/policy';
+import {
+  reviewProposal,
+  saveChannelGrant,
+  saveConsent,
+  saveConsentRequirements,
+} from '@/actions/policy';
 import { ActionRequirementsForm } from '@/app/action-requirements-form';
 import { ApprovalToolsForm } from '@/app/approval-tools-form';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
@@ -41,6 +46,7 @@ export function ReviewSettings({
   approvalExpiresAfterHours,
   approvalOnReject,
   approvalSpendCents,
+  channelActions,
 }: {
   agentId: string;
   configurationVersion: number;
@@ -48,6 +54,12 @@ export function ReviewSettings({
   approvalExpiresAfterHours: number | null;
   approvalOnReject: 'continue' | 'end';
   approvalSpendCents: number | null;
+  channelActions: {
+    type: string;
+    label: string;
+    enabled: boolean;
+    alwaysRequiresApproval: boolean;
+  }[];
 }) {
   return (
     <section className="access-workbench" data-testid="approval-settings">
@@ -66,7 +78,27 @@ export function ReviewSettings({
         approvalExpiresAfterHours={approvalExpiresAfterHours}
         approvalOnReject={approvalOnReject}
         approvalSpendCents={approvalSpendCents}
+        channelActions={channelActions.filter((action) => !action.alwaysRequiresApproval)}
       />
+      {channelActions.length > 0 && (
+        <section className="space-y-4" aria-labelledby="channel-actions">
+          <h2 id="channel-actions">Channel permissions</h2>
+          {channelActions.map((action) => (
+            <WorkspaceForm
+              key={action.type}
+              action={saveChannelGrant}
+              label={`${action.enabled ? 'Disable' : 'Enable'} ${action.label}`}
+            >
+              <input type="hidden" name="agentId" value={agentId} />
+              <input type="hidden" name="type" value={action.type} />
+              <input type="hidden" name="enabled" value={String(!action.enabled)} />
+              <p>
+                {action.label} · {action.enabled ? 'Enabled' : 'Disabled'}
+              </p>
+            </WorkspaceForm>
+          ))}
+        </section>
+      )}
     </section>
   );
 }

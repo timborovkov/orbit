@@ -12,8 +12,8 @@ import {
   shouldCancelPendingJobs,
 } from '@/lib/lifecycle';
 import { cancelWorkForLifecycle } from '@/lib/lifecycle-work';
+import { scheduleChannelWork } from '@/lib/runtime/channels/registry';
 import { configSchema } from '@/lib/runtime/config';
-import { ensureDiscoveryPollJob } from '@/lib/runtime/x/poll';
 import { agents, type ApprovalSettings, audit, configurations } from '@/lib/schema';
 
 export async function persistLifecycle(actor: string, agentId: string, next: LifecycleState) {
@@ -59,14 +59,13 @@ export async function persistLifecycle(actor: string, agentId: string, next: Lif
           .orderBy(desc(configurations.version))
           .limit(1)
       ).at(0);
-      const query = version ? configSchema.parse(version.config).xSearchQuery.trim() : '';
-      if (query) await ensureDiscoveryPollJob(agentId, tx);
+      if (version) await scheduleChannelWork(tx, agentId, configSchema.parse(version.config));
     }
 
     return {
       message:
         parsed.data === 'live'
-          ? 'Live lifecycle saved. Administrator-approved email replies may dispatch; other proposals stay suppressed until their adapters land.'
+          ? 'Live lifecycle saved. Channel actions can dispatch when policy allows.'
           : `Lifecycle set to ${lifecycleLabels[parsed.data].toLowerCase()}.`,
     };
   });

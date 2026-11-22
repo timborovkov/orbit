@@ -4,10 +4,10 @@ import { db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
 import { lockApprovalAgent, recordApprovalReviews } from '@/lib/runtime/approval-work';
-import { finalizeOutboundForCancelledJobs } from '@/lib/runtime/email/send';
 import { EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import { finalizeCancelledEvaluationComparisons } from '@/lib/runtime/evaluation';
 import { skipScheduledFollowUpsForLifecycle } from '@/lib/runtime/follow-ups/process';
+import { finalizeOutboundForCancelledJobs } from '@/lib/runtime/outbound/process';
 import { actionIntents, agents, emailMessages, runs } from '@/lib/schema';
 
 /**
@@ -54,7 +54,7 @@ export async function cancelWorkForLifecycle(
   // Follow-ups use skip-and-record: mark scheduled commitments skipped and
   // write activity events when pause/stop cancels their delayed jobs.
   await skipScheduledFollowUpsForLifecycle(agentId, next, store);
-  // Cancelled email.send jobs never reach dispatch; finalize linked outbound rows now.
+  // Cancelled outbound jobs never reach dispatch. Finalize the linked actions here.
   await finalizeOutboundForCancelledJobs(
     store,
     cancelledIds,

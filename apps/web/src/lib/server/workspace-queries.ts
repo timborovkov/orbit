@@ -1,11 +1,13 @@
 import 'server-only';
 
-import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { budgetViolationMessage, parseBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
+import { channelForRun } from '@/lib/runtime/channels/registry';
 import { openRouterKeySource } from '@/lib/runtime/openrouter-key';
+import { latestPersistedRun } from '@/lib/runtime/playground-ui';
 import { isExpiredSimulationRun } from '@/lib/runtime/simulation-watch';
 import {
   actionIntents,
@@ -19,8 +21,8 @@ import {
   jobs,
   personIdentities,
   recipientConsents,
+  runMemoryEvidence,
   runs,
-  sourceEvents,
   templates,
   usageCounters,
 } from '@/lib/schema';
@@ -138,18 +140,20 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
       .from(credentials)
       .where(eq(credentials.agentId, id)),
     db()
-      .select({ run: runs, personId: personIdentities.personId })
+      .select({
+        run: runs,
+        personId: personIdentities.personId,
+        sourceTitle: runMemoryEvidence.title,
+        sourceHref: runMemoryEvidence.href,
+        sourceLinkLabel: runMemoryEvidence.linkLabel,
+      })
       .from(runs)
       .leftJoin(
-        sourceEvents,
-        and(
-          eq(sourceEvents.runId, runs.id),
-          eq(sourceEvents.agentId, runs.agentId),
-          eq(sourceEvents.provider, 'x'),
-        ),
+        runMemoryEvidence,
+        and(eq(runMemoryEvidence.runId, runs.id), eq(runMemoryEvidence.agentId, runs.agentId)),
       )
-      .leftJoin(personIdentities, eq(personIdentities.id, sourceEvents.personIdentityId))
-      .where(and(eq(runs.agentId, id), inArray(runs.origin, ['playground', 'discovery'])))
+      .leftJoin(personIdentities, eq(personIdentities.id, runMemoryEvidence.personIdentityId))
+      .where(and(eq(runs.agentId, id), ne(runs.origin, 'replay')))
       .orderBy(
         ...(focusRunId ? [desc(sql`${runs.id} = ${focusRunId}::uuid`)] : []),
         desc(runs.createdAt),
@@ -208,13 +212,24 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     ? await db().select().from(jobs).where(inArray(jobs.id, jobIds))
     : [];
   const jobsById = new Map(linkedJobs.map((job) => [job.id, job]));
-  const viewedHistory = history.map(({ run, personId }) => {
+  const describeRun = ({
+    run,
+    personId,
+    sourceTitle,
+    sourceHref,
+    sourceLinkLabel,
+  }: (typeof history)[number]) => {
     // awaiting_approval waits on reviewExpiresAt, not the execution deadline.
     const expired = isExpiredSimulationRun(run);
     const deferred = Boolean(run.deferReason) && (run.status === 'failed' || expired);
     return {
       ...run,
       personId,
+      sourceTitle: sourceTitle || run.input,
+      sourceHref: sourceHref?.endsWith(`#run-${run.id}`) ? null : sourceHref,
+      sourceLinkLabel,
+      channelName: channelForRun(run)?.label ?? run.channel ?? 'Playground',
+      preferDraftAnswer: channelForRun(run)?.run.mode === 'draft',
       deferReason: run.deferReason ?? (expired ? budgetViolationMessage('run-deadline') : null),
       interrupted: expired || run.status === 'interrupted',
       displayStatus: expired
@@ -224,7 +239,22 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
           : run.status,
       job: run.jobId ? (jobsById.get(run.jobId) ?? null) : null,
     };
-  });
+  };
+  const viewedHistory = history.map(describeRun);
+  const latestPlaygroundRun = latestPersistedRun(
+    viewedHistory.filter((run) => run.origin === 'playground'),
+  );
+  const olderPlaygroundRun =
+    !latestPlaygroundRun && history.length === 50
+      ? (
+          await db()
+            .select()
+            .from(runs)
+            .where(and(eq(runs.agentId, id), eq(runs.origin, 'playground')))
+            .orderBy(desc(runs.createdAt))
+            .limit(1)
+        ).at(0)
+      : undefined;
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
   const emptyUsage = { spendMicros: BigInt(0), requests: 0, outboundActions: 0 };
@@ -239,6 +269,17 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     hasAgentCredential,
     keySource: openRouterKeySource(hasAgentCredential),
     history: viewedHistory,
+    latestPlaygroundRun:
+      latestPlaygroundRun ??
+      (olderPlaygroundRun
+        ? describeRun({
+            run: olderPlaygroundRun,
+            personId: null,
+            sourceTitle: null,
+            sourceHref: null,
+            sourceLinkLabel: null,
+          })
+        : undefined),
     reviews,
     pendingApprovalCount: pendingApprovals,
     consents,

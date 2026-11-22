@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 
 import {
   type BudgetSnapshot,
@@ -9,19 +9,13 @@ import {
 import { db, type Tx } from '@/lib/db';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { enqueueJob } from '@/lib/queue/jobs';
-import { emailMemoryQuery } from '@/lib/runtime/email/input';
-import { buildEmailDraftInput } from '@/lib/runtime/email/receive';
-import {
-  processSimulationRunForOrigin,
-  type SimulationBehavior,
-  type SimulationJobClaim,
-} from '@/lib/runtime/execute';
+import { channelAdapter, channelForRun } from '@/lib/runtime/channels/registry';
+import { processSimulationRunForOrigin, type SimulationJobClaim } from '@/lib/runtime/execute';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import type { ModelCall } from '@/lib/runtime/simulation';
 import {
   agents,
   configurations,
-  emailMessages,
   evaluationCases,
   type EvaluationCaseSource,
   evaluationComparisons,
@@ -29,10 +23,6 @@ import {
   runs,
   usageCounters,
 } from '@/lib/schema';
-
-function behaviorForCaseSource(sourceKind: EvaluationCaseSource): SimulationBehavior {
-  return sourceKind === 'email' ? 'email' : 'playground';
-}
 
 export const EVALUATION_REPLAY_JOB = 'evaluation.replay';
 
@@ -79,11 +69,13 @@ async function admitReplayRun(
     configurationId,
     input,
     recipients,
+    channel,
   }: {
     actor: string;
     configurationId: string;
     input: string;
     recipients: string[];
+    channel?: string | null;
   },
 ): Promise<{ runId: string } | { error: string }> {
   const budgets = parseBudgets(agent.budgets);
@@ -149,6 +141,7 @@ async function admitReplayRun(
         configurationId,
         input,
         origin: 'replay',
+        channel,
         recipients,
         actor,
         status: 'queued',
@@ -175,7 +168,7 @@ export async function saveEvaluationCase(input: {
   const caseInput = input.caseInput.trim();
   if (!title) return { error: 'Give this case a short title.' };
   const emailFromMessage = input.sourceKind === 'email' && Boolean(input.sourceEmailMessageId);
-  if (!caseInput && !emailFromMessage) {
+  if (!caseInput && !emailFromMessage && !input.sourceRunId) {
     return { error: 'The case needs a non-empty input snapshot.' };
   }
 
@@ -183,38 +176,39 @@ export async function saveEvaluationCase(input: {
     const agent = (await tx.select().from(agents).where(eq(agents.id, input.agentId))).at(0);
     if (!agent) return { error: 'Agent not found.' };
 
-    if (input.sourceKind === 'playground' && input.sourceRunId) {
-      const source = (
-        await tx
-          .select()
-          .from(runs)
-          .where(
-            and(
-              eq(runs.id, input.sourceRunId),
-              eq(runs.agentId, input.agentId),
-              eq(runs.origin, 'playground'),
-            ),
-          )
-      ).at(0);
-      if (!source) return { error: 'Playground run not found for this agent.' };
-    }
-
+    let sourceKind = input.sourceKind;
+    let sourceChannel = channelAdapter(sourceKind)?.id;
     let persistedInput = caseInput;
-    if (input.sourceKind === 'email' && input.sourceEmailMessageId) {
-      const source = (
-        await tx
-          .select()
-          .from(emailMessages)
-          .where(
-            and(
-              eq(emailMessages.id, input.sourceEmailMessageId),
-              eq(emailMessages.agentId, input.agentId),
-            ),
-          )
-      ).at(0);
-      if (!source) return { error: 'Inbound email message not found for this agent.' };
-      // Prefer the production drafting snapshot over a client-supplied body excerpt.
-      persistedInput = await buildEmailDraftInput(tx, source);
+    let recipients = input.recipients ?? [];
+    if (input.sourceRunId) {
+      const [source] = await tx
+        .select()
+        .from(runs)
+        .where(
+          and(
+            eq(runs.id, input.sourceRunId),
+            eq(runs.agentId, input.agentId),
+            ne(runs.origin, 'replay'),
+          ),
+        );
+      if (!source) return { error: 'Run not found for this agent.' };
+      sourceChannel = channelForRun(source)?.id;
+      if (source.origin !== 'playground' && !sourceChannel) {
+        return { error: 'The source channel is unavailable.' };
+      }
+      sourceKind = sourceChannel ? 'channel' : 'playground';
+      persistedInput = source.input;
+      recipients = source.recipients;
+    } else if (input.sourceEmailMessageId) {
+      const snapshot = await channelAdapter(sourceKind)?.run.evaluationInput?.(
+        tx,
+        input.agentId,
+        input.sourceEmailMessageId,
+      );
+      if (!snapshot) return { error: 'Inbound email message not found for this agent.' };
+      persistedInput = snapshot;
+    } else if (sourceKind === 'channel') {
+      return { error: 'Select an originating run.' };
     }
 
     const row = (
@@ -223,11 +217,12 @@ export async function saveEvaluationCase(input: {
         .values({
           agentId: input.agentId,
           title,
-          sourceKind: input.sourceKind,
+          sourceKind,
+          sourceChannel,
           sourceRunId: input.sourceRunId ?? null,
           sourceEmailMessageId: input.sourceEmailMessageId ?? null,
           input: persistedInput,
-          recipients: input.recipients ?? [],
+          recipients,
           actor: input.actor,
         })
         .returning({ id: evaluationCases.id })
@@ -370,9 +365,10 @@ async function runReplaySide(
     ).at(0);
     if (!evaluationCase) return { error: 'Evaluation case not found.' as const };
 
-    const behavior = behaviorForCaseSource(evaluationCase.sourceKind);
-    const recallQuery =
-      behavior === 'email' ? emailMemoryQuery(evaluationCase.input) : evaluationCase.input;
+    const channelId = evaluationCase.sourceChannel ?? channelAdapter(evaluationCase.sourceKind)?.id;
+    const adapter = channelAdapter(channelId);
+    if (channelId && !adapter) return { error: 'The source channel is unavailable.' as const };
+    const recallQuery = adapter?.run.recallQuery?.(evaluationCase.input) ?? evaluationCase.input;
     const existingRunId = side === 'left' ? comparison.leftRunId : comparison.rightRunId;
     if (existingRunId) {
       const existing = (
@@ -397,7 +393,12 @@ async function runReplaySide(
             })
             .where(eq(runs.id, existing.id));
         }
-        return { runId: existing.id, behavior, recallQuery, skipProcess: false as const };
+        return {
+          runId: existing.id,
+          channel: adapter?.id,
+          recallQuery,
+          skipProcess: false as const,
+        };
       }
     }
 
@@ -406,6 +407,7 @@ async function runReplaySide(
       configurationId,
       input: evaluationCase.input,
       recipients: evaluationCase.recipients,
+      channel: adapter?.id,
     });
     if ('error' in result) return result;
 
@@ -414,14 +416,14 @@ async function runReplaySide(
       .set(side === 'left' ? { leftRunId: result.runId } : { rightRunId: result.runId })
       .where(eq(evaluationComparisons.id, comparisonId));
 
-    return { ...result, behavior, recallQuery, skipProcess: false as const };
+    return { ...result, channel: adapter?.id, recallQuery, skipProcess: false as const };
   });
 
   if ('error' in admitted) return admitted;
   if ('skipped' in admitted) return admitted;
   if (!admitted.skipProcess) {
     await processSimulationRunForOrigin(admitted.runId, 'replay', inference, signal, ownedClaim, {
-      behavior: admitted.behavior,
+      channel: admitted.channel,
       recallQuery: admitted.recallQuery,
     });
   }

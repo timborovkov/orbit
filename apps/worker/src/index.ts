@@ -10,14 +10,12 @@ import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import type { JobRecord } from '@/lib/queue/types';
 import { startJobWorker } from '@/lib/queue/worker';
 import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
-import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
-import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
+import { CHANNEL_EVENT_JOB, processChannelEventJob } from '@/lib/runtime/channels/ingest';
 import {
-  finalizeExhaustedOutboundJob,
-  processEmailSendJob,
-  reconcileDeadOutboundJobs,
-} from '@/lib/runtime/email/send';
-import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB, EMAIL_SEND_JOB } from '@/lib/runtime/email/settings';
+  channelJobs,
+  channelOutboundJobTypes,
+  channelRunJobTypes,
+} from '@/lib/runtime/channels/registry';
 import {
   EVALUATION_REPLAY_JOB,
   finalizeExhaustedEvaluationReplayJob,
@@ -26,7 +24,6 @@ import {
 } from '@/lib/runtime/evaluation';
 import {
   finalizeExhaustedSimulationJob,
-  processEmailDraftJob,
   processSimulationJob,
   reconcileOrphanedSimulationRuns,
   SIMULATION_JOB_TYPE,
@@ -48,11 +45,12 @@ import {
 } from '@/lib/runtime/knowledge/provider';
 import { processMemoryEmbedding } from '@/lib/runtime/memory/store';
 import { MEMORY_EMBED_JOB } from '@/lib/runtime/memory/types';
+import {
+  finalizeExhaustedOutboundJob,
+  processOutboundJob,
+  reconcileDeadOutboundJobs,
+} from '@/lib/runtime/outbound/process';
 import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
-import { createXSearchAdapter } from '@/lib/runtime/x/adapter';
-import { processDiscoveryPoll } from '@/lib/runtime/x/poll';
-import { resolveXBearerToken } from '@/lib/runtime/x/settings';
-import { X_DISCOVERY_POLL_JOB } from '@/lib/runtime/x/types';
 import { workerEnvConfig } from '@/lib/worker-env';
 
 const config = workerEnvConfig();
@@ -104,7 +102,18 @@ function jobCorrelation(job: { id: string; payload: Record<string, unknown> }) {
   };
 }
 
-const xAdapter = createXSearchAdapter(resolveXBearerToken(config.X_BEARER_TOKEN));
+const runJobTypes = channelRunJobTypes(SIMULATION_JOB_TYPE);
+const outboundJobTypes = channelOutboundJobTypes();
+const providerJobs = channelJobs(workerId, [
+  ...runJobTypes,
+  ...outboundJobTypes,
+  CHANNEL_EVENT_JOB,
+  EVALUATION_REPLAY_JOB,
+  MEMORY_EMBED_JOB,
+  KNOWLEDGE_JOB_TYPE,
+  SHARED_KNOWLEDGE_JOB_TYPE,
+  FOLLOW_UP_JOB_TYPE,
+]);
 
 async function runKnowledgeJob(job: JobRecord, signal: AbortSignal) {
   try {
@@ -136,31 +145,26 @@ async function runKnowledgeJob(job: JobRecord, signal: AbortSignal) {
 const worker = startJobWorker({
   workerId,
   handlers: {
-    [EMAIL_RECEIVE_JOB]: (job, signal) =>
-      processEmailReceiveJob(job, workerId, signal, (emailId, fetchSignal) =>
-        fetchReceivedEmail(emailId, config.RESEND_API_KEY, fetchSignal),
-      ),
-    [EMAIL_DRAFT_JOB]: (job, signal) =>
-      processEmailDraftJob(job.payload, undefined, signal, {
-        jobId: job.id,
-        workerId,
-      }),
-    [EMAIL_SEND_JOB]: (job, signal) =>
-      processEmailSendJob(job, signal, undefined, {
-        apiKey: config.RESEND_API_KEY,
-        sendingDomain: config.RESEND_SENDING_DOMAIN,
-      }),
-    [SIMULATION_JOB_TYPE]: async (job, signal) => {
-      try {
-        await processSimulationJob(job.payload, undefined, signal, {
-          jobId: job.id,
-          workerId,
-        });
-      } catch (error) {
-        reportFailure('worker.queue', jobCorrelation(job), error);
-        throw error;
-      }
-    },
+    ...providerJobs,
+    [CHANNEL_EVENT_JOB]: processChannelEventJob,
+    ...Object.fromEntries(outboundJobTypes.map((type) => [type, processOutboundJob])),
+    ...Object.fromEntries(
+      runJobTypes.map((type) => [
+        type,
+        async (job: JobRecord, signal: AbortSignal) => {
+          try {
+            await processSimulationJob(job.payload, undefined, signal, {
+              jobId: job.id,
+              workerId,
+              jobType: job.type,
+            });
+          } catch (error) {
+            reportFailure('worker.queue', jobCorrelation(job), error);
+            throw error;
+          }
+        },
+      ]),
+    ),
     [EVALUATION_REPLAY_JOB]: async (job, signal) => {
       try {
         await processEvaluationReplayJob(job.payload, undefined, signal, {
@@ -168,18 +172,6 @@ const worker = startJobWorker({
           workerId,
           jobType: EVALUATION_REPLAY_JOB,
         });
-      } catch (error) {
-        reportFailure('worker.queue', jobCorrelation(job), error);
-        throw error;
-      }
-    },
-    [X_DISCOVERY_POLL_JOB]: async (job, signal) => {
-      try {
-        const result = await processDiscoveryPoll(job, signal, {
-          adapter: xAdapter,
-          jobId: job.id,
-        });
-        if (result.deferUntil) return { deferUntil: result.deferUntil };
       } catch (error) {
         reportFailure('worker.queue', jobCorrelation(job), error);
         throw error;
@@ -199,7 +191,7 @@ const worker = startJobWorker({
   },
   onDeadLetter: async (job, error) => {
     reportFailure('worker.dead_letter', jobCorrelation(job), error);
-    if (job.type === SIMULATION_JOB_TYPE || job.type === EMAIL_DRAFT_JOB) {
+    if (runJobTypes.includes(job.type)) {
       await finalizeExhaustedSimulationJob(job.payload, error);
       return;
     }
@@ -207,7 +199,7 @@ const worker = startJobWorker({
       await finalizeExhaustedEvaluationReplayJob(job.payload, error);
       return;
     }
-    if (job.type === EMAIL_SEND_JOB) {
+    if (outboundJobTypes.includes(job.type)) {
       await finalizeExhaustedOutboundJob(job.payload, error);
       return;
     }

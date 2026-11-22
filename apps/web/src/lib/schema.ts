@@ -147,9 +147,10 @@ export const runs = pgTable(
       .notNull()
       .references(() => configurations.id),
     origin: text('origin')
-      .$type<'playground' | 'email' | 'discovery' | 'replay'>()
+      .$type<'playground' | 'email' | 'discovery' | 'replay' | 'channel'>()
       .notNull()
       .default('playground'),
+    channel: text('channel'),
     input: text('input').notNull(),
     recipients: jsonb('recipients').$type<string[]>().notNull().default([]),
     status: text('status').$type<RunStatus>().notNull().default('queued'),
@@ -171,7 +172,7 @@ export const people = pgTable('people', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export type PersonChannel = 'email' | 'x';
+export type PersonChannel = string;
 export type PersonEvidence = { channel: PersonChannel; sourceId: string };
 
 export const personIdentities = pgTable(
@@ -311,7 +312,7 @@ export const emailMessages = pgTable(
   ],
 );
 
-export type EvaluationCaseSource = 'playground' | 'email';
+export type EvaluationCaseSource = 'playground' | 'email' | 'channel';
 export type EvaluationComparisonStatus = 'queued' | 'running' | 'completed' | 'failed';
 
 export const evaluationCases = pgTable('evaluation_cases', {
@@ -321,6 +322,7 @@ export const evaluationCases = pgTable('evaluation_cases', {
     .references(() => agents.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   sourceKind: text('source_kind').$type<EvaluationCaseSource>().notNull(),
+  sourceChannel: text('source_channel'),
   sourceRunId: uuid('source_run_id').references(() => runs.id, { onDelete: 'set null' }),
   sourceEmailMessageId: uuid('source_email_message_id').references(() => emailMessages.id, {
     onDelete: 'set null',
@@ -567,7 +569,7 @@ export const agentMcpConnections = pgTable(
   (table) => [primaryKey({ columns: [table.agentId, table.connectionId] })],
 );
 
-export type SourceEventProvider = 'x';
+export type SourceEventProvider = string;
 
 export const sourceEvents = pgTable(
   'source_events',
@@ -578,6 +580,12 @@ export const sourceEvents = pgTable(
       .references(() => agents.id, { onDelete: 'cascade' }),
     provider: text('provider').$type<SourceEventProvider>().notNull(),
     providerEventId: text('provider_event_id').notNull(),
+    accountId: text('account_id'),
+    threadId: text('thread_id'),
+    admissionStatus: text('admission_status').$type<
+      'pending' | 'deferred' | 'admitted' | 'rejected'
+    >(),
+    admissionReason: text('admission_reason'),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
     text: text('text').notNull(),
     authorId: text('author_id'),
@@ -592,7 +600,9 @@ export const sourceEvents = pgTable(
       .references(() => runs.id, { onDelete: 'set null' }),
   },
   (table) => [
-    unique().on(table.agentId, table.provider, table.providerEventId),
+    unique('source_events_delivery_key')
+      .on(table.agentId, table.provider, table.accountId, table.providerEventId)
+      .nullsNotDistinct(),
     unique().on(table.agentId, table.id),
   ],
 );
@@ -682,6 +692,9 @@ export const runMemoryEvidence = pgView('run_memory_evidence', {
   label: text('label').notNull(),
   href: text('href').notNull(),
   linkLabel: text('link_label').notNull(),
+  channel: text('channel').notNull(),
+  personIdentityId: uuid('person_identity_id'),
+  observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
 }).existing();
 
 export const discoveryCursors = pgTable(

@@ -5,8 +5,8 @@ import { eq } from 'drizzle-orm';
 import { budgetDefaults } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import { canAcceptBackgroundWork } from '@/lib/lifecycle';
+import { scheduleChannelWork } from '@/lib/runtime/channels/registry';
 import { configSchema } from '@/lib/runtime/config';
-import { ensureDiscoveryPollJob } from '@/lib/runtime/x/poll';
 import { agents, audit, configurations, templates } from '@/lib/schema';
 
 export async function createAgentFromTemplate(
@@ -41,8 +41,8 @@ export async function createAgentFromTemplate(
       actor,
       action: `Created shadow agent: ${data.name}`,
     });
-    if (config.xSearchQuery.trim() && canAcceptBackgroundWork(agent.lifecycle)) {
-      await ensureDiscoveryPollJob(agent.id, tx);
+    if (canAcceptBackgroundWork(agent.lifecycle)) {
+      await scheduleChannelWork(tx, agent.id, config);
     }
   });
   return { ok: true as const };

@@ -2,44 +2,26 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import { db, type Tx } from '@/lib/db';
 import { enqueueJob } from '@/lib/queue/jobs';
-import {
-  EMAIL_SEND_ACTION,
-  EMAIL_SEND_JOB,
-  hasWriteAdapter,
-  type OutboundActionStatus,
-} from '@/lib/runtime/outbound/types';
+import { channelAction } from '@/lib/runtime/channels/registry';
+import type { ActionIntent } from '@/lib/runtime/channels/types';
+import { CHANNEL_OUTBOUND_JOB, type OutboundActionStatus } from '@/lib/runtime/outbound/types';
 import { actionIntents, outboundActions, usageCounters } from '@/lib/schema';
 
-/**
- * Persist a durable outbound action and enqueue its worker job after an
- * administrator approval that evaluated to `allow`. Shared by email.send and
- * future adapters. Caller must hold the agent lock and have already recorded
- * the approval decision on the intent.
- */
-export async function enqueueApprovedOutbound(
+/** Queue a policy-approved intent while holding the agent lock. */
+export async function enqueueOutbound(
   tx: Tx,
-  input: {
-    agentId: string;
-    intentId: string;
-    actionType: string;
-    body: string;
-    idempotencyKey: string;
-    emailMessageId?: string | null;
-    threadId?: string | null;
-    actor: string;
-  },
+  intent: ActionIntent,
+  actor: string,
 ): Promise<{ outboundId: string; jobId: string; status: OutboundActionStatus } | null> {
-  if (!hasWriteAdapter(input.actionType)) return null;
-  if (input.actionType !== EMAIL_SEND_ACTION) return null;
-
-  const body = input.body.trim();
-  if (!body) return null;
+  const adapter = channelAction(intent.actionType)?.action;
+  if (!adapter || intent.decision !== 'allow') return null;
+  const body = typeof intent.payload.draft === 'string' ? intent.payload.draft.trim() : '';
 
   const existing = (
     await tx
       .select()
       .from(outboundActions)
-      .where(eq(outboundActions.idempotencyKey, input.idempotencyKey))
+      .where(eq(outboundActions.idempotencyKey, intent.idempotencyKey))
       .for('update')
   ).at(0);
   if (existing) {
@@ -54,7 +36,7 @@ export async function enqueueApprovedOutbound(
     await tx
       .select()
       .from(outboundActions)
-      .where(eq(outboundActions.intentId, input.intentId))
+      .where(eq(outboundActions.intentId, intent.id))
       .for('update')
   ).at(0);
   if (byIntent) {
@@ -69,29 +51,28 @@ export async function enqueueApprovedOutbound(
     await tx
       .insert(outboundActions)
       .values({
-        agentId: input.agentId,
-        intentId: input.intentId,
-        actionType: input.actionType,
+        agentId: intent.agentId,
+        intentId: intent.id,
+        actionType: intent.actionType,
         status: 'queued',
         reason: null,
-        idempotencyKey: input.idempotencyKey,
+        idempotencyKey: intent.idempotencyKey,
         body,
-        emailMessageId: input.emailMessageId ?? null,
-        threadId: input.threadId ?? null,
+        ...adapter.legacyReferences?.(intent),
       })
       .returning()
   ).at(0);
   if (!outbound) throw new Error('Failed to persist outbound action');
 
   const job = await enqueueJob(tx, {
-    type: EMAIL_SEND_JOB,
+    type: adapter.jobType ?? CHANNEL_OUTBOUND_JOB,
     payload: {
       outboundId: outbound.id,
-      intentId: input.intentId,
-      agentId: input.agentId,
-      actor: input.actor,
+      intentId: intent.id,
+      agentId: intent.agentId,
+      actor,
     },
-    idempotencyKey: `outbound:${input.idempotencyKey}`,
+    idempotencyKey: `outbound:${intent.idempotencyKey}`,
     maxAttempts: 5,
   });
 

@@ -25,12 +25,8 @@ import {
   recordApprovalReviews,
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
-import { emailKnowledgeQuery } from '@/lib/runtime/email/input';
-import {
-  proposeEmailReplyFromDraft,
-  recoverEmailReplyProposalIfNeeded,
-} from '@/lib/runtime/email/propose';
-import { EMAIL_DRAFT_JOB } from '@/lib/runtime/email/settings';
+import { channelAction, channelForRun, channelRunJobTypes } from '@/lib/runtime/channels/registry';
+import { loadChannelThread } from '@/lib/runtime/channels/thread';
 import {
   isRetryableInfrastructureError,
   isUnrecoverablePaidStepFinalizationError,
@@ -54,6 +50,7 @@ import {
 import { type MemoryCandidate, memoryCaptureOrigin } from '@/lib/runtime/memory/types';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import { resolveOpenRouterApiKey } from '@/lib/runtime/openrouter-key';
+import { enqueueOutbound } from '@/lib/runtime/outbound/dispatch';
 import { loadRelationshipContext, storeRelationshipNote } from '@/lib/runtime/people/history';
 import { prepareRunTools } from '@/lib/runtime/resources';
 import {
@@ -342,14 +339,18 @@ export async function admitRun(
     input,
     origin,
     recipients = [],
+    channel,
   }: {
     actor: string;
     configurationId: string;
     input: string;
     origin: typeof runs.$inferSelect.origin;
     recipients?: string[];
+    channel?: string;
   },
 ) {
+  const adapter = channelForRun({ origin, channel });
+  if (origin === 'channel' && !adapter) return { error: 'Channel is not registered.' };
   const agentId = agent.id;
   await expireStaleRuns(tx, agent);
 
@@ -369,6 +370,7 @@ export async function admitRun(
     return {
       error: budgetViolationMessage('concurrency'),
       waitForCapacity: true as const,
+      budgetViolation: 'concurrency' as const,
     };
   }
 
@@ -393,7 +395,7 @@ export async function admitRun(
   };
   const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
   if (violation && violation !== 'concurrency') {
-    return { error: budgetViolationMessage(violation) };
+    return { error: budgetViolationMessage(violation), budgetViolation: violation };
   }
 
   const config = (
@@ -417,6 +419,7 @@ export async function admitRun(
         configurationId,
         input,
         origin,
+        channel: adapter?.id,
         recipients,
         actor,
         status: 'queued',
@@ -427,10 +430,11 @@ export async function admitRun(
   ).at(0);
   if (!run) throw new Error('Run insert failed');
 
+  const jobType = adapter?.run.jobType ?? SIMULATION_JOB_TYPE;
   const job = await enqueueJob(tx, {
-    type: origin === 'email' ? EMAIL_DRAFT_JOB : SIMULATION_JOB_TYPE,
+    type: jobType,
     payload: { runId: run.id, agentId, configurationId, actor },
-    idempotencyKey: origin === 'email' ? `email.draft:${run.id}` : `simulation:${run.id}`,
+    idempotencyKey: `${adapter?.run.jobType ?? 'simulation'}:${run.id}`,
     maxAttempts: 3,
   });
 
@@ -465,9 +469,7 @@ export interface SimulationJobClaim {
   jobType?: string;
 }
 
-/** Playground vs email drafting semantics. Replay keeps origin=replay for safety. */
-export type SimulationBehavior = 'playground' | 'email';
-type ReplayOptions = { behavior: SimulationBehavior; recallQuery: string };
+type ReplayOptions = { channel?: string | null; recallQuery: string };
 
 async function processSimulationRun(
   runId: string,
@@ -477,9 +479,6 @@ async function processSimulationRun(
   origin: typeof runs.$inferSelect.origin = 'playground',
   replay?: ReplayOptions,
 ) {
-  // Persisted origin gates reclaim; behavior selects email vs playground simulate paths.
-  const simulationBehavior: SimulationBehavior =
-    replay?.behavior ?? (origin === 'email' ? 'email' : 'playground');
   const claimed = await db().transaction(async (tx) => {
     // Peek without locking so we can take the agent lock before the run lock
     // (same order as enqueueSimulation and persistLifecycle) and avoid deadlocks.
@@ -501,8 +500,7 @@ async function processSimulationRun(
       if (peek.jobId && peek.jobId !== claim.jobId) {
         return { skip: true as const, run: peek };
       }
-      const expectedType =
-        claim.jobType ?? (origin === 'email' ? EMAIL_DRAFT_JOB : SIMULATION_JOB_TYPE);
+      const expectedType = claim.jobType ?? channelForRun(peek)?.run.jobType ?? SIMULATION_JOB_TYPE;
       const jobRow = (
         await tx
           .select({ id: jobs.id })
@@ -580,13 +578,19 @@ async function processSimulationRun(
   });
 
   if (!claimed) return;
+  const adapter = channelForRun({ origin, channel: replay?.channel ?? claimed.run.channel });
+  const profile = adapter?.run;
+  const channelMode = profile?.mode;
   if (claimed.skip) {
-    // Completed email drafts must still have an approval intent. If proposal
-    // persistence failed after completion on an earlier attempt, recover here
-    // before exiting — retries otherwise skip completed runs forever.
-    if (origin === 'email' && claimed.run.status === 'completed' && !claimed.run.result.error) {
+    if (
+      origin !== 'replay' &&
+      profile?.recover &&
+      claimed.run.status === 'completed' &&
+      !claimed.run.result.error
+    ) {
+      const recover = profile.recover;
       await retryableStore(() =>
-        recoverEmailReplyProposalIfNeeded({
+        recover({
           agentId: claimed.run.agentId,
           runId: claimed.run.id,
           actor: claimed.run.actor,
@@ -598,6 +602,17 @@ async function processSimulationRun(
   }
 
   const { run, config, budgets, executionToken, expiresAt, agent } = claimed;
+  if (run.channel && !adapter) {
+    const message = 'The run’s channel adapter is unavailable.';
+    await retryableStore(() =>
+      updateIfOwned(run.id, executionToken, {
+        status: 'failed',
+        finishedAt: new Date(),
+        result: { steps: [], actions: [], error: message },
+      }),
+    );
+    return;
+  }
   // Refuse model work for paused/stopped agents even if a job was already claimed.
   if (!canEnqueueSimulation(agent.lifecycle)) {
     const message =
@@ -644,7 +659,7 @@ async function processSimulationRun(
     jobId: claim?.jobId,
     lifecycle: agent.lifecycle,
     trigger: origin,
-    allowContentCapture: simulationBehavior !== 'email',
+    allowContentCapture: !adapter || profile?.allowContentCapture === true,
   });
   const failureCorrelation = (extra: { stage?: 'evaluator' | 'main' } = {}) => ({
     runId: run.id,
@@ -725,6 +740,10 @@ async function processSimulationRun(
     const source = memoryCaptureOrigin(run.origin)
       ? await retryableStore(() => memoryRunSource(run))
       : null;
+    const channelThread =
+      source?.sourceKind === 'event'
+        ? await retryableStore(() => loadChannelThread(run.agentId, run.id))
+        : undefined;
     const recallQuery = source?.text.join('\n') ?? replay?.recallQuery ?? run.input;
     const resources = await prepareRunTools({
       agentId: run.agentId,
@@ -807,20 +826,24 @@ async function processSimulationRun(
           },
           async (partial, note) => {
             const updated = await retryableStore(() => {
-              if (!note || (origin !== 'email' && origin !== 'discovery')) {
+              if (!note || !memoryCaptureOrigin(origin)) {
                 return updateIfOwned(run.id, executionToken, { result: partial });
               }
               return db().transaction(async (tx) => {
                 const owned = await updateIfOwned(run.id, executionToken, { result: partial }, tx);
-                if (owned.length)
-                  await storeRelationshipNote(tx, run.agentId, run.id, origin, note);
+                if (owned.length) await storeRelationshipNote(tx, run.agentId, run.id, note);
                 return owned;
               });
             });
             if (!updated.length) throw new BudgetError('cancelled');
           },
           {
-            origin: origin === 'discovery' ? 'discovery' : simulationBehavior,
+            channelMode,
+            channelThread,
+            actionTypes:
+              channelMode === 'evaluate'
+                ? (profile?.proposalTypes ?? adapter?.actions?.map(({ type }) => type) ?? [])
+                : undefined,
             memoryCapture: source
               ? {
                   source: source.text,
@@ -847,11 +870,10 @@ async function processSimulationRun(
                 return [];
               }
             },
-            summarizeRelationship: origin === 'email' || origin === 'discovery',
-            loadRelationshipContext:
-              origin === 'email' || origin === 'discovery'
-                ? () => retryableStore(() => loadRelationshipContext(run.agentId, run.id, origin))
-                : undefined,
+            summarizeRelationship: Boolean(source),
+            loadRelationshipContext: source
+              ? () => retryableStore(() => loadRelationshipContext(run.agentId, run.id))
+              : undefined,
             maxToolSteps: budgets.maxToolStepsPerRun,
             signal,
             initial: checkpointed,
@@ -863,7 +885,9 @@ async function processSimulationRun(
             retrieveKnowledge: agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
               ? async (requestSignal) => {
                   const query = (
-                    simulationBehavior === 'email' ? emailKnowledgeQuery(run.input) : run.input
+                    profile?.knowledgeQuery?.(run.input) ??
+                    source?.text.join('\n') ??
+                    run.input
                   ).slice(0, 2000);
                   if (!query) return { status: 'deny', reason: 'No text to search.', hits: [] };
                   const args = { query, limit: 4 };
@@ -979,7 +1003,7 @@ async function processSimulationRun(
               }
             },
             onActions: async (actions, partial, stage) => {
-              if (simulationBehavior === 'email') return [];
+              if (channelMode === 'draft') return [];
               await assertOwned(run.id, executionToken);
               // Tool invocations are gated separately from paid inference stages
               // (evaluator/main). Do not add steps.length — that double-counts.
@@ -1060,6 +1084,40 @@ async function processSimulationRun(
                         ? decision.payload.draft
                         : action.draft
                       : action.draft;
+                  if (
+                    stage === 'main' &&
+                    decision.decision === 'allow' &&
+                    channelAction(action.type)
+                  ) {
+                    await retryableStore(() =>
+                      db().transaction(async (tx) => {
+                        if (!(await lockApprovalAgent(tx, run.agentId))) return;
+                        const [owned] = await tx
+                          .select({ id: runs.id })
+                          .from(runs)
+                          .where(
+                            and(
+                              eq(runs.id, run.id),
+                              eq(runs.executionToken, executionToken),
+                              eq(runs.status, 'running'),
+                              sql`${runs.expiresAt} > now()`,
+                            ),
+                          )
+                          .for('update');
+                        if (!owned) return;
+                        const [intent] = await tx
+                          .select()
+                          .from(actionIntents)
+                          .where(
+                            and(
+                              eq(actionIntents.id, decision.intentId),
+                              eq(actionIntents.agentId, run.agentId),
+                            ),
+                          );
+                        if (intent) await enqueueOutbound(tx, intent, run.actor);
+                      }),
+                    );
+                  }
                   return {
                     ...action,
                     draft,
@@ -1098,14 +1156,11 @@ async function processSimulationRun(
       try {
         const { pendingMemories, ...completedResult } = result;
         const traceResult = { ...completedResult, traceId: telemetry.traceId };
-        // Propose before flipping the run to completed so a transient failure
-        // leaves the run running and the job can retry. Wrap with retryableStore so
-        // ordinary DB errors become RetryableInfrastructureError (outer catch rethrows)
-        // instead of permanently failing a paid draft. Idempotent recovery also runs
-        // when skipping already-completed email drafts (see claimed.skip).
-        if (origin === 'email' && !result.error) {
+        // Adapter completion is idempotent and occurs before the run becomes terminal.
+        if (origin !== 'replay' && profile?.complete && !result.error) {
+          const complete = profile.complete;
           await retryableStore(() =>
-            proposeEmailReplyFromDraft({
+            complete({
               agentId: run.agentId,
               runId: run.id,
               actor: run.actor,
@@ -1121,7 +1176,7 @@ async function processSimulationRun(
                 result: traceResult,
                 deferReason: isTrustedBudgetMessage(result.error) ? result.error : null,
               })
-            : simulationBehavior === 'email'
+            : channelMode === 'draft'
               ? completeSimulation(run, executionToken, traceResult, pendingMemories)
               : finishSimulationWithApprovals(
                   run,
@@ -1407,13 +1462,18 @@ export async function processSimulationJob(
 ) {
   const runId = typeof payload.runId === 'string' ? payload.runId : null;
   if (!runId) throw new Error('simulation.run payload missing runId');
-  const origin =
-    (await db().select({ origin: runs.origin }).from(runs).where(eq(runs.id, runId))).at(0)
-      ?.origin ?? 'playground';
-  if (origin === 'email') {
-    throw new Error('email runs must use email.draft');
+  const [run] = await db()
+    .select({ origin: runs.origin, channel: runs.channel })
+    .from(runs)
+    .where(eq(runs.id, runId));
+  if (!run) return;
+  const expectedType = channelForRun(run)?.run.jobType ?? SIMULATION_JOB_TYPE;
+  if (run.origin === 'replay' || (claim?.jobType ?? SIMULATION_JOB_TYPE) !== expectedType) {
+    throw new Error(
+      `${run.origin} runs must use ${run.origin === 'replay' ? 'evaluation.replay' : expectedType}`,
+    );
   }
-  await processSimulationRun(runId, inference, signal, claim, origin);
+  await processSimulationRun(runId, inference, signal, claim, run.origin);
 }
 
 export async function processEmailDraftJob(
@@ -1489,7 +1549,10 @@ export async function finalizeOrphanedDeadSimulationRuns() {
     FROM jobs AS j
     WHERE r.job_id = j.id
       AND j.status = 'dead'
-      AND j.type IN (${SIMULATION_JOB_TYPE}, ${EMAIL_DRAFT_JOB})
+      AND j.type IN (${sql.join(
+        channelRunJobTypes(SIMULATION_JOB_TYPE).map((type) => sql`${type}`),
+        sql`, `,
+      )})
       AND r.status IN ('queued', 'running')
   `);
 }
@@ -1516,7 +1579,10 @@ export async function finalizeOrphanedCompletedSimulationRuns() {
     FROM jobs AS j
     WHERE r.job_id = j.id
       AND j.status = 'completed'
-      AND j.type IN (${SIMULATION_JOB_TYPE}, ${EMAIL_DRAFT_JOB})
+      AND j.type IN (${sql.join(
+        channelRunJobTypes(SIMULATION_JOB_TYPE).map((type) => sql`${type}`),
+        sql`, `,
+      )})
       AND r.status IN ('queued', 'running')
   `);
 }

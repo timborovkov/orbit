@@ -29,7 +29,13 @@ async function loadIdentity(tx: Tx, input: IdentityInput) {
   const [evidence] = await tx
     .select({ id: source.id })
     .from(source)
-    .where(and(eq(source.id, input.sourceId), eq(source.personIdentityId, identity.id)));
+    .where(
+      and(
+        eq(source.id, input.sourceId),
+        eq(source.personIdentityId, identity.id),
+        identity.channel === 'email' ? undefined : eq(sourceEvents.provider, identity.channel),
+      ),
+    );
   return evidence
     ? { identity, evidence: { channel: identity.channel, sourceId: evidence.id } }
     : null;

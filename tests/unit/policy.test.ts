@@ -66,25 +66,26 @@ test('shadow and live suppress writes when adapters are absent', () => {
 });
 
 test('email.send always needs approval and allows after approval in Live', () => {
+  const email = { ...base, runChannel: 'email' };
   expect(
-    evaluateActionForTest(base, { type: 'email.send', idempotencyKey: 'email-shadow' }).decision,
+    evaluateActionForTest(email, { type: 'email.send', idempotencyKey: 'email-shadow' }).decision,
   ).toBe('needs-approval');
   expect(
     evaluateActionForTest(
-      { ...base, lifecycle: 'live' },
+      { ...email, lifecycle: 'live' },
       { type: 'email.send', idempotencyKey: 'email-live' },
     ).decision,
   ).toBe('needs-approval');
   expect(
     evaluateActionForTest(
-      base,
+      email,
       { type: 'email.send', idempotencyKey: 'email-shadow-skip' },
       { skipApproval: true },
     ).decision,
   ).toBe('suppressed');
   expect(
     evaluateActionForTest(
-      { ...base, lifecycle: 'live' },
+      { ...email, lifecycle: 'live' },
       { type: 'email.send', idempotencyKey: 'email-live-skip' },
       { skipApproval: true },
     ).decision,

@@ -47,7 +47,7 @@ function SideColumn({
 
 export function EvaluationComparisonView({ detail }: { detail: Detail }) {
   const pending = detail.comparison.status === 'queued' || detail.comparison.status === 'running';
-  const preferDraftAnswer = detail.comparison.caseSourceKind === 'email';
+  const { preferDraftAnswer, sourceLabel } = detail;
   return (
     <div className="evaluation-comparison">
       <PendingRunRefresh active={pending} />
@@ -58,7 +58,7 @@ export function EvaluationComparisonView({ detail }: { detail: Detail }) {
         <div>
           <h1>{detail.comparison.caseTitle}</h1>
           <p className="muted">
-            {detail.comparison.agentName} · {detail.comparison.caseSourceKind} case ·{' '}
+            {detail.comparison.agentName} · {sourceLabel} case ·{' '}
             <time dateTime={detail.comparison.createdAt.toISOString()}>
               {formatUtcTimestamp(detail.comparison.createdAt)}
             </time>
