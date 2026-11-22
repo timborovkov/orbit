@@ -195,16 +195,19 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
     expect(await reviewProposedAction(admin, owner.id, intent!.id, 'approved')).toMatchObject({
       message: expect.stringContaining('queued'),
     });
-    const resumedJob = await claim(SIMULATION_JOB_TYPE, owner.id);
-    await processSimulationJob(
-      resumedJob.payload,
-      () => async () => {
-        throw new Error('Approval should resume without another paid model call.');
-      },
-      signal,
-      { jobId: resumedJob.id, workerId },
-    );
-    await completeJob(resumedJob.id, workerId);
+    const resumeApprovedRun = async () => {
+      const resumedJob = await claim(SIMULATION_JOB_TYPE, owner.id);
+      await processSimulationJob(
+        resumedJob.payload,
+        () => async () => {
+          throw new Error('Approval should resume without another paid model call.');
+        },
+        signal,
+        { jobId: resumedJob.id, workerId },
+      );
+      await completeJob(resumedJob.id, workerId);
+    };
+    await resumeApprovedRun();
     const [completed] = await sql`SELECT status FROM simulation_runs WHERE id=${source!.run_id}`;
     expect(completed?.status).toBe('completed');
     const sendJob = await claim(CHANNEL_OUTBOUND_JOB, owner.id);
@@ -256,13 +259,40 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
     await completeJob(laterJob.id, workerId);
     const recallJob = await claim(SIMULATION_JOB_TYPE, owner.id);
     const recalled: string[] = [];
+    const stages: string[] = [];
+    const evaluatorDraft = 'Unreviewed evaluator text.';
+    const reply = 'Yes, the Northstar pilot requires SSO.';
     await processSimulationJob(
       recallJob.payload,
       () => async (request) => {
-        const context: { untrustedMemories?: { fact: string }[] } = JSON.parse(request.input);
-        recalled.push(...(context.untrustedMemories ?? []).map(({ fact }) => fact));
+        stages.push(request.stage!);
+        const context = JSON.parse(request.input);
+        recalled.push(
+          ...(context.untrustedMemories ?? []).map(({ fact }: { fact: string }) => fact),
+        );
+        const evaluator = request.stage === 'evaluator';
+        if (evaluator) {
+          expect(context.untrustedRelationshipContext).toContainEqual(
+            expect.objectContaining({ summary: requirement }),
+          );
+        } else {
+          expect(context.untrustedRelationshipContext).toBeUndefined();
+          expect(request.system).not.toContain(evaluatorDraft);
+        }
         return {
-          decision: { relevant: true, priority: 1, reason: 'Follow-up', actions: [] },
+          decision: {
+            relevant: true,
+            priority: 1,
+            reason: 'Follow-up',
+            ...(request.grounded ? { answer: null, citations: [], memoryCitations: [] } : {}),
+            actions: [
+              {
+                type: actionType,
+                reason: 'Answer the follow-up',
+                draft: evaluator ? evaluatorDraft : reply,
+              },
+            ],
+          },
           memoryCandidates: [],
           inputTokens: 3,
           outputTokens: 5,
@@ -275,6 +305,24 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
     await completeJob(recallJob.id, workerId);
     expect(later).not.toBeNull();
     expect(recalled).toContain(requirement);
+    expect(stages).toEqual(['evaluator', 'main']);
+    const [followUpIntent] = await sql`SELECT intent.id, intent.payload, run.result
+      FROM source_events event JOIN simulation_runs run ON run.id=event.run_id
+      JOIN action_intents intent ON intent.run_id=run.id
+      WHERE event.id=${later!.sourceId} AND intent.review_status='pending'`;
+    expect(followUpIntent!.payload.draft).toBe(reply);
+    expect(followUpIntent!.result.steps[0].decision.actions[0].draft).toBeNull();
+    expect(
+      await reviewProposedAction(admin, owner.id, followUpIntent!.id, 'approved'),
+    ).toHaveProperty('message');
+    await resumeApprovedRun();
+    const followUpSend = await claim(CHANNEL_OUTBOUND_JOB, owner.id);
+    await processOutboundJob(followUpSend, signal);
+    await completeJob(followUpSend.id, workerId);
+    expect(deliveries).toEqual([
+      { body: 'Thanks. We support SSO.', key: expect.any(String) },
+      { body: reply, key: expect.any(String) },
+    ]);
 
     const savedInput = {
       actor: admin,
@@ -315,8 +363,8 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
         WHERE r.agent_id=${owner.id} AND r.origin='replay' AND action_type=${actionType}`;
     expect(replayPolicy.length).toBeGreaterThan(0);
     expect(replayPolicy.every(({ decision }) => decision === 'suppressed')).toBe(true);
-    expect(await sql`SELECT id FROM outbound_actions WHERE agent_id=${owner.id}`).toHaveLength(1);
-    expect(await sql`SELECT id FROM agent_memories WHERE agent_id=${owner.id}`).toHaveLength(2);
+    expect(await sql`SELECT id FROM outbound_actions WHERE agent_id=${owner.id}`).toHaveLength(2);
+    expect(await sql`SELECT id FROM agent_memories WHERE agent_id=${owner.id}`).toHaveLength(3);
 
     const otherEvent = await ingestChannelEvent({ ...inbound, agentId: other.id });
     const otherIntake = await claim(CHANNEL_EVENT_JOB, other.id);
@@ -405,27 +453,31 @@ test('accepted channel events retry admission when quota returns and persist rej
       externalId: 'deferred',
       text: 'Please follow up.',
     };
-    await sql`UPDATE agents SET budgets=${sql.json({ ...budgets, dailyRequests: 0 })} WHERE id=${agent.id}`;
     const event = (await ingestChannelEvent(inbound))!;
-    const claimed = await claim(CHANNEL_EVENT_JOB, agent.id);
-    const deferred = await processChannelEventJob(claimed);
-    expect(deferred?.deferUntil.getTime()).toBeGreaterThan(Date.now());
-    const [waiting] =
-      await sql`SELECT run_id,admission_status,admission_reason FROM source_events WHERE id=${event.sourceId}`;
-    expect(waiting).toEqual({
-      run_id: null,
-      admission_status: 'deferred',
-      admission_reason: 'Daily request quota reached. Work was deferred.',
-    });
-    // Release as the worker does. Advance the retry date in the fixture.
-    expect(await releaseClaim(claimed.id, workerId, undefined, deferred!.deferUntil)).toMatchObject(
-      {
+    for (const [limits, reason] of [
+      [{ dailyRequests: 0 }, 'Daily request quota reached. Work was deferred.'],
+      [{ dailySpendCents: 0 }, 'Daily OpenRouter spend cap reached. Work was deferred.'],
+    ] as const) {
+      await sql`UPDATE agents SET budgets=${sql.json({ ...budgets, ...limits })} WHERE id=${agent.id}`;
+      const claimed = await claim(CHANNEL_EVENT_JOB, agent.id);
+      const deferred = await processChannelEventJob(claimed);
+      expect(deferred?.deferUntil.getTime()).toBeGreaterThan(Date.now());
+      const [waiting] =
+        await sql`SELECT run_id,admission_status,admission_reason FROM source_events WHERE id=${event.sourceId}`;
+      expect(waiting).toEqual({
+        run_id: null,
+        admission_status: 'deferred',
+        admission_reason: reason,
+      });
+      expect(
+        await releaseClaim(claimed.id, workerId, undefined, deferred!.deferUntil),
+      ).toMatchObject({
         status: 'pending',
         attempts: 0,
-      },
-    );
+      });
+      await sql`UPDATE jobs SET available_at=now() WHERE id=${claimed.id}`;
+    }
     await sql`UPDATE agents SET budgets=${sql.json(budgets)} WHERE id=${agent.id}`;
-    await sql`UPDATE jobs SET available_at=now() WHERE id=${claimed.id}`;
     expect(await ingestChannelEvent(inbound)).toBeNull();
     const retry = await claim(CHANNEL_EVENT_JOB, agent.id);
     await processChannelEventJob(retry);

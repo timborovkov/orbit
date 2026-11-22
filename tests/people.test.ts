@@ -7,6 +7,8 @@ import { budgetDefaults } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import { recipientConsentFailure } from '@/lib/policy/consent';
 import { claimJobs, completeJob } from '@/lib/queue/jobs';
+import { ingestChannelEvent } from '@/lib/runtime/channels/ingest';
+import { registerChannel } from '@/lib/runtime/channels/registry';
 import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
 import { EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import { processEmailDraftJob, processSimulationJob } from '@/lib/runtime/execute';
@@ -550,7 +552,8 @@ test('reciprocal claims reconcile automatically, roll back on conflict and respe
   const sender = `match-${suffix}@example.test`;
   const author = `match-${suffix}`;
   const differentAuthor = `match-other-${suffix}`;
-  identityKeys.push(sender, author, differentAuthor);
+  const chatAuthor = `chat-${suffix}`;
+  identityKeys.push(sender, author, differentAuthor, chatAuthor);
   const owner = await agent('Reconciliation fixture');
   const deliver = async (body: string) => {
     const event = delivery(owner.address, sender, 'Identity evidence');
@@ -563,6 +566,28 @@ test('reciprocal claims reconcile automatically, roll back on conflict and respe
   await observe(owner.id, '100', author, 'match_riley', 'I need reporting.');
   const x = await identityFor('x', author);
   expect(x.person_id).not.toBe(email.person_id);
+
+  const chat = 'identity-test-chat';
+  const unregister = registerChannel({
+    id: chat,
+    label: 'Identity fixture',
+    run: { mode: 'draft' },
+  });
+  try {
+    expect(
+      await ingestChannelEvent({
+        agentId: owner.id,
+        channel: chat,
+        externalId: 'message-1',
+        authorId: chatAuthor,
+        authorUsername: 'match_riley',
+        text: 'A chat author has the same username as the X account.',
+      }),
+    ).not.toBeNull();
+  } finally {
+    unregister();
+  }
+  expect((await identityFor(chat, chatAuthor)).link_state).toBe('standalone');
 
   await observe(owner.id, '101', author, 'match_riley', `My email: ${sender}`);
   let current = await identityFor('x', author);

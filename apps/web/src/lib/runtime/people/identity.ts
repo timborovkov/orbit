@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
 
 import type { Tx } from '@/lib/db';
 import { extractEmailAddress } from '@/lib/runtime/email/headers';
+import { X_PROVIDER } from '@/lib/runtime/x/types';
 import {
   emailMessages,
   people,
@@ -68,6 +69,7 @@ async function competingObservation(tx: Tx, x: XClaim) {
     .from(sourceEvents)
     .where(
       and(
+        eq(sourceEvents.provider, X_PROVIDER),
         eq(sql`lower(${sourceEvents.authorUsername})`, x.handle),
         ne(sourceEvents.personIdentityId, x.identityId),
         sql`${xObservedAt} >= ${new Date(x.observedAt.getTime() - claimWindowMs).toISOString()}::timestamptz`,
@@ -159,7 +161,13 @@ export async function reconcilePeople(tx: Tx) {
         observedAt: xObservedAt,
       })
       .from(sourceEvents)
-      .where(and(isNotNull(sourceEvents.personIdentityId), isNotNull(sourceEvents.personClaim)))
+      .where(
+        and(
+          eq(sourceEvents.provider, X_PROVIDER),
+          isNotNull(sourceEvents.personIdentityId),
+          isNotNull(sourceEvents.personClaim),
+        ),
+      )
       .orderBy(asc(sourceEvents.personIdentityId), desc(xObservedAt), desc(sourceEvents.id)),
     tx.select().from(personIdentities),
   ]);
@@ -196,7 +204,9 @@ export async function reconcilePeople(tx: Tx) {
     }
   }
 
-  const inferred = identities.filter(({ linkState }) => linkState === 'inferred');
+  const inferred = identities.filter(
+    ({ channel, linkState }) => channel === X_PROVIDER && linkState === 'inferred',
+  );
   const inferences = inferred.length
     ? await tx
         .selectDistinctOn([personIdentityChanges.identityId], {
@@ -233,7 +243,7 @@ export async function reconcilePeople(tx: Tx) {
           observedAt: xObservedAt,
         })
         .from(sourceEvents)
-        .where(inArray(sourceEvents.id, sourceIds))
+        .where(and(eq(sourceEvents.provider, X_PROVIDER), inArray(sourceEvents.id, sourceIds)))
     : [];
   const originalBySource = new Map(originalPosts.map((row) => [row.sourceId, row]));
 
