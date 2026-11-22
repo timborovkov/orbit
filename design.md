@@ -354,8 +354,15 @@ For person facts, label the controlled field (Company or Job title), use a
 single-line correction input, and link to the current person in the owning
 agent’s view. Keep the original evidence link on the same row.
 
+Use a **Retention** disclosure above the entries. Provide independent day limits
+for facts, notes and outcomes, plus a daily or weekly maintenance schedule. Keep
+review due and expired labels on individual entries. Show the original evidence
+for a note or a confirmed delivery using the same evidence view.
+
 Playwright verified evidence access at 1440px and correction, expiry and removal
 at 390px in Dark mode, including keyboard focus and mobile overflow checks.
+The mobile flow also saved separate fact and note retention periods with a weekly
+maintenance schedule.
 
 ### Email
 

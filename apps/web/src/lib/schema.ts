@@ -27,7 +27,12 @@ import type {
   FollowUpSource,
   FollowUpStatus,
 } from '@/lib/runtime/follow-ups/types';
-import type { MemorySubject, PersonMemoryField, RecalledMemory } from '@/lib/runtime/memory/types';
+import type {
+  MemoryNote,
+  MemorySubject,
+  PersonMemoryField,
+  RecalledMemory,
+} from '@/lib/runtime/memory/types';
 import type { SimulationResult } from '@/lib/runtime/simulation';
 
 const KNOWLEDGE_EMBEDDING_DIMENSIONS = 1536;
@@ -67,6 +72,14 @@ export const agents = pgTable('agents', {
     .default('continue'),
   /** When set, write actions need approval once day spend reaches this many USD cents. */
   approvalSpendCents: integer('approval_spend_cents'),
+  memoryFactRetentionDays: integer('memory_fact_retention_days'),
+  memoryNoteRetentionDays: integer('memory_note_retention_days'),
+  memoryOutcomeRetentionDays: integer('memory_outcome_retention_days'),
+  memoryMaintenanceIntervalDays: integer('memory_maintenance_interval_days')
+    .$type<1 | 7>()
+    .notNull()
+    .default(1),
+  memoryNextMaintenanceAt: timestamp('memory_next_maintenance_at', { withTimezone: true }),
   enabledTools: jsonb('enabled_tools').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -636,6 +649,7 @@ export const agentMemories = pgTable(
     fact: text('fact').notNull(),
     personField: text('person_field').$type<PersonMemoryField>(),
     personValue: text('person_value'),
+    note: jsonb('note').$type<MemoryNote>(),
     quote: text('quote').notNull(),
     runId: uuid('run_id').notNull(),
     sourceKind: text('source_kind').notNull(),
@@ -659,7 +673,7 @@ export const agentMemories = pgTable(
   ],
 );
 
-export const runMemoryEvidence = pgView('run_memory_evidence', {
+const memoryEvidenceColumns = () => ({
   sourceKind: text('source_kind').notNull(),
   sourceId: uuid('source_id').notNull(),
   agentId: uuid('agent_id').notNull(),
@@ -674,7 +688,9 @@ export const runMemoryEvidence = pgView('run_memory_evidence', {
   channel: text('channel').notNull(),
   personIdentityId: uuid('person_identity_id'),
   observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
-}).existing();
+});
+export const runMemoryEvidence = pgView('run_memory_evidence', memoryEvidenceColumns()).existing();
+export const memoryEvidence = pgView('memory_evidence', memoryEvidenceColumns()).existing();
 
 export const personMemoryEvidence = pgView('person_memory_evidence', {
   memoryId: uuid('memory_id').notNull(),

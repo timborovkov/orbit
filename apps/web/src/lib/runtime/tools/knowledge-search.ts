@@ -18,6 +18,7 @@ interface KnowledgeSearchToolInput {
   limit?: number;
   runId?: string | null;
   idempotencyKey: string;
+  privateQuery?: boolean;
   signal?: AbortSignal;
   execution?: {
     runId: string;
@@ -43,7 +44,7 @@ export async function executeKnowledgeSearchTool(input: KnowledgeSearchToolInput
     idempotencyKey: input.idempotencyKey,
     readOnly: true,
     executionToken: input.execution?.token,
-    payload: { query, limit },
+    payload: input.privateQuery ? { limit } : { query, limit },
   });
   if (policy.decision !== 'allow') return { policy };
 

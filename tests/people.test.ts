@@ -212,6 +212,42 @@ test('person facts follow current evidence identities and stay private to the le
     });
     expect(await selectAgentMemoryEvidence(john.id, company.id, company.revision)).toBeNull();
 
+    const repeated = delivery(sarah.address, `Riley <${sender}>`, 'Another introduction');
+    await persistReceivedEmail(repeated);
+    const repeatedEmail = await receive(sarah.id, repeated.data.email_id, quote);
+    await processEmailDraftJob({ runId: repeatedEmail.run_id }, () => async (request) => ({
+      ...(await inference('', '')()(request)),
+      memoryCandidates: [
+        {
+          subjectKind: 'company',
+          subject: 'Acme',
+          topic: 'Staff',
+          fact: 'Riley works at Acme.',
+          quote,
+        },
+        {
+          subjectKind: 'note',
+          subject: 'Acme',
+          topic: 'Staff',
+          note: { kind: 'observation', text: 'Riley works at Acme.' },
+          quote,
+        },
+        {
+          subjectKind: 'note',
+          subject: 'Acme',
+          topic: 'Invalid shape',
+          note: { kind: 'observation', text: quote, permissions: 'owner' },
+          quote,
+        },
+      ],
+    }));
+    const aliases = await sql`SELECT subject_kind, note FROM agent_memories
+      WHERE agent_id = ${sarah.id} AND subject_kind <> 'person' ORDER BY subject_kind`;
+    expect([...aliases]).toEqual([
+      { subject_kind: 'company', note: null },
+      { subject_kind: 'note', note: { kind: 'observation', text: 'Riley works at Acme.' } },
+    ]);
+
     const runX = async (agentId: string, eventId: string, text: string) => {
       expect((await observe(agentId, eventId, author, 'riley', text, true)).evaluated).toBe(1);
       const [post] = await sql<{ id: string; run_id: string }[]>`
@@ -245,6 +281,15 @@ test('person facts follow current evidence identities and stay private to the le
       },
       { subjectKind: 'person', personFact: { field: 'job_title', value: 'Staff Engineer' } },
     ]);
+    expect((await runX(sarah.id, '203', 'Riley works at Acme?')).memories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ subjectKind: 'company', fact: 'Riley works at Acme.' }),
+        expect.objectContaining({
+          subjectKind: 'note',
+          note: { kind: 'observation', text: 'Riley works at Acme.' },
+        }),
+      ]),
+    );
     expect((await runX(john.id, '202', 'Riley works at Acme.')).memories).toBeUndefined();
     expect(await selectPersonMemories(sarah.id, mail.person_id)).toHaveLength(2);
     expect(await selectPersonMemories(john.id, mail.person_id)).toHaveLength(0);
@@ -260,7 +305,7 @@ test('person facts follow current evidence identities and stay private to the le
         reviewOn: null,
       }),
     ).toHaveProperty('message');
-    expect((await runX(sarah.id, '203', 'A follow-up.')).memories).toMatchObject([
+    expect((await runX(sarah.id, '204', 'A follow-up.')).memories).toMatchObject([
       { fact: 'Riley works at Acme Labs.', personFact: { value: 'Acme Labs' } },
       { topic: 'Job title' },
     ]);
@@ -273,7 +318,7 @@ test('person facts follow current evidence identities and stay private to the le
       }),
     ).toEqual({ message: 'Identity unlinked.' });
     expect(
-      (await runX(sarah.id, '204', 'Riley works at Acme Labs as a Staff Engineer?')).memories,
+      (await runX(sarah.id, '205', 'Riley works at Acme Labs as a Staff Engineer?')).memories,
     ).toBeUndefined();
     expect(await selectPersonMemories(sarah.id, x.person_id)).toHaveLength(0);
     const own = await selectPersonMemories(sarah.id, mail.person_id);

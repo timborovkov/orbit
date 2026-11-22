@@ -7,7 +7,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { enqueueMemoryEmbedding } from '@/lib/runtime/memory/store';
 import { personMemoryStatement } from '@/lib/runtime/memory/types';
-import { agentMemories, audit } from '@/lib/schema';
+import { agentMemories, agents, audit } from '@/lib/schema';
 
 type EditKey = { agentId: string; id: string; revision: string };
 type Correction = { expiresOn: string | null; reviewOn: string | null } & (
@@ -25,7 +25,12 @@ export function saveAgentMemory(actor: string, key: EditKey, correction?: Correc
   return db().transaction(async (tx) => {
     if (correction) {
       const [current] = await tx
-        .select({ subject: agentMemories.subject, personField: agentMemories.personField })
+        .select({
+          subject: agentMemories.subject,
+          personField: agentMemories.personField,
+          note: agentMemories.note,
+          kind: agentMemories.subjectKind,
+        })
         .from(agentMemories)
         .where(target)
         .for('update');
@@ -43,6 +48,7 @@ export function saveAgentMemory(actor: string, key: EditKey, correction?: Correc
         .update(agentMemories)
         .set({
           fact,
+          note: current.note ? { ...current.note, text: fact } : null,
           personValue: personValue ?? null,
           expiresOn: correction.expiresOn,
           reviewOn: correction.reviewOn,
@@ -59,7 +65,7 @@ export function saveAgentMemory(actor: string, key: EditKey, correction?: Correc
           revision: agentMemories.revision,
         });
       if (!entry) return stale;
-      if (!personField) await enqueueMemoryEmbedding(tx, entry);
+      if (!personField && current.kind !== 'outcome') await enqueueMemoryEmbedding(tx, entry);
     } else {
       const [entry] = await tx
         .delete(agentMemories)
@@ -72,5 +78,40 @@ export function saveAgentMemory(actor: string, key: EditKey, correction?: Correc
       action: `${correction ? 'Corrected' : 'Removed'} memory ${key.id} for agent ${key.agentId}`,
     });
     return { message: correction ? 'Memory corrected.' : 'Memory removed.' };
+  });
+}
+
+export async function saveMemoryRetention(
+  actor: string,
+  agentId: string,
+  {
+    factDays,
+    noteDays,
+    outcomeDays,
+    intervalDays,
+  }: {
+    factDays: number | null;
+    noteDays: number | null;
+    outcomeDays: number | null;
+    intervalDays: 1 | 7;
+  },
+) {
+  return db().transaction(async (tx) => {
+    const [agent] = await tx
+      .update(agents)
+      .set({
+        memoryFactRetentionDays: factDays,
+        memoryNoteRetentionDays: noteDays,
+        memoryOutcomeRetentionDays: outcomeDays,
+        memoryMaintenanceIntervalDays: intervalDays,
+        memoryNextMaintenanceAt: factDays || noteDays || outcomeDays ? new Date() : null,
+      })
+      .where(eq(agents.id, agentId))
+      .returning({ id: agents.id });
+    if (!agent) return { error: 'Agent unavailable.' };
+    await tx
+      .insert(audit)
+      .values({ actor, action: `Updated memory retention for agent ${agentId}` });
+    return { message: 'Memory retention saved.' };
   });
 }

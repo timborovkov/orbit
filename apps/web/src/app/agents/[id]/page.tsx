@@ -298,6 +298,12 @@ export default async function AgentWorkspace({
                     page={memoryPage}
                     hasMore={memory.hasMore}
                     today={today}
+                    retention={{
+                      factDays: agent.memoryFactRetentionDays,
+                      noteDays: agent.memoryNoteRetentionDays,
+                      outcomeDays: agent.memoryOutcomeRetentionDays,
+                      intervalDays: agent.memoryMaintenanceIntervalDays,
+                    }}
                   />
                 ),
               },

@@ -4,7 +4,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { agentMemories, personMemoryEvidence, runMemoryEvidence } from '@/lib/schema';
+import { agentMemories, memoryEvidence, personMemoryEvidence } from '@/lib/schema';
 
 const pageSize = 30;
 
@@ -19,6 +19,7 @@ export async function listAgentMemories(agentId: string, page: number) {
       fact: agentMemories.fact,
       personField: agentMemories.personField,
       personValue: agentMemories.personValue,
+      noteKind: sql<string | null>`${agentMemories.note}->>'kind'`,
       personId: personMemoryEvidence.personId,
       learnedAt: agentMemories.learnedAt,
       expiresOn: agentMemories.expiresOn,
@@ -88,23 +89,23 @@ export async function selectAgentMemoryEvidence(
       sourceAt: agentMemories.sourceAt,
       correctedBy: agentMemories.correctedBy,
       source: {
-        id: runMemoryEvidence.sourceId,
-        title: runMemoryEvidence.title,
-        author: runMemoryEvidence.author,
-        body: runMemoryEvidence.body,
-        label: runMemoryEvidence.label,
-        href: runMemoryEvidence.href,
-        linkLabel: runMemoryEvidence.linkLabel,
+        id: memoryEvidence.sourceId,
+        title: memoryEvidence.title,
+        author: memoryEvidence.author,
+        body: memoryEvidence.body,
+        label: memoryEvidence.label,
+        href: memoryEvidence.href,
+        linkLabel: memoryEvidence.linkLabel,
       },
     })
     .from(agentMemories)
     .innerJoin(
-      runMemoryEvidence,
+      memoryEvidence,
       and(
-        eq(runMemoryEvidence.sourceId, agentMemories.sourceId),
-        eq(runMemoryEvidence.sourceKind, agentMemories.sourceKind),
-        eq(runMemoryEvidence.agentId, agentMemories.agentId),
-        eq(runMemoryEvidence.runId, agentMemories.runId),
+        eq(memoryEvidence.sourceId, agentMemories.sourceId),
+        eq(memoryEvidence.sourceKind, agentMemories.sourceKind),
+        eq(memoryEvidence.agentId, agentMemories.agentId),
+        eq(memoryEvidence.runId, agentMemories.runId),
       ),
     )
     .where(

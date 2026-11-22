@@ -188,3 +188,50 @@ export async function storeRelationshipNote(
     ON CONFLICT DO NOTHING
   `);
 }
+
+// Scope before search. A replay or admin prompt without a current verified
+// channel identity cannot search a person's conversation history.
+export async function searchRunHistory(
+  agentId: string,
+  runId: string,
+  query: string,
+  limit: number,
+) {
+  return db().execute<{
+    title: string | null;
+    excerpt: string;
+    channel: string;
+    observedAt: Date;
+  }>(sql`
+    WITH current_source AS (
+      SELECT evidence.source_id, evidence.observed_at, identity.person_id
+      FROM run_memory_evidence evidence
+      JOIN person_identities identity ON identity.id = evidence.person_identity_id
+      WHERE evidence.agent_id = ${agentId} AND evidence.run_id = ${runId}
+      AND (SELECT count(*) FROM run_memory_evidence WHERE agent_id = ${agentId} AND run_id = ${runId}) = 1
+    ), history AS MATERIALIZED (
+      SELECT previous.title, previous.body, previous.channel, previous.observed_at, previous.source_id
+      FROM current_source current
+      JOIN person_identities peer ON peer.person_id = current.person_id
+      JOIN run_memory_evidence previous ON previous.person_identity_id = peer.id
+      WHERE previous.agent_id = ${agentId} AND previous.source_id <> current.source_id
+        AND previous.observed_at <= current.observed_at
+      UNION ALL
+      SELECT delivery.action_type, delivery.body, evidence.channel, evidence.observed_at, evidence.source_id
+      FROM current_source current
+      JOIN person_identities peer ON peer.person_id = current.person_id
+      JOIN memory_evidence evidence ON evidence.person_identity_id = peer.id
+        AND evidence.source_kind = 'outcome' AND evidence.agent_id = ${agentId}
+      JOIN outbound_actions delivery ON delivery.id = evidence.source_id AND delivery.agent_id = evidence.agent_id
+      WHERE evidence.run_id <> ${runId} AND evidence.observed_at <= current.observed_at
+    ), terms AS (
+      SELECT CASE WHEN ${Boolean(query)} THEN websearch_to_tsquery('english', ${query}) END AS value
+    )
+    SELECT title, left(body, 400) AS excerpt, channel, observed_at AS "observedAt"
+    FROM history CROSS JOIN terms
+    WHERE ${!query} OR to_tsvector('english', coalesce(title, '') || ' ' || body) @@ terms.value
+    ORDER BY ts_rank_cd(to_tsvector('english', coalesce(title, '') || ' ' || body), terms.value) DESC,
+      observed_at DESC, source_id
+    LIMIT ${limit}
+  `);
+}

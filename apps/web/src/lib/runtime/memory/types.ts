@@ -7,8 +7,10 @@ export const MEMORY_SEARCH = 'memory.search';
 export const MEMORY_CAPTURE = 'memory.capture';
 export const MEMORY_EMBED_JOB = 'memory.embed';
 export const MEMORY_LIMIT = 4;
+export const DEEP_MEMORY_LIMIT = 8;
+export const HISTORY_SEARCH = 'history.search';
 
-export type MemorySubject = 'company' | 'project' | 'person';
+export type MemorySubject = 'company' | 'project' | 'person' | 'note' | 'outcome';
 export const personMemoryFields = ['company', 'job_title'] as const;
 export type PersonMemoryField = (typeof personMemoryFields)[number];
 export const personMemoryLabels = { company: 'Company', job_title: 'Job title' } satisfies Record<
@@ -22,6 +24,7 @@ export type RecalledMemory = MemoryRef & {
   topic: string;
   fact: string;
   personFact?: { field: PersonMemoryField; value: string };
+  note?: MemoryNote;
   learnedAt: string;
 };
 
@@ -44,6 +47,11 @@ const memoryText = (max: number) =>
     .max(max)
     .refine(safeMemoryText, 'Use factual information without sensitive settings.');
 export const memoryFact = memoryText(500);
+const memoryNote = z.strictObject({
+  kind: z.enum(['fact', 'observation', 'commitment']),
+  text: memoryFact,
+});
+export type MemoryNote = z.infer<typeof memoryNote>;
 export const memoryDate = z.iso.date();
 export const personMemoryValue = memoryText(120).refine((value) => !/[\r\n]/.test(value));
 
@@ -58,6 +66,13 @@ export const memoryCandidate = z.discriminatedUnion('subjectKind', [
     subject: memoryText(120),
     topic: memoryText(80),
     fact: memoryFact,
+    ...evidenceFields,
+  }),
+  z.object({
+    subjectKind: z.literal('note'),
+    subject: memoryText(120).or(z.literal('')).default(''),
+    topic: memoryText(80),
+    note: memoryNote,
     ...evidenceFields,
   }),
   z.object({

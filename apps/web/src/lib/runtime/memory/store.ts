@@ -54,7 +54,7 @@ type CaptureEvidence = NonNullable<Awaited<ReturnType<typeof memoryRunSource>>>;
 function identityKey(candidate: MemoryCandidate, evidence: CaptureEvidence) {
   return candidate.subjectKind === 'person'
     ? JSON.stringify([evidence.personIdentityId, candidate.personFact.field])
-    : topicKey(candidate);
+    : `[${JSON.stringify(evidence.personIdentityId)},${topicKey(candidate)}]`;
 }
 
 export function verifiedMemoryCandidates(
@@ -66,6 +66,9 @@ export function verifiedMemoryCandidates(
     const parsed = memoryCandidate.safeParse(raw);
     if (!parsed.success) return [];
     const candidate = parsed.data;
+    if (candidate.subjectKind === 'note' && !candidate.subject) {
+      candidate.subject = evidence.author ? personMemorySubject(evidence.author) : 'Interaction';
+    }
     if (candidate.subjectKind === 'person') {
       if (
         !evidence.personIdentityId ||
@@ -133,7 +136,12 @@ export async function captureRunMemories(
         const fields =
           candidate.subjectKind === 'person'
             ? personFields(candidate.personFact, evidence.author)
-            : { subject: candidate.subject, topic: candidate.topic, fact: candidate.fact };
+            : {
+                subject: candidate.subject,
+                topic: candidate.topic,
+                fact: candidate.subjectKind === 'note' ? candidate.note.text : candidate.fact,
+                note: candidate.subjectKind === 'note' ? candidate.note : null,
+              };
         return {
           ...fields,
           subjectKind: candidate.subjectKind,
@@ -157,6 +165,7 @@ export async function captureRunMemories(
         topic: sql`excluded.topic`,
         fact: sql`excluded.fact`,
         personValue: sql`excluded.person_value`,
+        note: sql`excluded.note`,
         quote: sql`excluded.quote`,
         runId: sql`excluded.run_id`,
         sourceKind: sql`excluded.source_kind`,

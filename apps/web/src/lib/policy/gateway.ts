@@ -22,7 +22,12 @@ import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import { channelAction, channelForRun } from '@/lib/runtime/channels/registry';
 import { retryableStore } from '@/lib/runtime/errors';
-import { MEMORY_CAPTURE, MEMORY_SEARCH, memoryCaptureOrigin } from '@/lib/runtime/memory/types';
+import {
+  HISTORY_SEARCH,
+  MEMORY_CAPTURE,
+  MEMORY_SEARCH,
+  memoryCaptureOrigin,
+} from '@/lib/runtime/memory/types';
 import {
   actionIntents,
   agentMcpConnections,
@@ -199,7 +204,11 @@ export function evaluateCandidate(
 
   // Internal memory operations are tied to a persisted, owned run. Capture does
   // not dispatch outbound actions or change any configuration or permissions.
-  if (action.type === MEMORY_CAPTURE || action.type === MEMORY_SEARCH) {
+  if (
+    action.type === MEMORY_CAPTURE ||
+    action.type === MEMORY_SEARCH ||
+    action.type === HISTORY_SEARCH
+  ) {
     if (!ctx.runId || !ctx.runOrigin || !action.executionToken) {
       return { decision: 'deny', reasons: ['Memory requires an owned run.'] };
     }

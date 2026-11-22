@@ -624,6 +624,59 @@ test('inbound memory commits once across a finalization retry and recalls only i
   const [later] = await sql`SELECT result FROM simulation_runs WHERE id=${followUp.run_id}`;
   expect(later!.result.memory).toEqual([{ id: entry!.id, revision: entry!.revision }]);
 
+  const deeper = await incomingMemorySource(sarah.address, 'Can you clarify item ZQ579?');
+  await draft(
+    Object.assign(
+      async (request: Parameters<ModelCall>[0]) => {
+        if (request.stage === 'evaluator') return model(request);
+        expect(JSON.parse(request.input).untrustedMemories).toBeUndefined();
+        const search = async (name: string, query: string) => {
+          const execute = request.tools?.[name]?.execute;
+          expect(execute).toBeDefined();
+          return execute!({ query }, { toolCallId: name, messages: [], context: undefined });
+        };
+        expect(await search('search_history', 'Northstar SSO')).toMatchObject({
+          untrustedResults: expect.arrayContaining([
+            expect.objectContaining({ excerpt: ssoRequirement }),
+          ]),
+        });
+        expect(await search('search_memory', 'Northstar SSO')).toMatchObject({
+          untrustedResults: [{ fact: ssoRequirement, memoryCitation: 1 }],
+        });
+        expect(await search('search_knowledge', 'Northstar pilot')).toMatchObject({
+          untrustedResults: [{ passage: 'Northstar pilot', citation: 1 }],
+        });
+        const response = await model(request);
+        return {
+          ...response,
+          decision: {
+            ...response.decision,
+            answer: ssoRequirement,
+            citations: [1],
+            memoryCitations: [1],
+          },
+        };
+      },
+      { quote: model.quote },
+    ),
+    1,
+  );
+  const [deepResult] =
+    await sql`SELECT status,result FROM simulation_runs WHERE id=${deeper.run_id}`;
+  expect(deepResult!.status).toBe('completed');
+  expect(draftAnswerFromResult(deepResult!.result)).toMatchObject({
+    memories: [{ id: entry!.id, revision: entry!.revision }],
+    sources: [{ documentId: doc!.id }],
+  });
+  expect(deepResult!.result.toolCalls.slice(-3)).toEqual(
+    ['history.search', 'memory.search', 'knowledge.search'].map((tool) => ({
+      tool,
+      args: {},
+      policy: 'allow',
+      result: { hitCount: 1 },
+    })),
+  );
+
   const asked = 'Does the Northstar pilot require SSO?';
   await sql`UPDATE agent_configurations SET config = config || '{"xSearchQuery":"*"}'::jsonb
     WHERE id=${sarah.version}`;
@@ -639,15 +692,13 @@ test('inbound memory commits once across a finalization retry and recalls only i
     memoryInference([], (request) => {
       const input = JSON.parse(request.input);
       expect(input.untrustedMemorySource).toEqual([asked]);
-      expect(input.untrustedMemories).toMatchObject([{ fact: ssoRequirement }]);
+      expect(input.untrustedMemories).toBeUndefined();
     }),
   );
   const [crossChannel] =
     await sql`SELECT status,result FROM simulation_runs WHERE id=${discovery!.run_id}`;
-  expect(crossChannel).toMatchObject({
-    status: 'completed',
-    result: { memory: [{ id: entry!.id, revision: entry!.revision }] },
-  });
+  expect(crossChannel!.status).toBe('completed');
+  expect(crossChannel!.result.memory).toBeUndefined();
 
   const outside = await playgroundMemory(
     john,

@@ -6,7 +6,7 @@ import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
 import { memoryDate, memoryFact, personMemoryValue } from '@/lib/runtime/memory/types';
-import { saveAgentMemory } from '@/lib/server/memory-mutations';
+import { saveAgentMemory, saveMemoryRetention } from '@/lib/server/memory-mutations';
 
 const editKey = z.object({ agentId: z.uuid(), id: z.uuid(), revision: z.uuid() });
 const correctionDates = z.object({
@@ -51,4 +51,33 @@ export async function correctMemory(form: FormData) {
 
 export async function removeMemory(form: FormData) {
   return memoryAction(form, true);
+}
+
+export async function configureMemoryRetention(form: FormData) {
+  await checkOrigin();
+  const actor = await requireAdmin();
+  const days = z.coerce.number().int().min(1).max(3650).nullable();
+  const parsed = z
+    .object({
+      agentId: z.uuid(),
+      intervalDays: z
+        .union([z.literal('1'), z.literal('7')])
+        .transform((value) => (value === '1' ? 1 : 7)),
+      factDays: days,
+      noteDays: days,
+      outcomeDays: days,
+    })
+    .safeParse({
+      agentId: form.get('agentId'),
+      intervalDays: form.get('intervalDays'),
+      factDays: form.get('factDays') || null,
+      noteDays: form.get('noteDays') || null,
+      outcomeDays: form.get('outcomeDays') || null,
+    });
+  if (!parsed.success)
+    return { error: 'Choose a schedule and enter retention between 1 and 3,650 days.' };
+  const { agentId, ...values } = parsed.data;
+  const result = await saveMemoryRetention(actor, agentId, values);
+  if (!('error' in result)) revalidatePath(`/agents/${agentId}`);
+  return result;
 }
