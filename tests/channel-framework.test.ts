@@ -339,11 +339,18 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
       });
     }
     expect(await sql`SELECT id FROM outbound_actions WHERE agent_id=${other.id}`).toHaveLength(0);
-    await sql`UPDATE agent_memories SET learned_at=now()-interval '2 days' WHERE agent_id IN (${owner.id},${other.id})`;
+    const [fact] =
+      await sql`SELECT id,revision FROM agent_memories WHERE agent_id=${owner.id} AND subject_kind='company'`;
+    await sql`UPDATE agent_memories SET learned_at=now()-interval '2 days' WHERE id=${fact!.id}`;
+    const [replacement] =
+      await sql`UPDATE agent_memories SET revision=gen_random_uuid(),learned_at=now()
+      WHERE id=${fact!.id} RETURNING revision`;
+    expect(await selectAgentMemoryEvidence(owner.id, fact!.id, fact!.revision)).not.toBeNull();
+    await sql`UPDATE agent_memories SET learned_at=now()-interval '2 days' WHERE agent_id IN (${owner.id},${other.id}) AND id<>${fact!.id}`;
     await sql`UPDATE person_relationship_notes SET created_at=now()-interval '2 days' WHERE agent_id=${owner.id}`;
     expect(
       await saveMemoryRetention(admin, owner.id, {
-        factDays: null,
+        factDays: 1,
         noteDays: 1,
         outcomeDays: 1,
         intervalDays: 7,
@@ -357,6 +364,10 @@ test('a new channel uses shared intake, policy, dispatch, memory, People and rep
     await processMemoryMaintenance(owner.id);
     await processMemoryMaintenance(owner.id);
     await completeJob(maintenance.id, workerId);
+    expect(await selectAgentMemoryEvidence(owner.id, fact!.id, fact!.revision)).toBeNull();
+    expect(
+      await selectAgentMemoryEvidence(owner.id, fact!.id, replacement!.revision),
+    ).not.toBeNull();
     expect([
       ...(await sql`SELECT subject_kind FROM agent_memories WHERE agent_id=${owner.id}`),
     ]).toEqual([{ subject_kind: 'company' }]);

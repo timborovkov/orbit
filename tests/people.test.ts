@@ -10,7 +10,11 @@ import { claimJobs, completeJob } from '@/lib/queue/jobs';
 import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
 import { EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import { processEmailDraftJob, processSimulationJob } from '@/lib/runtime/execute';
-import { getPersonContextForAgent, listPersonInteractions } from '@/lib/runtime/people/history';
+import {
+  getPersonContextForAgent,
+  listPersonInteractions,
+  searchRunHistory,
+} from '@/lib/runtime/people/history';
 import type { ModelCall } from '@/lib/runtime/simulation';
 import { createFixtureXSearchAdapter } from '@/lib/runtime/x/fixture';
 import { processDiscoveryPoll } from '@/lib/runtime/x/poll';
@@ -175,19 +179,24 @@ test('person facts follow current evidence identities and stay private to the le
     const inbound = delivery(sarah.address, `Riley <${sender}>`, 'Nice to meet you');
     await persistReceivedEmail(inbound);
     const quote = 'I work at Acme as a Staff Engineer.';
-    const email = await receive(sarah.id, inbound.data.email_id, quote);
+    const thirdParty = 'Jordan works at Other Co.';
+    const email = await receive(sarah.id, inbound.data.email_id, `${thirdParty} ${quote}`);
     const model = async (request: Parameters<ModelCall>[0]) => {
       expect(request.system).toContain('For the current author only');
       return {
         ...(await inference('', '')()(request)),
         memoryCandidates: [
+          {
+            subjectKind: 'person',
+            personFact: { field: 'company', value: 'Other Co' },
+            quote: thirdParty,
+          },
           { subjectKind: 'person', personFact: { field: 'company', value: 'Acme' }, quote },
           {
             subjectKind: 'person',
             personFact: { field: 'job_title', value: 'Staff Engineer' },
             quote,
           },
-          { subjectKind: 'person', personFact: { field: 'company', value: 'Invented Co' }, quote },
         ],
       };
     };
@@ -613,4 +622,33 @@ test('reciprocal claims reconcile automatically, roll back on conflict and respe
     expect.arrayContaining(['infer', 'rollback', 'unlink', 'confirm']),
   );
   expect(changes.every(({ evidence }) => evidence.length > 0)).toBe(true);
+});
+
+test('history returns text around a late match and keeps normalized channel threads separate', async () => {
+  const owner = await agent('History excerpts');
+  const author = randomUUID();
+  identityKeys.push(author);
+  const previous = randomUUID();
+  const other = randomUUID();
+  const current = randomUUID();
+  const channel = 'fixture-chat';
+  const milestone = 'The Cobalt milestone is Friday.';
+  const body = `${'Unrelated background. '.repeat(48)}${milestone}`;
+  for (const id of [previous, other, current]) {
+    await sql`INSERT INTO simulation_runs (id, agent_id, configuration_id, input, origin, channel, actor, result, expires_at)
+      SELECT ${id}, agent_id, id, 'Synthetic test event', 'channel', ${channel}, ${admin}, '{}', now()
+      FROM agent_configurations WHERE agent_id=${owner.id}`;
+  }
+  await sql`INSERT INTO source_events (agent_id, provider, provider_event_id, account_id, thread_id, payload, text, author_id, run_id, ingested_at)
+    VALUES
+      (${owner.id}, ${channel}, 'before', 'account', 'pilot', '{}', ${body}, ${author}, ${previous}, now() - interval '2 hours'),
+      (${owner.id}, ${channel}, 'other', 'account', 'billing', '{}', 'Cobalt billing question', ${author}, ${other}, now() - interval '1 hour'),
+      (${owner.id}, ${channel}, 'current', 'account', 'pilot', '{}', 'When is the milestone?', ${author}, ${current}, now())`;
+
+  const matches = await searchRunHistory(owner.id, current, 'Cobalt', 4);
+  expect(matches).toHaveLength(1);
+  expect(matches[0]!.excerpt).toContain('The Cobalt milestone is Friday');
+  expect(matches[0]!.excerpt.length).toBeLessThanOrEqual(400);
+  expect(matches[0]!.excerpt).not.toMatch(/[\u0001\u0002]/u);
+  expect((await searchRunHistory(owner.id, current, '', 4))[0]!.excerpt).toBe(body.slice(0, 400));
 });

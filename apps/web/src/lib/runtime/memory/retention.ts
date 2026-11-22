@@ -34,12 +34,17 @@ export async function processMemoryMaintenance(agentId: string) {
       .for('update');
     if (!policy) return;
     const cutoff = (days: number | null) => sql`now() - ${days}::integer * interval '24 hours'`;
+    const retainedSince = sql`CASE subject_kind
+      WHEN 'note' THEN ${cutoff(policy.noteDays)}
+      WHEN 'outcome' THEN ${cutoff(policy.outcomeDays)}
+      ELSE ${cutoff(policy.factDays)}
+    END`;
     await tx.execute(sql`
-      DELETE FROM agent_memories WHERE agent_id = ${agentId} AND learned_at < CASE subject_kind
-        WHEN 'note' THEN ${cutoff(policy.noteDays)}
-        WHEN 'outcome' THEN ${cutoff(policy.outcomeDays)}
-        ELSE ${cutoff(policy.factDays)}
-      END
+      DELETE FROM agent_memory_evidence_revisions
+      WHERE agent_id = ${agentId} AND learned_at < ${retainedSince}
+    `);
+    await tx.execute(sql`
+      DELETE FROM agent_memories WHERE agent_id = ${agentId} AND learned_at < ${retainedSince}
     `);
     await tx.execute(sql`
       DELETE FROM person_relationship_notes WHERE agent_id = ${agentId} AND created_at < ${cutoff(policy.noteDays)}

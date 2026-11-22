@@ -9,6 +9,7 @@ import {
   validateKnowledgeVector,
 } from '@/lib/runtime/knowledge/embed';
 import { resolveKnowledgeEmbedders } from '@/lib/runtime/knowledge/provider';
+import { supportsPersonFact } from '@/lib/runtime/memory/person-source';
 import {
   MEMORY_CAPTURE,
   MEMORY_EMBED_JOB,
@@ -72,8 +73,12 @@ export function verifiedMemoryCandidates(
     if (candidate.subjectKind === 'person') {
       if (
         !evidence.personIdentityId ||
-        !evidence.body.includes(candidate.quote) ||
-        !candidate.quote.includes(candidate.personFact.value)
+        !supportsPersonFact(
+          evidence.body,
+          candidate.quote,
+          candidate.personFact.field,
+          candidate.personFact.value,
+        )
       )
         return [];
     } else if (!evidence.text.some((text) => text.includes(candidate.quote))) return [];
