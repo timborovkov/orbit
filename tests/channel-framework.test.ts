@@ -475,6 +475,14 @@ test('a channel run keeps conversation context within its own agent, account and
     expect(stages).toEqual(['evaluator', 'main']);
     const [result] = await sql`SELECT status FROM simulation_runs WHERE id=${source!.run_id}`;
     expect(result).toEqual({ status: 'completed' });
+    const [identity] = await sql`SELECT person_id FROM person_identities WHERE channel=${channel}
+      AND identity_key=${inbound.authorId}`;
+    const history = await getPersonContextForAgent(agent.id, identity!.person_id);
+    expect(
+      history.interactions.filter(({ title }) =>
+        [inbound.text, 'Other account secret'].includes(title),
+      ),
+    ).toHaveLength(2);
   } finally {
     unregister();
     if (encryptionKey === undefined) delete process.env.ORBIT_ENCRYPTION_KEY;

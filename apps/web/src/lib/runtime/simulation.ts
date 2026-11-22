@@ -453,7 +453,7 @@ export async function simulate(
         : '';
       const draftInstructions =
         stage === 'evaluator'
-          ? 'Evaluate whether the latest message warrants a reply under the saved agent configuration. Mark spam or irrelevant mail as irrelevant.'
+          ? 'Evaluate whether the latest message warrants a reply under the saved agent configuration. Mark spam or irrelevant messages as irrelevant.'
           : 'Put the single plain-text reply draft in answer, or return null if no reply is warranted. Cite only supplied source IDs that directly support the draft. For unsupported product questions, ask for clarification or acknowledge uncertainty.';
       const summarizeRelationship = stage === 'evaluator' && options.summarizeRelationship;
       const relationshipInstructions = summarizeRelationship

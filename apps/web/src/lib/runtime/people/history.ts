@@ -69,8 +69,9 @@ export async function loadRelationshipContext(agentId: string, runId: string) {
       from identities join source_events post on post.person_identity_id = identities.id
       left join person_relationship_notes note on note.source_event_id = post.id and note.agent_id = ${agentId}
       where post.agent_id = ${agentId} and post.id <> identities.current_id
-        and (identities.thread_id is null or post.provider <> identities.provider
-          or (post.thread_id = identities.thread_id and post.account_id is not distinct from identities.account_id))
+        and (identities.provider is null or post.provider <> identities.provider
+          or (post.thread_id is not distinct from identities.thread_id
+            and post.account_id is not distinct from identities.account_id))
         and post.ingested_at <= identities.observed_at
       union all
       select 'reply', left(post.text, 280), null,
@@ -79,8 +80,9 @@ export async function loadRelationshipContext(agentId: string, runId: string) {
       join action_intents intent on intent.run_id = post.run_id and intent.agent_id = post.agent_id
       join outbound_actions reply on reply.intent_id = intent.id and reply.agent_id = post.agent_id
       where post.agent_id = ${agentId} and post.id <> identities.current_id
-        and (identities.thread_id is null or post.provider <> identities.provider
-          or (post.thread_id = identities.thread_id and post.account_id is not distinct from identities.account_id))
+        and (identities.provider is null or post.provider <> identities.provider
+          or (post.thread_id is not distinct from identities.thread_id
+            and post.account_id is not distinct from identities.account_id))
         and reply.status = 'sent' and reply.email_message_id is null
         and intent.recipients ? post.author_id
         and coalesce(reply.completed_at, reply.dispatched_at, reply.created_at) <= identities.observed_at
@@ -114,7 +116,8 @@ export async function listPersonInteractions(personId: string, page: number, age
       join outbound_actions reply on reply.email_message_id = email.id and reply.agent_id = email.agent_id
       where reply.action_type = 'email.send' and reply.status = 'sent' ${emailScope}
       union all
-      select post.provider, post.provider_event_id, coalesce(post.provider_created_at, post.ingested_at),
+      select post.provider, jsonb_build_array(post.account_id, post.provider_event_id)::text,
+        coalesce(post.provider_created_at, post.ingested_at),
         left(post.text, 280), post.agent_id, null::uuid, post.run_id, post.provider_event_id, post.id,
         post.provider, false
       from source_events post join identities on post.person_identity_id = identities.id
