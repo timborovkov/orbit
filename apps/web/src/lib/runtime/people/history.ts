@@ -231,8 +231,9 @@ export async function searchRunHistory(
       JOIN run_memory_evidence previous ON previous.person_identity_id = peer.id
       LEFT JOIN source_events event ON previous.source_kind = 'event' AND event.id = previous.source_id
         AND event.agent_id = previous.agent_id
-      WHERE (current.thread_id IS NULL OR previous.channel <> current.provider
-          OR (event.thread_id = current.thread_id AND event.account_id IS NOT DISTINCT FROM current.account_id))
+      WHERE (current.provider IS NULL OR previous.channel <> current.provider
+          OR (event.thread_id IS NOT DISTINCT FROM current.thread_id
+            AND event.account_id IS NOT DISTINCT FROM current.account_id))
         AND previous.agent_id = ${agentId} AND previous.source_id <> current.source_id
         AND previous.observed_at <= current.observed_at
       UNION ALL
@@ -243,8 +244,9 @@ export async function searchRunHistory(
         AND evidence.source_kind = 'outcome' AND evidence.agent_id = ${agentId}
       JOIN outbound_actions delivery ON delivery.id = evidence.source_id AND delivery.agent_id = evidence.agent_id
       LEFT JOIN source_events event ON event.run_id = evidence.run_id AND event.agent_id = evidence.agent_id
-      WHERE (current.thread_id IS NULL OR evidence.channel <> current.provider
-          OR (event.thread_id = current.thread_id AND event.account_id IS NOT DISTINCT FROM current.account_id))
+      WHERE (current.provider IS NULL OR evidence.channel <> current.provider
+          OR (event.thread_id IS NOT DISTINCT FROM current.thread_id
+            AND event.account_id IS NOT DISTINCT FROM current.account_id))
         AND evidence.run_id <> ${runId} AND evidence.observed_at <= current.observed_at
     ), terms AS (
       SELECT CASE WHEN ${Boolean(query)} THEN websearch_to_tsquery('english', ${query}) END AS value
