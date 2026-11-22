@@ -269,7 +269,7 @@ test('optional retrieval falls back to one provider call while keeping recalled 
     );
     expect(stages).toEqual(['evaluator', 'main']);
     expect(toolPricing).toEqual(cap === 'spend' ? [false, true, false] : []);
-    if (!result.runId) throw new Error(result.error);
+    if (!result.runId) throw new Error('Expected an admitted run.');
     const [run] = await sql`SELECT status,result FROM simulation_runs WHERE id=${result.runId}`;
     expect(run).toMatchObject({
       status: 'completed',

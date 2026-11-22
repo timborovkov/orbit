@@ -258,7 +258,7 @@ export async function searchRunHistory(
       ORDER BY rank DESC, observed_at DESC, source_id
       LIMIT ${limit}
     ), snippets AS (
-      SELECT *, CASE WHEN value IS NULL THEN left(body, 400) ELSE
+      SELECT *, CASE WHEN value IS NULL OR char_length(body) <= 400 THEN left(body, 400) ELSE
         ts_headline('english', replace(replace(body, chr(1), ''), chr(2), ''), value,
           'MaxWords=24, MinWords=1, MaxFragments=1, StartSel=' || chr(1) || ', StopSel=' || chr(2)) END AS snippet
       FROM matches
