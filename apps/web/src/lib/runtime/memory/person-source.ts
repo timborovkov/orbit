@@ -1,12 +1,26 @@
 import type { PersonMemoryField } from '@/lib/runtime/memory/types';
 
 const sentences = new Intl.Segmenter('en', { granularity: 'sentence' });
-const selfStatements = [
-  /^I (?:currently )?work (?:at|for) (?<company>.+?)(?: as (?:an? |the )?(?<job_title>.+))?$/di,
-  /^I(?: am |['’]m )(?:currently )?(?:an? |the )(?<job_title>.+?) (?:at|for|with) (?<company>.+)$/di,
-  /^I (?:currently )?(?:work|serve) as (?:an? |the )?(?<job_title>.+?)(?: at (?<company>.+))?$/di,
-  /^My (?:current )?employer is (?<company>.+)$/di,
-  /^My (?:current )?(?:job )?title is (?<job_title>.+)$/di,
+// Capture every part of each form so the evidence can include the exact prefix
+// through the matching value, including when a later clause names another field.
+const selfStatements: { pattern: RegExp; company?: number; job_title?: number }[] = [
+  {
+    pattern: /^(I (?:currently )?work (?:at|for) )(.+?)(?:( as (?:an? |the )?)(.+))?$/i,
+    company: 2,
+    job_title: 4,
+  },
+  {
+    pattern: /^(I(?: am |['’]m )(?:currently )?(?:an? |the ))(.+?)( (?:at|for|with) )(.+)$/i,
+    job_title: 2,
+    company: 4,
+  },
+  {
+    pattern: /^(I (?:currently )?(?:work|serve) as (?:an? |the )?)(.+?)(?:( at )(.+))?$/i,
+    job_title: 2,
+    company: 4,
+  },
+  { pattern: /^(My (?:current )?employer is )(.+)$/i, company: 2 },
+  { pattern: /^(My (?:current )?(?:job )?title is )(.+)$/i, job_title: 2 },
 ];
 
 export function supportsPersonFact(
@@ -34,14 +48,10 @@ export function supportsPersonFact(
         .trim()
         .split(/[,;]/, 1)[0]
         .replace(/[.!]+$/, '');
-      for (const form of selfStatements) {
-        const match = statement.match(form);
-        const span = match?.indices?.groups?.[field];
-        if (
-          match?.groups?.[field] === value &&
-          span &&
-          quote.includes(statement.slice(0, span[1]))
-        ) {
+      for (const { pattern, [field]: group } of selfStatements) {
+        if (!group) continue;
+        const match = statement.match(pattern);
+        if (match?.[group] === value && quote.includes(match.slice(1, group + 1).join(''))) {
           return true;
         }
       }
