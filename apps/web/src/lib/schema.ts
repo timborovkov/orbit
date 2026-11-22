@@ -650,12 +650,27 @@ export const agentMemories = pgTable(
   },
   (table) => [
     unique().on(table.agentId, table.subjectKind, table.identityKey),
+    unique().on(table.agentId, table.id),
     foreignKey({
       columns: [table.agentId, table.runId],
       foreignColumns: [runs.agentId, runs.id],
     }).onDelete('cascade'),
   ],
 );
+
+export const agentMemoryEvidenceVersions = pgView('agent_memory_evidence_versions', {
+  agentId: uuid('agent_id').notNull(),
+  id: uuid('id').notNull(),
+  revision: uuid('revision').notNull(),
+  subject: text('subject').notNull(),
+  topic: text('topic').notNull(),
+  quote: text('quote').notNull(),
+  sourceAt: timestamp('source_at', { withTimezone: true }).notNull(),
+  correctedBy: text('corrected_by'),
+  runId: uuid('run_id').notNull(),
+  sourceKind: text('source_kind').notNull(),
+  sourceId: uuid('source_id').notNull(),
+}).existing();
 
 export const runMemoryEvidence = pgView('run_memory_evidence', {
   sourceKind: text('source_kind').notNull(),
