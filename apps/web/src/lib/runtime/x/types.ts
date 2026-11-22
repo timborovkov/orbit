@@ -2,6 +2,7 @@
 export interface XSearchPost {
   id: string;
   text: string;
+  conversationId?: string;
   authorId?: string;
   authorUsername?: string;
   authorName?: string;

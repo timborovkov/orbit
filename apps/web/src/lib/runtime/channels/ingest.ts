@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { db, type Tx } from '@/lib/db';
@@ -16,6 +16,8 @@ const eventInput = z.object({
   agentId: z.uuid(),
   channel: z.string(),
   externalId: z.string().min(1).max(500),
+  accountId: z.string().min(1).max(500).optional(),
+  threadId: z.string().min(1).max(500).optional(),
   text: z.string().trim().min(1).max(16000),
   authorId: z.string().min(1).max(500).optional(),
   authorUsername: z.string().max(500).optional(),
@@ -35,6 +37,9 @@ export async function persistChannelEvent(tx: Tx, event: typeof sourceEvents.$in
         eq(sourceEvents.agentId, event.agentId),
         eq(sourceEvents.provider, event.provider),
         eq(sourceEvents.providerEventId, event.providerEventId),
+        event.accountId
+          ? eq(sourceEvents.accountId, event.accountId)
+          : isNull(sourceEvents.accountId),
       ),
     );
   if (existing) return;
@@ -42,7 +47,11 @@ export async function persistChannelEvent(tx: Tx, event: typeof sourceEvents.$in
   return source;
 }
 
-/** Called by authenticated provider adapters with an agent and channels resolved by the server. */
+/**
+ * Authenticated adapters resolve the agent and channel server-side. Use the provider
+ * account when event or thread IDs are account-local, and a stable conversation ID
+ * for threadId. Author IDs must identify the same person across that channel.
+ */
 export async function ingestChannelEvent(input: z.input<typeof eventInput>) {
   const event = eventInput.parse(input);
   if (!channelAdapter(event.channel)) throw new Error('Channel is not registered.');
@@ -64,6 +73,9 @@ export async function ingestChannelEvent(input: z.input<typeof eventInput>) {
       agentId: event.agentId,
       provider: event.channel,
       providerEventId: event.externalId,
+      accountId: event.accountId,
+      threadId: event.threadId,
+      admissionStatus: 'pending',
       text: event.text,
       authorId: event.authorId,
       authorUsername: event.authorUsername,
@@ -101,7 +113,7 @@ export async function processChannelEventJob(job: JobRecord) {
       .from(agents)
       .where(eq(agents.id, payload.agentId))
       .for('update');
-    if (!agent || !canAcceptBackgroundWork(agent.lifecycle)) return;
+    if (!agent) return;
     const [claim] = await tx
       .select({ id: jobs.id })
       .from(jobs)
@@ -121,15 +133,26 @@ export async function processChannelEventJob(job: JobRecord) {
       .from(sourceEvents)
       .where(and(eq(sourceEvents.id, payload.sourceId), eq(sourceEvents.agentId, payload.agentId)))
       .for('update');
-    if (!source || source.runId) return;
-    const admitted = await admitChannelEvent(tx, agent, source, {
-      configurationId: payload.configurationId,
-      input: source.text,
-      recipients: payload.recipients,
-      actor: `system:${source.provider}`,
-    });
-    if ('waitForCapacity' in admitted && admitted.waitForCapacity) {
-      return { deferUntil: new Date(Date.now() + 5_000) };
+    if (!source || source.runId || source.admissionStatus === 'rejected') return;
+    const admitted = canAcceptBackgroundWork(agent.lifecycle)
+      ? await admitChannelEvent(tx, agent, source, {
+          configurationId: payload.configurationId,
+          input: source.text,
+          recipients: payload.recipients,
+          actor: `system:${source.provider}`,
+        })
+      : { error: `Agent is ${agent.lifecycle}.` };
+    if (!('error' in admitted) || !admitted.error) return;
+    const violation = 'budgetViolation' in admitted ? admitted.budgetViolation : undefined;
+    await tx
+      .update(sourceEvents)
+      .set({
+        admissionStatus: violation ? 'deferred' : 'rejected',
+        admissionReason: admitted.error,
+      })
+      .where(eq(sourceEvents.id, source.id));
+    if (violation) {
+      return { deferUntil: new Date(Date.now() + (violation === 'concurrency' ? 5_000 : 60_000)) };
     }
   });
 }
@@ -152,7 +175,10 @@ export async function admitChannelEvent(
   if ('runId' in admitted && admitted.runId) {
     await tx
       .update(sourceEvents)
-      .set({ runId: admitted.runId })
+      .set({
+        runId: admitted.runId,
+        ...(source.admissionStatus ? { admissionStatus: 'admitted', admissionReason: null } : {}),
+      })
       .where(eq(sourceEvents.id, source.id));
   }
   return admitted;

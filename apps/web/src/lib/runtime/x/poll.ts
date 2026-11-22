@@ -164,6 +164,7 @@ async function persistPosts(
         agentId,
         provider: X_PROVIDER,
         providerEventId: post.id,
+        threadId: post.conversationId,
         payload: post.raw,
         text: post.text,
         authorId: post.authorId ?? null,

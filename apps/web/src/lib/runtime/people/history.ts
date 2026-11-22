@@ -34,10 +34,15 @@ export async function loadRelationshipContext(agentId: string, runId: string) {
     observedAt: Date | string;
   }>(sql`
     with current_source as (
-      select source_id as id, person_identity_id, observed_at
-      from run_memory_evidence where agent_id = ${agentId} and run_id = ${runId}
+      select evidence.source_id as id, evidence.person_identity_id, evidence.observed_at,
+        event.provider, event.account_id, event.thread_id
+      from run_memory_evidence evidence
+      left join source_events event on evidence.source_kind = 'event' and event.id = evidence.source_id
+        and event.agent_id = evidence.agent_id
+      where evidence.agent_id = ${agentId} and evidence.run_id = ${runId}
     ), identities as (
-      select peer.id, current_source.id as current_id, current_source.observed_at
+      select peer.id, current_source.id as current_id, current_source.observed_at,
+        current_source.provider, current_source.account_id, current_source.thread_id
       from current_source
       join person_identities current_identity on current_identity.id = current_source.person_identity_id
       join person_identities peer on peer.person_id = current_identity.person_id
@@ -64,6 +69,8 @@ export async function loadRelationshipContext(agentId: string, runId: string) {
       from identities join source_events post on post.person_identity_id = identities.id
       left join person_relationship_notes note on note.source_event_id = post.id and note.agent_id = ${agentId}
       where post.agent_id = ${agentId} and post.id <> identities.current_id
+        and (identities.thread_id is null or post.provider <> identities.provider
+          or (post.thread_id = identities.thread_id and post.account_id is not distinct from identities.account_id))
         and post.ingested_at <= identities.observed_at
       union all
       select 'reply', left(post.text, 280), null,
@@ -72,6 +79,8 @@ export async function loadRelationshipContext(agentId: string, runId: string) {
       join action_intents intent on intent.run_id = post.run_id and intent.agent_id = post.agent_id
       join outbound_actions reply on reply.intent_id = intent.id and reply.agent_id = post.agent_id
       where post.agent_id = ${agentId} and post.id <> identities.current_id
+        and (identities.thread_id is null or post.provider <> identities.provider
+          or (post.thread_id = identities.thread_id and post.account_id is not distinct from identities.account_id))
         and reply.status = 'sent' and reply.email_message_id is null
         and intent.recipients ? post.author_id
         and coalesce(reply.completed_at, reply.dispatched_at, reply.created_at) <= identities.observed_at

@@ -580,6 +580,12 @@ export const sourceEvents = pgTable(
       .references(() => agents.id, { onDelete: 'cascade' }),
     provider: text('provider').$type<SourceEventProvider>().notNull(),
     providerEventId: text('provider_event_id').notNull(),
+    accountId: text('account_id'),
+    threadId: text('thread_id'),
+    admissionStatus: text('admission_status').$type<
+      'pending' | 'deferred' | 'admitted' | 'rejected'
+    >(),
+    admissionReason: text('admission_reason'),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
     text: text('text').notNull(),
     authorId: text('author_id'),
@@ -594,7 +600,9 @@ export const sourceEvents = pgTable(
       .references(() => runs.id, { onDelete: 'set null' }),
   },
   (table) => [
-    unique().on(table.agentId, table.provider, table.providerEventId),
+    unique('source_events_delivery_key')
+      .on(table.agentId, table.provider, table.accountId, table.providerEventId)
+      .nullsNotDistinct(),
     unique().on(table.agentId, table.id),
   ],
 );
