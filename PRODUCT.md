@@ -25,6 +25,11 @@ Operators inspect progress and citations in Activity and can explicitly import
 saved pages into a shared Knowledge library. Provider activity, availability and
 successful actions displayed in the console come from recorded results.
 
+Administrators can grant an agent permission to schedule a follow-up or wait for
+a reply in a saved conversation. Activity records the deadline, outcome and
+evidence. A deadline can produce a draft for administrator review. See
+[durable follow-ups](docs/follow-ups.md).
+
 ## Confirmed commitments
 
 Use the Orbit logo, IBM Plex typography, light/dark/automatic appearance and responsive

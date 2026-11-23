@@ -300,7 +300,7 @@ export async function failJob(
         finishedAt: dead ? now : null,
         updatedAt: now,
       })
-      .where(eq(jobs.id, current.id))
+      .where(activeJobClaim(jobId, workerId, claim))
       .returning()
   ).at(0);
   return updated ? mapJob(updated) : null;
