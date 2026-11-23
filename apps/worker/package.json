@@ -11,6 +11,6 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
-    "@sentry/bun": "^11.14.0"
+    "@sentry/bun": "^11.15.0"
   }
 }
