@@ -11,7 +11,11 @@ import { processOutboundJob } from '@/lib/runtime/outbound/process';
 import { CHANNEL_OUTBOUND_JOB } from '@/lib/runtime/outbound/types';
 import { encryptSecret } from '@/lib/runtime/secrets';
 import type { ModelCall } from '@/lib/runtime/simulation';
-import { createFixtureXSearchAdapter, FIXTURE_X_POSTS } from '@/lib/runtime/x/fixture';
+import {
+  createFixtureXSearchAdapter,
+  FIXTURE_X_POSTS,
+  FIXTURE_X_REPLY_POST,
+} from '@/lib/runtime/x/fixture';
 import { ensureDiscoveryPollJob, processDiscoveryPoll } from '@/lib/runtime/x/poll';
 import { validateXReplyApproval, xReplySecretSubject } from '@/lib/runtime/x/reply';
 import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
@@ -511,7 +515,7 @@ async function discoverReply(
   await persistChannelGrant(admin, agentId, X_REPLY_ACTION, true);
   if (consent) await setXConsent(agentId, true);
   await connect?.(agentId);
-  const adapter = createFixtureXSearchAdapter();
+  const adapter = createFixtureXSearchAdapter([FIXTURE_X_REPLY_POST]);
   const poll = () => processDiscoveryPoll({ payload: { agentId } }, signal, { adapter });
   expect(await poll()).toMatchObject({ inserted: 1, evaluated: 1 });
   const [run] =
@@ -697,26 +701,34 @@ test('confirmed X rate limits can retry and an interrupted write cannot', async 
 test('the worker sends with the agent’s encrypted X token and records the provider reply ID', async () => {
   const originalEncryptionKey = process.env.ORBIT_ENCRYPTION_KEY;
   process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
-  const provider = spyOn(globalThis, 'fetch').mockImplementation((url, init) => {
-    const address = String(url);
-    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer fixture-x-user-token');
-    if (address.startsWith('https://api.x.com/2/tweets/1001?')) {
-      return Promise.resolve(
-        Response.json({
-          data: { id: '1001', author_id: '12001', entities: { mentions: [{ id: '12111' }] } },
-        }),
-      );
-    }
-    expect(address).toBe('https://api.x.com/2/tweets');
-    expect(init?.method).toBe('POST');
-    return Promise.resolve(Response.json({ data: { id: '12002' } }, { status: 201 }));
-  });
+  const provider = spyOn(globalThis, 'fetch');
   try {
     const { agentId } = await discoverReply('live', true, async (id) => {
       const encrypted = encryptSecret(xReplySecretSubject(id), 'fixture-x-user-token');
       await sql`INSERT INTO x_reply_credentials(agent_id,user_id,username,encrypted_token)
         VALUES(${id},'12111','orbit_fixture',${encrypted})`;
     });
+    provider.mockImplementation(
+      Object.assign(
+        (url: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+          const address = String(url);
+          expect(new Headers(init?.headers).get('Authorization')).toBe(
+            'Bearer fixture-x-user-token',
+          );
+          if (address.startsWith('https://api.x.com/2/tweets/1001?')) {
+            return Promise.resolve(
+              Response.json({
+                data: { id: '1001', author_id: '12001', entities: { mentions: [{ id: '12111' }] } },
+              }),
+            );
+          }
+          expect(address).toBe('https://api.x.com/2/tweets');
+          expect(init?.method).toBe('POST');
+          return Promise.resolve(Response.json({ data: { id: '12002' } }, { status: 201 }));
+        },
+        { preconnect: fetch.preconnect },
+      ),
+    );
     const job = await claimXReply(agentId);
     await processOutboundJob(job, signal);
     await processOutboundJob(job, signal);

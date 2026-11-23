@@ -9,8 +9,8 @@ import type {
 export const FIXTURE_X_POSTS: XSearchPost[] = [
   {
     id: '1001',
-    text: '@orbit_fixture Looking for a work-history product that helps teams see what changed and why. Could you tell me about yours?',
-    authorId: '12001',
+    text: 'Looking for a work-history product that helps teams see what changed and why. Any recommendations?',
+    authorId: 'u-100',
     authorUsername: 'ops_lead',
     createdAt: '2026-11-18T10:00:00.000Z',
     raw: { id: '1001', text: 'Looking for a work-history product…', fixture: true },
@@ -32,6 +32,15 @@ export const FIXTURE_X_POSTS: XSearchPost[] = [
     raw: { id: '1003', text: 'Random lunch spam…', fixture: true },
   },
 ];
+
+/** A single post addressed to the demo replying account. */
+export const FIXTURE_X_REPLY_POST: XSearchPost = {
+  id: '1001',
+  text: '@orbit_fixture Looking for a work-history product. Could you tell me about yours?',
+  authorId: '12001',
+  authorUsername: 'ops_lead',
+  raw: { id: '1001', fixture: true },
+};
 
 function newestAmong(posts: XSearchPost[], fallback: string | null): string | null {
   if (posts.length === 0) return fallback;

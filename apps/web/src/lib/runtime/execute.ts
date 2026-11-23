@@ -18,6 +18,7 @@ import { db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
+import { proposalTypes } from '@/lib/policy/scopes';
 import { completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
 import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
 import {
@@ -68,6 +69,7 @@ import { nativeTools } from '@/lib/runtime/tools/native';
 import { retrievalTools } from '@/lib/runtime/tools/retrieval';
 import { loadXReplyTarget } from '@/lib/runtime/x/reply';
 import { X_REPLY_ACTION, xReplyDraft, xReplyKey } from '@/lib/runtime/x/reply-input';
+import { X_PROVIDER } from '@/lib/runtime/x/types';
 import {
   actionIntents,
   agents,
@@ -744,6 +746,8 @@ async function processSimulationRun(
       return;
     }
 
+    const xDiscovery = origin !== 'replay' && adapter?.id === X_PROVIDER;
+    const xReplyEnabled = xDiscovery && basePolicy.enabledTools.includes(X_REPLY_ACTION);
     const source = memoryCaptureOrigin(run.origin)
       ? await retryableStore(() => memoryRunSource(run))
       : null;
@@ -871,7 +875,9 @@ async function processSimulationRun(
             channelThread,
             actionTypes:
               channelMode === 'evaluate'
-                ? (profile?.proposalTypes ?? adapter?.actions?.map(({ type }) => type) ?? [])
+                ? xDiscovery && !xReplyEnabled
+                  ? proposalTypes
+                  : (profile?.proposalTypes ?? adapter?.actions?.map(({ type }) => type) ?? [])
                 : undefined,
             memoryCapture: source
               ? {
@@ -1076,17 +1082,16 @@ async function processSimulationRun(
                   effect: 'Agent unavailable for policy checks.',
                 }));
               }
-              const xDiscovery = origin !== 'replay' && adapter?.id === 'x';
               const target =
-                xDiscovery && stage === 'main' && actions.length
+                xReplyEnabled && stage === 'main' && actions.length
                   ? await retryableStore(() => loadXReplyTarget(db(), run.agentId, run.id))
                   : null;
               return await Promise.all(
                 actions.map(async (action, index) => {
                   const xReply =
-                    xDiscovery && (action.type === X_REPLY_ACTION || action.type === 'reply');
+                    xReplyEnabled && (action.type === X_REPLY_ACTION || action.type === 'reply');
                   const actionType = xReply ? X_REPLY_ACTION : action.type;
-                  if (xDiscovery && (!xReply || stage !== 'main')) {
+                  if (xReplyEnabled && (!xReply || stage !== 'main')) {
                     return {
                       ...action,
                       policy: 'suppressed' as const,

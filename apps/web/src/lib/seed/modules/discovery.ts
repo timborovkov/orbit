@@ -1,4 +1,4 @@
-import { FIXTURE_X_POSTS } from '@/lib/runtime/x/fixture';
+import { FIXTURE_X_POSTS, FIXTURE_X_REPLY_POST } from '@/lib/runtime/x/fixture';
 import { formatDiscoveryInput } from '@/lib/runtime/x/poll';
 import { X_REPLY_ACTION, xReplyKey } from '@/lib/runtime/x/reply-input';
 import { X_DISCOVERY_ACTOR, X_PROVIDER } from '@/lib/runtime/x/types';
@@ -28,7 +28,7 @@ export const discoveryModule: SeedModule = {
   async apply({ tx, now }) {
     const agentId = DEMO_AGENTS.john;
     const configurationId = DEMO_CONFIGS.johnV2;
-    const posts = FIXTURE_X_POSTS.filter((post) => post.id === '1001' || post.id === '1002');
+    const posts = [FIXTURE_X_REPLY_POST, ...FIXTURE_X_POSTS.filter((post) => post.id === '1002')];
 
     await tx
       .insert(discoveryCursors)

@@ -453,6 +453,10 @@ approval. Show the connected account by handle and accept replacement tokens
 in a password field. Activity shows the reply outcome and provider reply ID
 when available. Label fixture delivery explicitly.
 
+Local Chromium verification covered editing John’s proposal in Shadow and
+approving it in Live at 1440px. Fixture delivery appeared in Activity at
+390px without horizontal overflow.
+
 ### Evaluations
 
 Global Evaluations navigation lists saved cases and comparisons. Cases come
