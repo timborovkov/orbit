@@ -27,8 +27,8 @@ continuation run or approval.
 
 Administrators can cancel while the timer or draft is pending. Pause and
 stop close unresolved commitments and record a skip. Resume leaves those
-commitments closed. Revoking a tool permission prevents new commitments. Existing commitments
-remain available for explicit cancellation.
+commitments closed. Revoking a tool permission prevents new commitments.
+Administrators can still cancel existing commitments from Follow-ups.
 
 ## Pending work interface
 
@@ -51,3 +51,11 @@ worker serializes the terminal transition under the same agent lock as inbound
 resolution and cancellation. The existing worker owns claim recovery and
 backoff. Heartbeats and acknowledgements check the current claim and lease
 deadline. See [the channel framework](channels.md) for the inbound contract.
+
+## Verify the workflow
+
+Run `bun run test:follow-ups` against a migrated test database. The suite
+covers Sarah’s reply and timeout paths, account and conversation matching,
+duplicate delivery, the deadline race, lease recovery, and agent lifecycle
+changes. The Playwright follow-ups suite checks grants, evidence links and
+cancellation from the workspace.

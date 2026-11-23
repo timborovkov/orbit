@@ -128,9 +128,10 @@ routing edits.
 - Run `bun run test:queue` / `bun run test:integration` when the durable job queue,
   worker claim/lease path or web→worker enqueue path changes (requires migrated
   `orbit_test`).
-- Run `bun run test:follow-ups` (also part of `test:integration`) when follow-up
-  scheduling, delayed execution, cancellation or lifecycle skip-and-record
-  behaviour changes (requires migrated `orbit_test`). See [follow-ups](../follow-ups.md).
+- Run `bun run test:follow-ups` for reminder and reply-aware commitment
+  changes. It checks Sarah’s email intake, shared channel matching, draft
+  approval, restart recovery and cancellation against a migrated `orbit_test`
+  database. The same suites run in `test:integration`. See [follow-ups](../follow-ups.md).
 - Run `bun run test:simulation` when simulation persistence, isolation, or shared
   runtime execution changes (requires migrated `orbit_test`).
 - Run `bun run test:knowledge` when knowledge upload/processing, embeddings,
