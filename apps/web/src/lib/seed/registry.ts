@@ -9,6 +9,7 @@ import { discoveryModule } from '@/lib/seed/modules/discovery';
 import { emailModule } from '@/lib/seed/modules/email';
 import { evaluationsModule } from '@/lib/seed/modules/evaluations';
 import { followUpsModule } from '@/lib/seed/modules/follow-ups';
+import { introductionsModule } from '@/lib/seed/modules/introductions';
 import { knowledgeModule } from '@/lib/seed/modules/knowledge';
 import { knowledgeLibrariesModule } from '@/lib/seed/modules/knowledge-libraries';
 import { memoryModule } from '@/lib/seed/modules/memory';
@@ -36,6 +37,7 @@ export const seedModules: SeedModule[] = [
   memoryModule,
   discoveryModule,
   peopleModule,
+  introductionsModule,
   followUpsModule,
   evaluationsModule,
   auditModule,

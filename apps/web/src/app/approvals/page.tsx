@@ -36,9 +36,7 @@ export default async function ApprovalsPage({
         <div className="page-heading">
           <div>
             <h1>Approvals</h1>
-            <p className="muted">
-              Review suspended proposals newest first. Approve, edit then approve, or reject.
-            </p>
+            <p className="muted">Review pending proposals and see past decisions.</p>
           </div>
           <span className="runtime-status" aria-live="polite">
             {pendingCount} pending

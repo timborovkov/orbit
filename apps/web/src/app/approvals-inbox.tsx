@@ -23,6 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { approvalReviewLimit } from '@/lib/approvals/rules';
 import { formatAge, formatUtcTimestamp } from '@/lib/format';
+import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
 import { cn } from '@/lib/utils';
 
 const actionLabels = {
@@ -34,6 +35,7 @@ const actionLabels = {
   introduce: 'Introduce',
   escalate: 'Escalate',
   'email.send': 'Email reply',
+  [INTRODUCTION_REVIEW]: 'Introduction draft',
 } as Record<string, string>;
 
 export interface ApprovalItem {
@@ -42,6 +44,7 @@ export interface ApprovalItem {
   agentName: string;
   actionType: string;
   runId: string | null;
+  introductionId: string | null;
   recipients: string[];
   draft: string | null;
   reason: string | null;
@@ -85,10 +88,16 @@ function AgeWithTooltip({ value, renderedAt }: { value: Date | string; renderedA
 }
 
 function ProposalContext({ item }: { item: ApprovalItem }) {
-  if (!item.recipients.length && !item.runId) return null;
+  if (!item.recipients.length && !item.runId && !item.introductionId) return null;
   return (
     <div className="approvals-proposal-context">
-      {item.recipients.length > 0 && <span>Recipients {item.recipients.join(' · ')}</span>}
+      {item.introductionId ? (
+        <Link href={`/people/introductions/${item.introductionId}`}>
+          View disclosure and consent
+        </Link>
+      ) : (
+        item.recipients.length > 0 && <span>Recipients {item.recipients.join(' · ')}</span>
+      )}
       {item.runId && (
         <Link href={`/agents/${item.agentId}?run=${item.runId}#run-${item.runId}`}>
           View originating run
@@ -224,18 +233,20 @@ function PendingCard({
           ) : (
             <>
               <blockquote className="approvals-preview">{preview}</blockquote>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="approvals-edit-button"
-                onClick={() => {
-                  setEditingState(true);
-                }}
-              >
-                <Pencil aria-hidden="true" />
-                Edit
-              </Button>
+              {item.actionType !== INTRODUCTION_REVIEW && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="approvals-edit-button"
+                  onClick={() => {
+                    setEditingState(true);
+                  }}
+                >
+                  <Pencil aria-hidden="true" />
+                  Edit
+                </Button>
+              )}
             </>
           )}
         </div>

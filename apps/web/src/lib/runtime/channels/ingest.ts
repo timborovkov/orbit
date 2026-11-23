@@ -4,10 +4,11 @@ import { z } from 'zod';
 import { db, type Tx } from '@/lib/db';
 import { canAcceptBackgroundWork } from '@/lib/lifecycle';
 import { recipientId } from '@/lib/policy/scopes';
-import { enqueueJob } from '@/lib/queue/jobs';
+import { activeJobClaim, enqueueJob } from '@/lib/queue/jobs';
 import type { JobRecord } from '@/lib/queue/types';
 import { channelAdapter } from '@/lib/runtime/channels/registry';
 import { admitRun } from '@/lib/runtime/execute';
+import { linkReplyCommitments, resolveConversationReply } from '@/lib/runtime/follow-ups/replies';
 import { agents, configurations, jobs, sourceEvents } from '@/lib/schema';
 
 export const CHANNEL_EVENT_JOB = 'channel.event';
@@ -18,6 +19,7 @@ const eventInput = z.object({
   externalId: z.string().min(1).max(500),
   accountId: z.string().min(1).max(500).optional(),
   threadId: z.string().min(1).max(500).optional(),
+  isReply: z.boolean().default(false),
   text: z.string().trim().min(1).max(16000),
   authorId: z.string().min(1).max(500).optional(),
   authorUsername: z.string().max(500).optional(),
@@ -28,7 +30,11 @@ const eventInput = z.object({
 });
 
 /** Persist normalized evidence under the agent lock before advancing a provider cursor. */
-export async function persistChannelEvent(tx: Tx, event: typeof sourceEvents.$inferInsert) {
+export async function persistChannelEvent(
+  tx: Tx,
+  event: typeof sourceEvents.$inferInsert,
+  options: { isReply?: boolean } = {},
+) {
   const [existing] = await tx
     .select({ id: sourceEvents.id })
     .from(sourceEvents)
@@ -44,6 +50,18 @@ export async function persistChannelEvent(tx: Tx, event: typeof sourceEvents.$in
     );
   if (existing) return;
   const [source] = await tx.insert(sourceEvents).values(event).onConflictDoNothing().returning();
+  if (source?.threadId && options.isReply) {
+    await resolveConversationReply(
+      tx,
+      {
+        agentId: source.agentId,
+        channel: source.provider,
+        accountId: source.accountId,
+        conversationId: source.threadId,
+      },
+      { kind: 'event', id: source.id },
+    );
+  }
   return source;
 }
 
@@ -69,20 +87,24 @@ export async function ingestChannelEvent(input: z.input<typeof eventInput>) {
       .orderBy(desc(configurations.version))
       .limit(1);
     if (!config) return null;
-    const source = await persistChannelEvent(tx, {
-      agentId: event.agentId,
-      provider: event.channel,
-      providerEventId: event.externalId,
-      accountId: event.accountId,
-      threadId: event.threadId,
-      admissionStatus: 'pending',
-      text: event.text,
-      authorId: event.authorId,
-      authorUsername: event.authorUsername,
-      authorName: event.authorName,
-      providerCreatedAt: event.occurredAt,
-      payload: event.payload,
-    });
+    const source = await persistChannelEvent(
+      tx,
+      {
+        agentId: event.agentId,
+        provider: event.channel,
+        providerEventId: event.externalId,
+        accountId: event.accountId,
+        threadId: event.threadId,
+        admissionStatus: 'pending',
+        text: event.text,
+        authorId: event.authorId,
+        authorUsername: event.authorUsername,
+        authorName: event.authorName,
+        providerCreatedAt: event.occurredAt,
+        payload: event.payload,
+      },
+      { isReply: event.isReply },
+    );
     if (!source) return null;
     const job = await enqueueJob(tx, {
       type: CHANNEL_EVENT_JOB,
@@ -118,13 +140,7 @@ export async function processChannelEventJob(job: JobRecord) {
       .select({ id: jobs.id })
       .from(jobs)
       .where(
-        and(
-          eq(jobs.id, job.id),
-          eq(jobs.type, CHANNEL_EVENT_JOB),
-          eq(jobs.status, 'claimed'),
-          eq(jobs.claimedBy, job.claimedBy ?? ''),
-          eq(jobs.attempts, job.attempts),
-        ),
+        and(activeJobClaim(job.id, job.claimedBy ?? '', job), eq(jobs.type, CHANNEL_EVENT_JOB)),
       )
       .for('update');
     if (!claim) return;
@@ -173,6 +189,7 @@ export async function admitChannelEvent(
     channel: adapter.id,
   });
   if ('runId' in admitted && admitted.runId) {
+    await linkReplyCommitments(tx, agent.id, { kind: 'event', id: source.id }, admitted.runId);
     await tx
       .update(sourceEvents)
       .set({

@@ -4183,6 +4183,7 @@ details[open] > summary > .disclosure-chevron {
 .activity-timeline-list > li {
   border-top: 1px solid var(--border);
   padding: 16px 0;
+  overflow-wrap: anywhere;
 }
 
 .activity-timeline-list > li:last-child {
@@ -4200,12 +4201,17 @@ details[open] > summary > .disclosure-chevron {
   max-width: 68ch;
 }
 
-.activity-timeline time {
-  display: block;
+.activity-event-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   margin-top: 6px;
   color: var(--muted);
-  font-family: var(--font-mono);
   font-size: 0.75rem;
+}
+
+.activity-event-meta time {
+  font-family: var(--font-mono);
 }
 
 .follow-ups-workbench {

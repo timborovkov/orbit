@@ -47,12 +47,14 @@ export const DEMO_INTENTS = {
   sarahEscalateSuspended: '00000000-0000-4000-a400-000000000002',
   mayaIntroduceApproved: '00000000-0000-4000-a400-000000000011',
   mayaIntroducePending: '00000000-0000-4000-a400-000000000012',
+  mayaPeopleIntroduction: '00000000-0000-4000-a400-000000000013',
 } as const;
 
 export const DEMO_POLICY = {
   sarahEscalate: '00000000-0000-4000-a500-000000000001',
   sarahEscalateSuspended: '00000000-0000-4000-a500-000000000002',
   mayaIntroduce: '00000000-0000-4000-a500-000000000011',
+  mayaPeopleIntroduction: '00000000-0000-4000-a500-000000000012',
 } as const;
 
 export const DEMO_AUDIT = {
@@ -99,6 +101,8 @@ export const DEMO_EMAIL = {
 export const DEMO_SOURCE_EVENTS = {
   johnPost1001: '00000000-0000-4000-a900-000000000001',
   johnPost1002: '00000000-0000-4000-a900-000000000002',
+  mayaAlex: '00000000-0000-4000-a900-000000000011',
+  mayaPriya: '00000000-0000-4000-a900-000000000012',
 } as const;
 
 export const DEMO_DISCOVERY_RUNS = {
@@ -113,6 +117,7 @@ export const DEMO_DISCOVERY_RUN_IDS = Object.values(DEMO_DISCOVERY_RUNS);
 export const DEMO_FOLLOW_UPS = {
   johnScheduled: '00000000-0000-4000-a920-000000000001',
   sarahCompleted: '00000000-0000-4000-a920-000000000011',
+  sarahReplyReceived: '00000000-0000-4000-a920-000000000012',
 } as const;
 
 export const DEMO_FOLLOW_UP_JOBS = {
@@ -122,6 +127,7 @@ export const DEMO_FOLLOW_UP_JOBS = {
 
 export const DEMO_ACTIVITY = {
   sarahFollowUpCompleted: '00000000-0000-4000-a940-000000000011',
+  sarahReplyReceived: '00000000-0000-4000-a940-000000000012',
 } as const;
 
 export const DEMO_FOLLOW_UP_IDS = Object.values(DEMO_FOLLOW_UPS);

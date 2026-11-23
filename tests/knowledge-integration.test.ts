@@ -531,7 +531,8 @@ test('upgrading a private library preserves ready documents, queued jobs, and sa
     try {
       const migrationsDir = new URL('../apps/web/drizzle/', import.meta.url);
       const nextMigration = '0019_shared_knowledge_libraries.sql';
-      for (const name of (await listMigrationFiles()).filter((name) => name < nextMigration)) {
+      const migrations = await listMigrationFiles();
+      for (const name of migrations.filter((name) => name < nextMigration)) {
         await upgrade.unsafe(await readFile(new URL(name, migrationsDir), 'utf8'));
       }
 
@@ -586,7 +587,9 @@ test('upgrading a private library preserves ready documents, queued jobs, and sa
         RETURNING id
       `;
 
-      await upgrade.unsafe(await readFile(new URL(nextMigration, migrationsDir), 'utf8'));
+      for (const name of migrations.filter((name) => name >= nextMigration)) {
+        await upgrade.unsafe(await readFile(new URL(name, migrationsDir), 'utf8'));
+      }
       const [preserved] =
         await upgrade`SELECT agent_id, library_id, object_key FROM knowledge_documents WHERE id=${documentId}`;
       expect(preserved).toEqual({

@@ -1,12 +1,12 @@
 /**
  * Decide how the agent workspace should refresh while follow-ups are scheduled.
- * Due or in-flight work polls frequently; future dues schedule one refresh at
- * the next due instant so idle days do not hammer router.refresh().
+ * Check reply waits periodically. A time-only reminder needs one refresh at its
+ * deadline, then frequent updates while the worker handles it.
  */
 export function followUpWorkspaceRefresh(input: {
   now: Date;
-  scheduled: { dueAt: Date; jobStatus: string | null }[];
-}): { pollFrequently: boolean; refreshAt: Date | null } {
+  scheduled: { dueAt: Date; jobStatus: string | null; waitForReply?: boolean }[];
+}): { pollFrequently: boolean; refreshAt: Date | null; intervalMs?: number } {
   if (!input.scheduled.length) return { pollFrequently: false, refreshAt: null };
 
   const nowMs = input.now.getTime();
@@ -14,6 +14,9 @@ export function followUpWorkspaceRefresh(input: {
     (row) => row.dueAt.getTime() <= nowMs || row.jobStatus === 'claimed',
   );
   if (dueOrExecuting) return { pollFrequently: true, refreshAt: null };
+  if (input.scheduled.some((row) => row.waitForReply)) {
+    return { pollFrequently: true, refreshAt: null, intervalMs: 10_000 };
+  }
 
   const nextDueMs = input.scheduled
     .map((row) => row.dueAt.getTime())

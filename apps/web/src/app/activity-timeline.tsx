@@ -1,12 +1,16 @@
+import Link from 'next/link';
+
 import { formatUtcTimestamp } from '@/lib/format';
 
 export interface ActivityEventRow {
   id: string;
-  kind: string;
   summary: string;
   detail: string | null;
-  followUpId: string | null;
   createdAt: Date;
+  dueAt: Date | null;
+  channel: string | null;
+  replyExcerpt: string | null;
+  links: { label: string; href: string }[];
 }
 
 export function ActivityTimeline({ events }: { events: ActivityEventRow[] }) {
@@ -14,27 +18,39 @@ export function ActivityTimeline({ events }: { events: ActivityEventRow[] }) {
     <section className="activity-timeline" aria-labelledby="activity-timeline-heading">
       <div className="editor-section-heading">
         <h2 id="activity-timeline-heading">Activity</h2>
-        <p className="muted">
-          Internal outcomes for durable commitments and other agent events. External writes are not
-          performed here.
-        </p>
       </div>
       {!events.length && <p className="muted">No activity events yet.</p>}
       <ol className="activity-timeline-list">
         {events.map((event) => (
-          <li
-            key={event.id}
-            id={event.followUpId ? `activity-follow-up-${event.followUpId}` : undefined}
-          >
-            <div className="activity-timeline-row">
-              <div>
-                <span className="activity-summary">{event.summary}</span>
-                {event.detail && <p className="muted activity-detail">{event.detail}</p>}
-                <time dateTime={event.createdAt.toISOString()}>
-                  {formatUtcTimestamp(event.createdAt)} · {event.kind}
-                </time>
-              </div>
+          <li key={event.id} id={`activity-event-${event.id}`}>
+            <span className="activity-summary">{event.summary}</span>
+            {event.detail && <p className="muted activity-detail">{event.detail}</p>}
+            {event.replyExcerpt && (
+              <blockquote className="muted activity-detail">{event.replyExcerpt}</blockquote>
+            )}
+            <div className="activity-event-meta">
+              <time dateTime={event.createdAt.toISOString()}>
+                {formatUtcTimestamp(event.createdAt)}
+              </time>
+              {event.channel && <span>{event.channel}</span>}
+              {event.channel && event.dueAt && (
+                <span>
+                  Due{' '}
+                  <time dateTime={event.dueAt.toISOString()}>
+                    {formatUtcTimestamp(event.dueAt)}
+                  </time>
+                </span>
+              )}
             </div>
+            {event.links.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                {event.links.map((link) => (
+                  <Link className="person-source-link" key={link.label} href={link.href}>
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
+            )}
           </li>
         ))}
       </ol>

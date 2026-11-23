@@ -4,6 +4,8 @@ import { db, type Tx } from '@/lib/db';
 import { enqueueJob } from '@/lib/queue/jobs';
 import { channelAction } from '@/lib/runtime/channels/registry';
 import type { ActionIntent } from '@/lib/runtime/channels/types';
+import { introductionDisclosureFailure } from '@/lib/runtime/introductions/disclosure';
+import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
 import { CHANNEL_OUTBOUND_JOB, type OutboundActionStatus } from '@/lib/runtime/outbound/types';
 import { actionIntents, outboundActions, usageCounters } from '@/lib/schema';
 
@@ -16,6 +18,12 @@ export async function enqueueOutbound(
   const adapter = channelAction(intent.actionType)?.action;
   if (!adapter || intent.decision !== 'allow') return null;
   const body = typeof intent.payload.draft === 'string' ? intent.payload.draft.trim() : '';
+
+  if (
+    intent.actionType === INTRODUCTION_REVIEW &&
+    (await introductionDisclosureFailure(tx, intent, { body, recipients: intent.recipients }))
+  )
+    return null;
 
   const existing = (
     await tx

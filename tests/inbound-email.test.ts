@@ -7,7 +7,13 @@ import { POST } from '@/app/api/webhooks/resend/route';
 import { budgetDefaults } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
-import { claimJobs, completeJob, failJob, releaseClaim } from '@/lib/queue/jobs';
+import {
+  claimJobs,
+  completeJob,
+  failJob,
+  recoverExpiredLeases,
+  releaseClaim,
+} from '@/lib/queue/jobs';
 import { createPlaygroundStreamProgress, playgroundChunksFromResult } from '@/lib/runtime/chat-ui';
 import { fetchReceivedEmail } from '@/lib/runtime/email/provider';
 import { processEmailReceiveJob } from '@/lib/runtime/email/receive';
@@ -22,6 +28,8 @@ import {
   processEmailDraftJob,
   processSimulationJob,
 } from '@/lib/runtime/execute';
+import { FOLLOW_UP_JOB_TYPE, processFollowUpJob } from '@/lib/runtime/follow-ups/process';
+import { PEOPLE_INTRODUCE, PEOPLE_SEARCH } from '@/lib/runtime/introductions/types';
 import { stubEmbedders } from '@/lib/runtime/knowledge/embed';
 import { searchKnowledge } from '@/lib/runtime/knowledge/search';
 import { processMemoryEmbedding } from '@/lib/runtime/memory/store';
@@ -30,9 +38,12 @@ import { draftAnswerFromResult, type ModelCall } from '@/lib/runtime/simulation'
 import { createFixtureXSearchAdapter } from '@/lib/runtime/x/fixture';
 import { processDiscoveryPoll } from '@/lib/runtime/x/poll';
 import { setEmailEnabled } from '@/lib/server/email-mutations';
+import { cancelFollowUp } from '@/lib/server/follow-up-mutations';
+import { persistPeopleGrant } from '@/lib/server/introduction-mutations';
 import { persistLifecycle } from '@/lib/server/lifecycle-mutations';
 import { saveAgentMemory } from '@/lib/server/memory-mutations';
 import { selectAgentMemoryEvidence } from '@/lib/server/memory-queries';
+import { persistCommitmentGrant } from '@/lib/server/policy-mutations';
 import { persistConfiguration } from '@/lib/server/workspace-mutations';
 
 const databaseUrl =
@@ -889,4 +900,427 @@ test('pgvector finds owned facts and memory capture requires a production run wi
   await sql`UPDATE email_messages SET body=NULL WHERE id=${original.id}`;
   expect(await sql`SELECT id FROM agent_memories WHERE id=${entry!.id}`).toHaveLength(0);
   expect((await playgroundMemory(sarah, ssoRequirement, memoryInference())).memory).toBeUndefined();
+});
+
+const emptyDraftDecision = {
+  relevant: true,
+  priority: 0.7,
+  reason: 'A support conversation',
+  actions: [],
+};
+
+async function sarahCommitment(
+  tool: 'wait_for_reply' | 'schedule_follow_up' = 'wait_for_reply',
+  existing?: { agent: Awaited<ReturnType<typeof createAgent>>; parent: string },
+) {
+  const sarah = existing?.agent ?? (await createAgent('Sarah'));
+  expect(await persistCommitmentGrant(admin, sarah.id, `commitments.${tool}`, true)).toEqual({
+    message: 'Commitment permission saved.',
+  });
+
+  const first = delivery([sarah.address]);
+  const parent = `<${first.data.email_id}@example.test>`;
+  expect((await POST(request(first))).status).toBe(200);
+  await receive(
+    new Map([
+      [
+        first.data.email_id,
+        {
+          text: 'Can you help me check an invoice?',
+          headers: {
+            'Message-ID': parent,
+            ...(existing ? { 'In-Reply-To': existing.parent } : {}),
+          },
+        },
+      ],
+    ]),
+    1,
+  );
+  const call: ModelCall = async (modelRequest) => {
+    if (modelRequest.stage === 'main') {
+      const exec = modelRequest.tools?.[tool]?.execute;
+      const otherTool = tool === 'wait_for_reply' ? 'schedule_follow_up' : 'wait_for_reply';
+      expect(modelRequest.tools?.[otherTool]).toBeUndefined();
+      expect(exec).toBeDefined();
+      if (!exec) throw new Error('Expected a conversation commitment tool.');
+      const args = {
+        subject: 'Check back about the invoice',
+        note: 'Ask if the customer still needs help.',
+        dueAt: new Date(Date.now() + 60_000).toISOString(),
+      };
+      const context = {
+        messages: [],
+        toolCallId: 'request-commitment',
+        abortSignal: signal,
+        context: undefined,
+      };
+      const one = await exec(args, context);
+      expect(one).toMatchObject({ status: 'scheduled' });
+      expect(await exec(args, { ...context, toolCallId: 'duplicate' })).toEqual(one);
+    }
+    return {
+      decision: {
+        ...emptyDraftDecision,
+        ...(modelRequest.stage === 'main' ? { answer: null, citations: [] } : {}),
+      },
+      inputTokens: 3,
+      outputTokens: 3,
+      costMicros: 1,
+    };
+  };
+  call.quote = model.quote;
+  await draft(call, 1);
+  const rows = await sql<{ id: string; job_id: string; conversation_id: string }[]>`
+    SELECT id, job_id, conversation_id FROM follow_ups WHERE agent_id=${sarah.id}
+  `;
+  expect(rows).toHaveLength(1);
+  return { sarah, parent, commitment: rows[0]! };
+}
+
+function replyDelivery(address: string, parent: string, text: string) {
+  const event = delivery([address]);
+  return {
+    event,
+    fixtures: new Map([
+      [
+        event.data.email_id,
+        {
+          text,
+          headers: {
+            'Message-ID': `<${event.data.email_id}@example.test>`,
+            'In-Reply-To': parent,
+            References: parent,
+          },
+        },
+      ],
+    ]),
+  };
+}
+
+async function claimCommitmentTimer(jobId: string, worker: string) {
+  const candidates = await claimJobs({ workerId: worker, types: [FOLLOW_UP_JOB_TYPE], limit: 20 });
+  const job = candidates.find((candidate) => candidate.id === jobId);
+  if (!job) throw new Error('Expected a claimed commitment timer.');
+  for (const candidate of candidates) {
+    if (candidate.id !== jobId) await releaseClaim(candidate.id, worker);
+  }
+  return job;
+}
+
+test('Sarah’s persisted reply closes the wait once and becomes the next channel run’s evidence', async () => {
+  const { sarah, parent, commitment } = await sarahCommitment();
+  const other = await createAgent('Different agent');
+  const unrelated = delivery([sarah.address]);
+  const wrongAgent = replyDelivery(other.address, parent, 'A reply for another agent.');
+  expect((await POST(request(unrelated))).status).toBe(200);
+  expect((await POST(request(wrongAgent.event))).status).toBe(200);
+  await receive(
+    new Map<string, ResendFixture>([
+      [unrelated.data.email_id, { text: 'Same sender and subject, different thread.' }],
+      ...wrongAgent.fixtures,
+    ]),
+    2,
+  );
+  await draft(model, 2);
+  expect((await sql`SELECT status FROM follow_ups WHERE id=${commitment.id}`)[0]?.status).toBe(
+    'scheduled',
+  );
+
+  // A claimed timer must check the real deadline and can lose its claim to the reply.
+  await sql`UPDATE jobs SET available_at=now() WHERE id=${commitment.job_id}`;
+  const timer = await claimCommitmentTimer(commitment.job_id, workerId);
+  const reply = replyDelivery(sarah.address, parent, 'I found the invoice. Thank you.');
+  const deliveries = await Promise.all([POST(request(reply.event)), POST(request(reply.event))]);
+  expect(deliveries.map(({ status }) => status)).toEqual([200, 200]);
+  const [, received] = await Promise.all([
+    processFollowUpJob(timer, signal),
+    receive(reply.fixtures, 1),
+  ]);
+  expect(received.calls).toBe(1);
+
+  let evidenceSeen = false;
+  const continuation: ModelCall = async (modelRequest) => {
+    const input = JSON.parse(modelRequest.input);
+    expect(input.untrustedInput).toContain('I found the invoice. Thank you.');
+    expect(input.untrustedResolvedCommitments).toEqual([
+      {
+        subject: 'Check back about the invoice',
+        note: 'Ask if the customer still needs help.',
+      },
+    ]);
+    evidenceSeen = true;
+    return model(modelRequest);
+  };
+  continuation.quote = model.quote;
+  await draft(continuation, 1);
+  expect(evidenceSeen).toBe(true);
+
+  const [row] = await sql`
+    SELECT f.status, f.outcome_kind, f.draft_run_id, f.continuation_run_id,
+      e.run_id AS email_run_id, e.thread_id, j.status AS timer_status
+    FROM follow_ups f JOIN email_messages e ON e.id=f.reply_email_id
+    JOIN jobs j ON j.id=f.job_id WHERE f.id=${commitment.id}
+  `;
+  expect(row).toMatchObject({
+    status: 'completed',
+    outcome_kind: 'reply_received',
+    thread_id: commitment.conversation_id,
+    draft_run_id: null,
+    timer_status: 'cancelled',
+  });
+  expect(row?.continuation_run_id).toBeTruthy();
+  expect(row?.continuation_run_id).toBe(row?.email_run_id);
+  expect(
+    await sql`
+    SELECT 1 FROM agent_activity_events WHERE follow_up_id=${commitment.id} AND kind <> 'follow_up.scheduled'
+  `,
+  ).toHaveLength(1);
+  expect(
+    await sql`SELECT 1 FROM action_intents WHERE idempotency_key=${`followup:${commitment.id}:draft`}`,
+  ).toHaveLength(0);
+});
+
+test('a late ancestor and a redelivered Message-ID leave a newer wait open', async () => {
+  const sarah = await createAgent('Sarah');
+  const first = delivery([sarah.address]);
+  const threadRoot = `<${first.data.email_id}@example.test>`;
+  expect((await POST(request(first))).status).toBe(200);
+  await receive(
+    new Map([
+      [
+        first.data.email_id,
+        {
+          text: 'The first question.',
+          headers: { 'Message-ID': threadRoot },
+        },
+      ],
+    ]),
+    1,
+  );
+  await draft(model, 1);
+
+  const ancestor = replyDelivery(sarah.address, threadRoot, 'The reply that arrived out of order.');
+  const ancestorMessageId = `<${ancestor.event.data.email_id}@example.test>`;
+  const { commitment, parent } = await sarahCommitment('wait_for_reply', {
+    agent: sarah,
+    parent: ancestorMessageId,
+  });
+  expect((await POST(request(ancestor.event))).status).toBe(200);
+  await receive(ancestor.fixtures, 1);
+  await draft(model, 1);
+  const [waiting] = await sql`
+    SELECT f.status, f.conversation_id, ancestor.thread_id AS canonical_thread_id
+    FROM follow_ups f JOIN email_messages ancestor ON ancestor.resend_email_id=${ancestor.event.data.email_id}
+    WHERE f.id=${commitment.id}`;
+  expect(waiting?.status).toBe('scheduled');
+  expect(waiting?.conversation_id).toBe(waiting?.canonical_thread_id);
+  expect(waiting?.conversation_id).not.toBe(commitment.conversation_id);
+
+  const duplicate = replyDelivery(sarah.address, parent, 'Redelivery of the same message.');
+  duplicate.fixtures.get(duplicate.event.data.email_id)!.headers['Message-ID'] = ancestorMessageId;
+  expect((await POST(request(duplicate.event))).status).toBe(200);
+  await receive(duplicate.fixtures, 1);
+  await draft(model, 1);
+  const [afterDuplicate] = await sql`SELECT status FROM follow_ups WHERE id=${commitment.id}`;
+  expect(afterDuplicate?.status).toBe('scheduled');
+
+  const reply = replyDelivery(sarah.address, parent, 'A new answer in the merged thread.');
+  expect((await POST(request(reply.event))).status).toBe(200);
+  await receive(reply.fixtures, 1);
+  await draft(model, 1);
+  const [resolved] = await sql`
+    SELECT f.outcome_kind, e.resend_email_id
+    FROM follow_ups f JOIN email_messages e ON e.id=f.reply_email_id WHERE f.id=${commitment.id}`;
+  expect(resolved).toMatchObject({
+    outcome_kind: 'reply_received',
+    resend_email_id: reply.event.data.email_id,
+  });
+});
+
+test('a matching reply waits for budget to return and continues without refetching', async () => {
+  const { sarah, parent, commitment } = await sarahCommitment();
+  await sql`UPDATE agents SET budgets=budgets || '{"dailyRequests":0}'::jsonb WHERE id=${sarah.id}`;
+  const reply = replyDelivery(sarah.address, parent, 'The invoice has arrived.');
+  expect((await POST(request(reply.event))).status).toBe(200);
+  const first = await receive(reply.fixtures, 1);
+  expect(first.calls).toBe(1);
+  expect(first.results[0]?.deferUntil.getTime()).toBeGreaterThan(Date.now());
+  const [waiting] = await sql`
+    SELECT f.outcome_kind, f.continuation_run_id, e.waiting_for_capacity, e.skip_reason
+    FROM follow_ups f JOIN email_messages e ON e.id=f.reply_email_id WHERE f.id=${commitment.id}`;
+  expect(waiting).toMatchObject({
+    outcome_kind: 'reply_received',
+    continuation_run_id: null,
+    waiting_for_capacity: true,
+    skip_reason: null,
+  });
+
+  await sql`UPDATE agents SET budgets=${sql.json(budgetDefaults)} WHERE id=${sarah.id}`;
+  await sql`UPDATE jobs SET available_at=now() WHERE payload->>'agentId'=${sarah.id} AND type='email.receive' AND status='pending'`;
+  expect((await receive(reply.fixtures, 1)).calls).toBe(0);
+  await draft(model, 1);
+  const [continued] = await sql`
+    SELECT f.continuation_run_id, e.run_id, r.status
+    FROM follow_ups f JOIN email_messages e ON e.id=f.reply_email_id
+    JOIN simulation_runs r ON r.id=f.continuation_run_id WHERE f.id=${commitment.id}`;
+  expect(continued?.continuation_run_id).toBeTruthy();
+  expect(continued?.continuation_run_id).toBe(continued?.run_id);
+  expect(continued?.status).toBe('completed');
+});
+
+test('a deadline and an expired worker claim produce one Sarah follow-up approval', async () => {
+  const { sarah, parent, commitment } = await sarahCommitment();
+  await sql`UPDATE agents SET budgets=${sql.json({ ...budgetDefaults, maxConcurrentRuns: 2 })}
+    WHERE id=${sarah.id}`;
+  await sql.begin(async (tx) => {
+    await tx`UPDATE follow_ups SET due_at=now() WHERE id=${commitment.id}`;
+    await tx`UPDATE jobs SET available_at=now() WHERE id=${commitment.job_id}`;
+  });
+  const expired = await claimCommitmentTimer(commitment.job_id, 'old-worker');
+  await sql`UPDATE jobs SET claim_expires_at=now()-interval '1 second' WHERE id=${expired.id}`;
+  expect((await recoverExpiredLeases()).some((job) => job.id === expired.id)).toBe(true);
+  const resumed = await claimCommitmentTimer(commitment.job_id, workerId);
+
+  const reply = replyDelivery(sarah.address, parent, 'Reply at the deadline.');
+  expect((await POST(request(reply.event))).status).toBe(200);
+  await Promise.all([
+    processFollowUpJob(expired, signal),
+    processFollowUpJob(resumed, signal),
+    receive(reply.fixtures, 1),
+  ]);
+  await processFollowUpJob(resumed, signal);
+  await completeJob(resumed.id, workerId);
+
+  const [pending] =
+    await sql`SELECT draft_run_id, reply_email_id FROM follow_ups WHERE id=${commitment.id}`;
+  expect(pending?.draft_run_id).toBeTruthy();
+  expect(pending?.reply_email_id).toBeNull();
+  const jobs = await claimJobs({ workerId, types: [EMAIL_DRAFT_JOB], limit: 2 });
+  expect(jobs).toHaveLength(2);
+  const generate: ModelCall = async (modelRequest) => {
+    const isFollowUp = modelRequest.input.includes('Check back about the invoice');
+    if (isFollowUp && modelRequest.stage === 'main') {
+      expect(modelRequest.tools?.wait_for_reply).toBeUndefined();
+      expect(modelRequest.system).toContain('one concise plain-text follow-up');
+    }
+    return {
+      decision: {
+        ...emptyDraftDecision,
+        relevant: !isFollowUp || modelRequest.stage === 'main',
+        ...(modelRequest.stage === 'main'
+          ? {
+              answer: isFollowUp ? 'Do you still need help finding your invoice?' : null,
+              citations: [],
+            }
+          : {}),
+      },
+      inputTokens: 2,
+      outputTokens: 2,
+      costMicros: 1,
+    };
+  };
+  generate.quote = model.quote;
+  for (const job of jobs) {
+    const claim = { workerId, jobId: job.id };
+    await processEmailDraftJob(job.payload, () => generate, signal, claim);
+    await processEmailDraftJob(job.payload, () => generate, signal, claim);
+    await completeJob(job.id, workerId);
+  }
+
+  const results = await sql`
+    SELECT f.status, f.outcome_kind, i.review_status, i.payload->>'draft' AS draft,
+      i.payload->>'threadId' AS thread
+    FROM follow_ups f JOIN action_intents i ON i.id=f.approval_intent_id
+    WHERE f.id=${commitment.id}
+  `;
+  expect(results).toHaveLength(1);
+  expect(results[0]).toMatchObject({
+    status: 'completed',
+    outcome_kind: 'draft_ready',
+    review_status: 'pending',
+    draft: 'Do you still need help finding your invoice?',
+    thread: commitment.conversation_id,
+  });
+  expect(
+    await sql`
+    SELECT 1 FROM agent_activity_events WHERE follow_up_id=${commitment.id} AND kind <> 'follow_up.scheduled'
+  `,
+  ).toHaveLength(1);
+  expect(await sql`SELECT 1 FROM outbound_actions WHERE agent_id=${sarah.id}`).toHaveLength(0);
+});
+
+test('cancel, pause and stop close pending conversation commitments', async () => {
+  for (const lifecycle of ['cancel', 'paused', 'stopped'] as const) {
+    const { sarah, commitment } = await sarahCommitment('schedule_follow_up');
+    await sql`UPDATE follow_ups SET due_at=now() WHERE id=${commitment.id}`;
+    await sql`UPDATE jobs SET available_at=now() WHERE id=${commitment.job_id}`;
+    const timer = await claimCommitmentTimer(commitment.job_id, workerId);
+    await processFollowUpJob(timer, signal);
+    const [job] = await claimJobs({ workerId, types: [EMAIL_DRAFT_JOB], limit: 1 });
+    expect(job).toBeDefined();
+
+    if (lifecycle === 'cancel') {
+      expect(await cancelFollowUp(admin, sarah.id, commitment.id)).toMatchObject({
+        message: 'Follow-up cancelled.',
+      });
+    } else {
+      await persistLifecycle(admin, sarah.id, lifecycle);
+      await persistLifecycle(admin, sarah.id, 'shadow');
+    }
+
+    const forbidden: ModelCall = async () => {
+      throw new Error('Cancelled draft attempted inference.');
+    };
+    await processEmailDraftJob(job!.payload, () => forbidden, signal, { workerId, jobId: job!.id });
+    await processFollowUpJob(timer, signal);
+    const [row] = await sql`
+      SELECT f.status, f.approval_intent_id, r.status AS run_status, j.status AS job_status
+      FROM follow_ups f JOIN simulation_runs r ON r.id=f.draft_run_id
+      JOIN jobs j ON j.id=r.job_id WHERE f.id=${commitment.id}
+    `;
+    expect(row).toMatchObject({
+      status: lifecycle === 'cancel' ? 'cancelled' : 'skipped',
+      approval_intent_id: null,
+      run_status: 'interrupted',
+      job_status: 'cancelled',
+    });
+    expect(
+      await sql`
+      SELECT 1 FROM agent_activity_events WHERE follow_up_id=${commitment.id} AND kind <> 'follow_up.scheduled'
+    `,
+    ).toHaveLength(1);
+  }
+}, 15_000);
+
+test('an unanswered Sarah conversation produces one draft awaiting administrator review', async () => {
+  const { sarah, commitment } = await sarahCommitment();
+  for (const tool of [PEOPLE_SEARCH, PEOPLE_INTRODUCE] as const) {
+    expect(await persistPeopleGrant(admin, sarah.id, tool, true)).toHaveProperty('message');
+  }
+  await sql.begin(async (tx) => {
+    await tx`UPDATE follow_ups SET due_at=now() WHERE id=${commitment.id}`;
+    await tx`UPDATE jobs SET available_at=now() WHERE id=${commitment.job_id}`;
+  });
+  const timer = await claimCommitmentTimer(commitment.job_id, workerId);
+  await processFollowUpJob(timer, signal);
+  await processFollowUpJob(timer, signal);
+  await completeJob(timer.id, workerId);
+  const generate: ModelCall = (request) => {
+    if (request.stage === 'main') {
+      expect(request.tools?.search_people).toBeDefined();
+      expect(request.tools?.propose_introduction).toBeUndefined();
+      expect(request.tools?.wait_for_reply).toBeUndefined();
+      expect(request.tools?.schedule_follow_up).toBeUndefined();
+    }
+    return model(request);
+  };
+  generate.quote = model.quote;
+  await draft(generate, 1);
+  const approvals = await sql`
+    SELECT i.review_status FROM action_intents i JOIN follow_ups f ON f.approval_intent_id=i.id
+    WHERE f.id=${commitment.id} AND f.reply_email_id IS NULL AND f.outcome_kind='draft_ready'
+  `;
+  expect(approvals).toHaveLength(1);
+  expect(approvals[0]?.review_status).toBe('pending');
+  expect(await sql`SELECT 1 FROM outbound_actions WHERE agent_id=${sarah.id}`).toHaveLength(0);
 });

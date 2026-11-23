@@ -28,6 +28,7 @@ import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { channelGrantOptions } from '@/lib/runtime/channels/registry';
 import { followUpWorkspaceRefresh } from '@/lib/runtime/follow-ups/refresh';
+import { isCommitmentTool } from '@/lib/runtime/follow-ups/types';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { getEmailInbox } from '@/lib/server/email-queries';
 import { listActivityEventsForAgent, listFollowUpsForAgent } from '@/lib/server/follow-up-queries';
@@ -122,7 +123,11 @@ export default async function AgentWorkspace({
     now,
     scheduled: followUps
       .filter((item) => item.status === 'scheduled')
-      .map((item) => ({ dueAt: item.dueAt, jobStatus: item.jobStatus })),
+      .map((item) => ({
+        dueAt: item.dueAt,
+        jobStatus: item.jobStatus,
+        waitForReply: item.waitForEvent === 'reply',
+      })),
   });
   const hasPendingRuns = history.some(
     (run) =>
@@ -176,11 +181,13 @@ export default async function AgentWorkspace({
       approvalExpiresAfterHours={approvalSettings.approvalExpiresAfterHours}
       approvalOnReject={approvalSettings.approvalOnReject}
       approvalSpendCents={approvalSettings.approvalSpendCents}
+      enabledCommitmentTools={agent.enabledTools.filter(isCommitmentTool)}
       channelActions={channelGrantOptions().map((option) => ({
         ...option,
         enabled: enabledTools.has(option.type),
       }))}
       consentRequiredTools={agent.consentRequiredTools}
+      enabledTools={agent.enabledTools}
       consents={consents}
       hasAgentCredential={hasAgentCredential}
       keySource={keySource}
@@ -261,6 +268,11 @@ export default async function AgentWorkspace({
             hasPendingRuns || hasPendingKnowledge || inbox.pending || followUpRefresh.pollFrequently
           }
           refreshAt={followUpRefresh.refreshAt}
+          intervalMs={
+            hasPendingRuns || hasPendingKnowledge || inbox.pending
+              ? undefined
+              : followUpRefresh.intervalMs
+          }
         />
         <Suspense
           fallback={

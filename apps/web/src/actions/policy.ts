@@ -10,6 +10,7 @@ import { channelGrantOptions } from '@/lib/runtime/channels/registry';
 import { persistApprovalTools } from '@/lib/server/lifecycle-mutations';
 import {
   persistChannelGrant,
+  persistCommitmentGrant,
   persistConsentRequirements,
   recordConsent,
   reviewProposedAction,
@@ -105,6 +106,19 @@ export async function saveChannelGrant(form: FormData) {
   return result;
 }
 
+export async function saveCommitmentGrant(form: FormData) {
+  await checkOrigin();
+  const actor = await requireAdmin();
+  const parsed = z
+    .object({ agentId: z.uuid(), type: z.string().max(80), enabled: z.enum(['true', 'false']) })
+    .safeParse(Object.fromEntries(form));
+  if (!parsed.success) return { error: 'Choose a valid commitment tool.' };
+  const { agentId, type, enabled } = parsed.data;
+  const result = await persistCommitmentGrant(actor, agentId, type, enabled === 'true');
+  revalidatePath(`/agents/${agentId}`);
+  return result;
+}
+
 export async function saveConsentRequirements(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
@@ -149,6 +163,8 @@ export async function reviewProposal(form: FormData) {
   });
   revalidatePath(`/agents/${agentId}`);
   revalidatePath('/approvals');
+  revalidatePath('/people/introductions');
+  revalidatePath('/people/introductions/[id]', 'page');
   return result;
 }
 
@@ -170,6 +186,8 @@ export async function reviewProposalsBulk(form: FormData) {
   }
   const result = await reviewProposedActionsBulk(actor, items, decision.data);
   revalidatePath('/approvals');
+  revalidatePath('/people/introductions');
+  revalidatePath('/people/introductions/[id]', 'page');
   for (const item of items) revalidatePath(`/agents/${item.agentId}`);
   return result;
 }

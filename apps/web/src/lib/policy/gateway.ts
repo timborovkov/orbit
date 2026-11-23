@@ -20,8 +20,10 @@ import { recipientConsentFailure } from '@/lib/policy/consent';
 import { type ExecutionContext, executionContextForOrigin } from '@/lib/policy/execution-context';
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
-import { channelAction, channelForRun } from '@/lib/runtime/channels/registry';
+import { channelAction, channelAdapter, channelForRun } from '@/lib/runtime/channels/registry';
 import { retryableStore } from '@/lib/runtime/errors';
+import { isCommitmentTool } from '@/lib/runtime/follow-ups/types';
+import { PEOPLE_INTRODUCE, peopleGrant } from '@/lib/runtime/introductions/types';
 import {
   HISTORY_SEARCH,
   MEMORY_CAPTURE,
@@ -202,6 +204,38 @@ export function evaluateCandidate(
     return { decision: 'deny', reasons };
   }
 
+  if (peopleGrant.safeParse(action.type).success) {
+    if (!ctx.runId || !ctx.runOrigin || !action.executionToken) {
+      return { decision: 'deny', reasons: ['People tools require an owned run.'] };
+    }
+    if (!ctx.enabledTools.includes(action.type)) {
+      return { decision: 'deny', reasons: [`Tool ${action.type} is not enabled for this agent.`] };
+    }
+    if (ctx.executionContext === 'replay') {
+      return { decision: 'deny', reasons: ['Replay uses the saved case and its memory snapshot.'] };
+    }
+    if (action.type === PEOPLE_INTRODUCE && channelAdapter(ctx.runChannel)?.run.mode === 'draft') {
+      return { decision: 'deny', reasons: ['Draft runs can read People profiles only.'] };
+    }
+    return { decision: 'allow', reasons: ['People tool permitted for this agent.'] };
+  }
+
+  if (isCommitmentTool(action.type)) {
+    if (
+      !ctx.runId ||
+      !ctx.runChannel ||
+      !action.executionToken ||
+      ctx.runOrigin === 'playground' ||
+      ctx.executionContext === 'replay'
+    ) {
+      return { decision: 'deny', reasons: ['Commitments require an owned channel run.'] };
+    }
+    if (!ctx.enabledTools.includes(action.type)) {
+      return { decision: 'deny', reasons: ['This commitment tool is not enabled for the agent.'] };
+    }
+    return { decision: 'allow', reasons: ['The conversation commitment is permitted.'] };
+  }
+
   // Internal memory operations are tied to a persisted, owned run. Capture does
   // not dispatch outbound actions or change any configuration or permissions.
   if (
@@ -224,6 +258,18 @@ export function evaluateCandidate(
     return { decision: 'allow', reasons: ['Agent memory operation permitted.'] };
   }
 
+  if (
+    action.type === 'introduce' &&
+    action.executionToken &&
+    ctx.executionContext !== 'replay' &&
+    ctx.enabledTools.includes(PEOPLE_INTRODUCE)
+  ) {
+    return {
+      decision: 'deny',
+      reasons: ['Use the People introduction tool for proposal-specific consent.'],
+    };
+  }
+
   if (!action.readOnly && !canAcceptBackgroundWork(ctx.lifecycle)) {
     reasons.push(`Agent lifecycle ${ctx.lifecycle} does not accept this work.`);
     return { decision: 'deny', reasons };
@@ -244,7 +290,12 @@ export function evaluateCandidate(
   // knowledge.search is opt-in and must not flip empty-list semantics for other native tools.
   const nativeEnablementTools = ctx.enabledTools.filter((tool) => {
     const channelGrant = channelAction(tool)?.action;
-    return tool !== KNOWLEDGE_SEARCH_TOOL && (!channelGrant || channelGrant.usesProviderGrant);
+    return (
+      tool !== KNOWLEDGE_SEARCH_TOOL &&
+      !isCommitmentTool(tool) &&
+      !peopleGrant.safeParse(tool).success &&
+      (!channelGrant || channelGrant.usesProviderGrant)
+    );
   });
   const toolDenied = isMcp
     ? !mcpGranted
@@ -378,7 +429,11 @@ export async function authorizeAction(
             sql`${runs.expiresAt} > now()`,
           ),
         );
-      const owned = (await (action.type === MEMORY_CAPTURE ? query.for('update') : query)).at(0);
+      const storesInternalRecord =
+        action.type === MEMORY_CAPTURE ||
+        action.type === PEOPLE_INTRODUCE ||
+        isCommitmentTool(action.type);
+      const owned = (await (storesInternalRecord ? query.for('update') : query)).at(0);
       if (!owned) throw new BudgetError('cancelled');
       if (action.type === MEMORY_CAPTURE && memoryCaptureOrigin(current.runOrigin)) {
         const sources = await tx
@@ -393,7 +448,7 @@ export async function authorizeAction(
     }
     const recipients = action.recipients ?? [];
     const consentFailure =
-      action.readOnly || action.type === MEMORY_CAPTURE
+      action.readOnly || action.type === MEMORY_CAPTURE || isCommitmentTool(action.type)
         ? null
         : await recipientConsentFailure(
             tx,

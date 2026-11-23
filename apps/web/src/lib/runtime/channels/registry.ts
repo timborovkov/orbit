@@ -6,7 +6,7 @@ import type { AgentConfig } from '@/lib/runtime/config';
 import { CHANNEL_OUTBOUND_JOB } from '@/lib/runtime/outbound/types';
 
 const channels = new Map<string, ChannelAdapter>();
-const reservedChannelIds = new Set(['channel', 'discovery', 'playground', 'replay']);
+const reservedChannelIds = new Set(['channel', 'commitments', 'discovery', 'playground', 'replay']);
 
 export function registerChannel(adapter: ChannelAdapter) {
   if (
@@ -27,6 +27,15 @@ export function registerChannel(adapter: ChannelAdapter) {
     )
   ) {
     throw new Error('Channel actions must have unique, channel-qualified identifiers.');
+  }
+  if (
+    adapter.followUp &&
+    (adapter.run.mode !== 'draft' ||
+      !adapter.actions?.some(
+        (action) => action.type === adapter.followUp?.actionType && action.alwaysRequiresApproval,
+      ))
+  ) {
+    throw new Error('Channel follow-ups require a draft profile and an approval-required action.');
   }
   channels.set(adapter.id, adapter);
   return () => {

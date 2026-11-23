@@ -49,7 +49,7 @@ bun run test:simulation     # durable simulation persistence
 bun run test:integration    # queue + worker/web enqueue path + simulation persistence
 ```
 
-Queue and integration suites need a migrated `orbit_test` database. Start the worker locally with `bun run --filter @orbit/worker dev` after migrations; it shares `apps/web/src/lib` modules through `@/*`.
+Queue and integration suites need a migrated `orbit_test` database. The integration suite also needs [RustFS and the test bucket](testing/README.md#local-commands). Start the worker locally with `bun run --filter @orbit/worker dev` after migrations; it shares `apps/web/src/lib` modules through `@/*`.
 
 Browser tests use a **disposable `orbit_test` database and truncate its foundation tables**. They do not use the development `orbit` database:
 
