@@ -191,6 +191,7 @@ export default async function AgentWorkspace({
         enabled: enabledTools.has(option.type),
       }))}
       consentRequiredTools={agent.consentRequiredTools}
+      enabledTools={agent.enabledTools}
       consents={consents}
       hasAgentCredential={hasAgentCredential}
       keySource={keySource}

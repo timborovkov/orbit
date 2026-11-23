@@ -34,6 +34,7 @@ export default defineConfig({
     'inbound-email.spec.ts',
     'memory.spec.ts',
     'people.spec.ts',
+    'introductions.spec.ts',
   ],
   workers: 1,
   use: {

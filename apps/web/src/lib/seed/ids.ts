@@ -48,12 +48,14 @@ export const DEMO_INTENTS = {
   sarahEscalateSuspended: '00000000-0000-4000-a400-000000000002',
   mayaIntroduceApproved: '00000000-0000-4000-a400-000000000011',
   mayaIntroducePending: '00000000-0000-4000-a400-000000000012',
+  mayaPeopleIntroduction: '00000000-0000-4000-a400-000000000013',
 } as const;
 
 export const DEMO_POLICY = {
   sarahEscalate: '00000000-0000-4000-a500-000000000001',
   sarahEscalateSuspended: '00000000-0000-4000-a500-000000000002',
   mayaIntroduce: '00000000-0000-4000-a500-000000000011',
+  mayaPeopleIntroduction: '00000000-0000-4000-a500-000000000012',
 } as const;
 
 export const DEMO_AUDIT = {
@@ -100,6 +102,8 @@ export const DEMO_EMAIL = {
 export const DEMO_SOURCE_EVENTS = {
   johnPost1001: '00000000-0000-4000-a900-000000000001',
   johnPost1002: '00000000-0000-4000-a900-000000000002',
+  mayaAlex: '00000000-0000-4000-a900-000000000011',
+  mayaPriya: '00000000-0000-4000-a900-000000000012',
 } as const;
 
 export const DEMO_DISCOVERY_RUNS = {

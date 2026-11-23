@@ -20,7 +20,12 @@ export const consentsModule: SeedModule = {
           actor: DEMO_ACTOR,
         })
         .onConflictDoUpdate({
-          target: [recipientConsents.agentId, recipientConsents.recipient, recipientConsents.scope],
+          target: [
+            recipientConsents.agentId,
+            recipientConsents.recipient,
+            recipientConsents.scope,
+            recipientConsents.introductionId,
+          ],
           set: {
             evidence: row.evidence,
             granted: row.granted,

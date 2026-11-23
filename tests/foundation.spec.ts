@@ -36,7 +36,7 @@ async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 test.beforeEach(async () => {
-  await sql`TRUNCATE agent_memory_evidence_revisions, agent_memories, person_relationship_notes, person_identity_changes, person_link_rejections, person_contacts, person_identities, people, evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, x_reply_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE agent_memory_evidence_revisions, agent_memories, person_relationship_notes, person_identity_changes, person_link_rejections, person_contacts, person_identities, people, evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, introduction_proposals, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, x_reply_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
 });
 test.afterAll(async () => {
@@ -153,6 +153,7 @@ test('private login, persisted workspace, keyboard dialog, themes and screenshot
   await expect(page.getByRole('button', { name: 'Release global pause' })).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Sarah', exact: true })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'Light', exact: true })).toBeChecked();
   await page.getByRole('radio', { name: 'Auto', exact: true }).check();
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(10, 10, 10)');

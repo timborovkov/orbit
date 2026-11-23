@@ -138,6 +138,9 @@ routing edits.
   discovery proposals or delivery change. The approvals browser suite checks
   John’s seeded reply, and the provider unit suite checks the X request format.
   Record hosted delivery separately. See [X replies](../x-discovery-replies.md).
+- Run the [introduction checks](../introductions.md#verify-the-workflow)
+  for changes to proposal consent, disclosure, or approval and dispatch
+  checks. The PostgreSQL scenarios also run in `test:integration`.
 - Run `bun run test:simulation` when simulation persistence, isolation, or shared
   runtime execution changes (requires migrated `orbit_test`).
 - Run `bun run test:knowledge` when knowledge upload/processing, embeddings,

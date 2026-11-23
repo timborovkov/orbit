@@ -39,6 +39,10 @@ dispatch or capture durable memory. The
 [fixture channel integration test](../tests/channel-framework.test.ts) covers
 registration through delivery against PostgreSQL without contacting a provider.
 
+[People introductions](introductions.md) use two decisions tied to the
+proposal. The dispatcher checks the approved disclosure and canonical People
+recipients at the boundary where a delivery adapter would send it.
+
 Draft-mode adapters can expose `followUp` with an approval-required channel
 action and a function that loads an agent-owned conversation from the stored
 anchor. The adapter supplies the drafting input and delivery references from

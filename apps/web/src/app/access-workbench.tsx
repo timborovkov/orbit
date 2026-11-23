@@ -62,6 +62,7 @@ export function AccessWorkbench({
   approvalSpendCents,
   channelActions,
   xAccount,
+  enabledTools,
   enabledCommitmentTools,
   consentRequiredTools,
   consents,
@@ -83,6 +84,7 @@ export function AccessWorkbench({
   approvalOnReject: 'continue' | 'end';
   approvalSpendCents: number | null;
   xAccount: string | null;
+  enabledTools: string[];
   enabledCommitmentTools: CommitmentTool[];
   channelActions: Parameters<typeof ReviewSettings>[0]['channelActions'];
   consentRequiredTools: ConsentScope[];
@@ -165,6 +167,7 @@ export function AccessWorkbench({
         agentId={agentId}
         consentRequiredTools={consentRequiredTools}
         consents={consents}
+        enabledTools={enabledTools}
       />
     ),
     skills: <SkillPicker agentId={agentId} skills={skills} selectedIds={skillIds} />,

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import type { Tx } from '@/lib/db';
 import { type ConsentScope, consentScope } from '@/lib/policy/scopes';
@@ -33,6 +33,7 @@ export async function recipientConsentFailure(
       and(
         eq(recipientConsents.agentId, agentId),
         eq(recipientConsents.scope, scope.data),
+        isNull(recipientConsents.introductionId),
         inArray(recipientConsents.recipient, distinct),
       ),
     );

@@ -30,6 +30,11 @@ a reply in a saved conversation. Activity records the deadline, outcome and
 evidence. A deadline can produce a draft for administrator review. See
 [durable follow-ups](docs/follow-ups.md).
 
+Agents with a People introduction grant can propose matches from their own
+observed profiles. Administrators record each participant’s decision on the
+displayed disclosure. Two agreements prepare a draft for review. See
+[consent-based introductions](docs/introductions.md).
+
 ## Confirmed commitments
 
 Use the Orbit logo, IBM Plex typography, light/dark/automatic appearance and responsive

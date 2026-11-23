@@ -8,6 +8,7 @@ import { lockApprovalAgent } from '@/lib/runtime/approval-work';
 import { channelAction, channelOutboundJobTypes } from '@/lib/runtime/channels/registry';
 import type { ChannelAction } from '@/lib/runtime/channels/types';
 import { RetryableInfrastructureError } from '@/lib/runtime/errors';
+import { introductionDisclosureFailure } from '@/lib/runtime/introductions/disclosure';
 import {
   claimOutboundForSending,
   loadOutboundForDispatch,
@@ -123,6 +124,7 @@ export async function processOutboundJob(
       .where(and(eq(actionIntents.id, row.intentId), eq(actionIntents.agentId, row.agentId)));
     if (
       !intent ||
+      intent.actionType !== row.actionType ||
       (intent.reviewStatus !== null && intent.reviewStatus !== 'approved') ||
       intent.decision !== 'allow' ||
       (handler?.alwaysRequiresApproval && intent.reviewStatus !== 'approved')
@@ -137,6 +139,23 @@ export async function processOutboundJob(
     const delivery = await prepare(tx, row, intent);
     if ('error' in delivery) {
       await block(delivery.error);
+      return null;
+    }
+
+    const disclosureError = await introductionDisclosureFailure(tx, intent, {
+      body: row.body,
+      recipients: delivery.recipients,
+    });
+    if (disclosureError) {
+      await tx.insert(policyDecisions).values({
+        agentId: row.agentId,
+        actionType: row.actionType,
+        intentId: intent.id,
+        actor,
+        decision: 'deny',
+        reasons: [disclosureError],
+      });
+      await block(disclosureError);
       return null;
     }
 
