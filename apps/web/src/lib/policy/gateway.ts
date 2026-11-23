@@ -20,6 +20,7 @@ import { recipientConsentFailure } from '@/lib/policy/consent';
 import { type ExecutionContext, executionContextForOrigin } from '@/lib/policy/execution-context';
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
+import { isWebTool, WEB_CRAWL } from '@/lib/research';
 import { channelAction, channelAdapter, channelForRun } from '@/lib/runtime/channels/registry';
 import { retryableStore } from '@/lib/runtime/errors';
 import { isCommitmentTool } from '@/lib/runtime/follow-ups/types';
@@ -30,6 +31,7 @@ import {
   MEMORY_SEARCH,
   memoryCaptureOrigin,
 } from '@/lib/runtime/memory/types';
+import { crawlAllowed, publicPageUrl } from '@/lib/runtime/research/urls';
 import {
   actionIntents,
   agentMcpConnections,
@@ -52,6 +54,7 @@ export interface CandidateAction {
   idempotencyKey: string;
   /** When true, this is a read-only tool invocation rather than an external write. */
   readOnly?: boolean;
+  webCrawlUrl?: string;
   recipients?: string[];
   preliminary?: boolean;
   executionToken?: string;
@@ -69,6 +72,7 @@ export interface PolicyContext {
   hasMemoryEvidence?: boolean;
   lifecycle: LifecycleState;
   enabledTools: string[];
+  webCrawlScopes?: string[];
   approvalTools: string[];
   approvalSpendCents: number | null;
   approvalExpiresAfterHours: number | null;
@@ -82,6 +86,7 @@ export interface PolicyResult {
   decision: PolicyDecision;
   reasons: string[];
   intentId: string;
+  created?: boolean;
   payload?: Record<string, unknown>;
   violation?: BudgetViolation;
 }
@@ -156,6 +161,7 @@ export async function loadPolicyContext(
     runChannel: runRow && channelForRun(runRow)?.id,
     lifecycle: agent.lifecycle,
     enabledTools: Array.isArray(agent.enabledTools) ? agent.enabledTools : [],
+    webCrawlScopes: agent.webCrawlScopes,
     approvalTools: mergeApprovalTools(approval.approvalTools, global?.approvalTools),
     approvalSpendCents: approval.approvalSpendCents,
     approvalExpiresAfterHours: approval.approvalExpiresAfterHours,
@@ -276,6 +282,26 @@ export function evaluateCandidate(
     return { decision: 'deny', reasons };
   }
 
+  const web = isWebTool(action.type);
+  if (
+    web &&
+    (!action.readOnly ||
+      !ctx.runId ||
+      !ctx.runOrigin ||
+      !action.executionToken ||
+      ctx.executionContext === 'replay')
+  ) {
+    return { decision: 'deny', reasons: ['Web research requires an active authorised run.'] };
+  }
+  if (action.type === WEB_CRAWL && ctx.enabledTools.includes(WEB_CRAWL)) {
+    const seed = publicPageUrl(action.webCrawlUrl ?? '');
+    if (!seed || !crawlAllowed(seed, ctx.webCrawlScopes ?? [])) {
+      return {
+        decision: 'deny',
+        reasons: ['The crawl URL is outside this agent’s approved scope.'],
+      };
+    }
+  }
   const isMcp = action.type.startsWith('mcp:');
   const registered = channelAction(action.type);
   if (registered && ctx.executionContext !== 'replay' && registered.channel !== ctx.runChannel) {
@@ -292,6 +318,7 @@ export function evaluateCandidate(
   const nativeEnablementTools = ctx.enabledTools.filter((tool) => {
     const channelGrant = channelAction(tool)?.action;
     return (
+      !isWebTool(tool) &&
       tool !== KNOWLEDGE_SEARCH_TOOL &&
       !isCommitmentTool(tool) &&
       !peopleGrant.safeParse(tool).success &&
@@ -302,8 +329,8 @@ export function evaluateCandidate(
     ? !mcpGranted
     : action.type === 'load_skill'
       ? false
-      : action.type === KNOWLEDGE_SEARCH_TOOL
-        ? !ctx.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)
+      : web || action.type === KNOWLEDGE_SEARCH_TOOL
+        ? !ctx.enabledTools.includes(action.type)
         : (!registered || registered.action.usesProviderGrant) &&
           nativeEnablementTools.length > 0 &&
           !nativeEnablementTools.includes(action.type);
@@ -321,7 +348,8 @@ export function evaluateCandidate(
     },
     month: ctx.usage.month,
     // A search inside an already admitted run does not open another concurrency slot.
-    activeRuns: ctx.runId && action.type === KNOWLEDGE_SEARCH_TOOL ? 0 : ctx.usage.activeRuns,
+    activeRuns:
+      ctx.runId && (web || action.type === KNOWLEDGE_SEARCH_TOOL) ? 0 : ctx.usage.activeRuns,
   };
 
   if (!action.readOnly) {
@@ -388,7 +416,7 @@ export function evaluateCandidate(
   const inRunTool = action.type === 'load_skill' || isMcp;
   const requestLimit = inRunTool
     ? checkRequestBudgets(snapshot, BigInt(0), 0, { checkSpend: false })
-    : checkRequestBudgets(snapshot);
+    : checkRequestBudgets(snapshot, BigInt(0), 1, { checkSpend: !web });
   if (requestLimit) {
     reasons.push(budgetViolationMessage(requestLimit));
     return { decision: 'deny', reasons, violation: requestLimit };
@@ -547,6 +575,18 @@ export async function authorizeAction(
       };
     }
 
+    // Firecrawl requests use the existing request counters. Crawl page usage is reserved
+    // separately by the crawl admission transaction and OpenRouter spend is independent.
+    if (isWebTool(action.type) && evaluated.decision === 'allow') {
+      await recordRequestUsage(
+        tx,
+        ctx.agentId,
+        new Date().toISOString().slice(0, 10),
+        BigInt(0),
+        1,
+      );
+    }
+
     const reviewExpiresAt =
       evaluated.decision === 'needs-approval' && current.approvalExpiresAfterHours
         ? new Date(Date.now() + current.approvalExpiresAfterHours * 60 * 60 * 1000)
@@ -595,6 +635,7 @@ export async function authorizeAction(
       decision: evaluated.decision,
       reasons: evaluated.reasons,
       intentId: intent.id,
+      created: true,
       payload: intent.payload,
       violation: evaluated.violation,
     };

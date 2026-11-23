@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests',
   outputDir: './test-results/openrouter-env',
-  testMatch: ['access-env.spec.ts', 'shared-knowledge.spec.ts'],
+  testMatch: ['access-env.spec.ts', 'shared-knowledge.spec.ts', 'web-research.spec.ts'],
   workers: 1,
   use: {
     baseURL: 'http://localhost:3003',
@@ -27,6 +27,8 @@ export default defineConfig({
       S3_SECRET_ACCESS_KEY: 'orbit_local_storage_only',
       ORBIT_ENCRYPTION_KEY: 'a'.repeat(64),
       OPENROUTER_API_KEY: 'test-only-env-default-never-use',
+      FIRECRAWL_API_KEY: '',
+      FIRECRAWL_API_ORIGIN: 'https://api.firecrawl.dev',
       KNOWLEDGE_EMBEDDING_STUB: 'true',
       ORBIT_ADMIN_EMAIL: 'admin@example.com',
       ORBIT_ADMIN_PASSWORD: 'test-only-password-123456',

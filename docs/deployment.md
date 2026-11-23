@@ -28,7 +28,7 @@ docker build -f docker/worker.Dockerfile -t orbit-worker .
 
 `NEXT_PUBLIC_SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` are inlined into the browser bundle at image build. Unset, browser Sentry stays off. Setting them only on the running web container cannot enable capture. Compose forwards them from the host env as web build args. Railway injects matching service variables because the Dockerfile declares those `ARG` names. Server-side Sentry still uses runtime `SENTRY_DSN` on web and worker.
 
-The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker claims simulation and knowledge-processing jobs, heartbeats leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
+The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker heartbeats queue leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
 
 The Dockerfiles use the base image's trust store for dependency installation. Railway's Docker builder does not support BuildKit secret mounts.
 
@@ -56,8 +56,9 @@ Configure these server-only variables on the Railway web and worker services:
 From a trusted source checkout with provisioning credentials, run
 `bun run storage:setup` once. It creates a private bucket if absent; it does not
 change existing bucket policies. Keep anonymous access disabled. The running web
-service needs GetObject, PutObject and DeleteObject on `agents/*`. The worker only needs
-GetObject on `agents/*/knowledge/*`. HeadBucket/CreateBucket are needed only by the
+service needs GetObject, PutObject and DeleteObject on `agents/*` and
+`knowledge-libraries/*`. The worker needs GetObject on `agents/*/knowledge/*`
+and `knowledge-libraries/*`. HeadBucket and CreateBucket are needed only by the
 provisioning script. Migrations apply on deploy/start for both services. If overriding
 `KNOWLEDGE_EMBEDDING_MODEL`, set the same value on both services and reprocess existing
 documents. The configured vector width must be 1536.
@@ -70,8 +71,10 @@ keys. Avoid `docker compose down -v` unless intentionally deleting local data.
 Replacement/removal deletes the previous object after committing its new database
 reference. Failed deletions produce an audit entry containing the object key for
 manual cleanup. A process crash between object upload and database commit can leave
-an unreferenced object; reconcile `agents/*/pictures/*` against `agents.picture_key`
-and `agents/*/knowledge/*` against `knowledge_documents.object_key` before deleting orphans.
+an unreferenced object. Reconcile `agents/*/pictures/*` against `agents.picture_key`
+before deleting orphaned pictures. For orphaned documents, check both
+`agents/*/knowledge/*` and `knowledge-libraries/*` against
+`knowledge_documents.object_key`.
 
 ## Runtime telemetry
 
@@ -124,3 +127,31 @@ real delivery when keys are present.
 For rollback, disable webhook delivery first. Drain pending email drafts and
 `email.send` jobs or pause the email-enabled agents. Keep the additive migrations
 and the stored mail. Older worker builds ignore unknown job types.
+
+## Firecrawl web research
+
+Set the same server-only `FIRECRAWL_API_ORIGIN` and optional
+`FIRECRAWL_API_KEY` on web and worker. The origin defaults to
+`https://api.firecrawl.dev`. For Firecrawl Local, use a trusted HTTP(S) origin
+reachable from the worker. `http://127.0.0.1:3002` works when Firecrawl Local
+listens in the worker’s network namespace.
+
+In **Access → Web research**, independently enable search, page reads or
+crawls. An encrypted Firecrawl key saved there takes precedence over the
+deployment default. For crawl access, enter an approved public origin or path
+prefix per line, or use `*` to approve any public site. Each crawl stays scoped
+to its seed site and path. Orbit defaults to 10 pages and depth 1, with maxima
+of 25 pages and depth 3, one active crawl and 100 reserved pages per agent per
+UTC day. A crawl has a ten-minute polling deadline followed by a bounded
+cancellation attempt.
+
+Firecrawl Local can read and crawl without a key in public-only serve mode.
+Search forwards to Firecrawl Cloud. Set `FIRECRAWL_CLOUD=off` on the Local
+process for local-only operation. This also disables the Cloud fallback for
+blocked reads, and Orbit reports search as unavailable. [Firecrawl Local documentation](https://docs.firecrawl.dev/quickstarts/firecrawl-local#what-runs-where)
+
+Check **History → Activity** for progress, cited pages and cancellation. Orbit
+resumes saved jobs after a worker restart. When Firecrawl Local loses an
+in-memory job, Activity records the failure for an operator to review. Import
+eligible saved pages from Activity into a selected shared Knowledge library.
+Shared indexing uses the workspace OpenRouter key and private object storage.

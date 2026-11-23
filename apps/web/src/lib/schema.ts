@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
@@ -12,6 +13,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   vector,
 } from 'drizzle-orm/pg-core';
@@ -21,6 +23,7 @@ import type { KnowledgeContentKind, KnowledgeDocumentStatus } from '@/lib/knowle
 import type { LifecycleState } from '@/lib/lifecycle';
 import type { McpToolAllowlistJson } from '@/lib/mcp-allowlist';
 import type { ConsentScope } from '@/lib/policy/scopes';
+import type { CrawlStatus, WebTool } from '@/lib/research';
 import type { AgentConfig } from '@/lib/runtime/config';
 import type {
   FollowUpOutcomeKind,
@@ -84,6 +87,7 @@ export const agents = pgTable('agents', {
     .notNull()
     .default(1),
   memoryNextMaintenanceAt: timestamp('memory_next_maintenance_at', { withTimezone: true }),
+  webCrawlScopes: jsonb('web_crawl_scopes').$type<string[]>().notNull().default([]),
   enabledTools: jsonb('enabled_tools').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -139,6 +143,13 @@ export const xReplyCredentials = pgTable('x_reply_credentials', {
   userId: text('user_id').notNull().unique(),
   username: text('username').notNull(),
   encryptedToken: text('encrypted_token').notNull(),
+});
+
+export const firecrawlCredentials = pgTable('agent_firecrawl_credentials', {
+  agentId: uuid('agent_id')
+    .primaryKey()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  encryptedKey: text('encrypted_key').notNull(),
 });
 
 export const jobs = pgTable('jobs', {
@@ -538,27 +549,107 @@ export const knowledgeLibraryGrants = pgTable(
   (table) => [primaryKey({ columns: [table.libraryId, table.agentId] })],
 );
 
-export const knowledgeDocuments = pgTable('knowledge_documents', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
-  libraryId: uuid('library_id').references(() => knowledgeLibraries.id),
-  filename: text('filename').notNull(),
-  title: text('title').notNull(),
-  contentKind: text('content_kind').$type<KnowledgeContentKind>().notNull(),
-  mimeType: text('mime_type').notNull(),
-  byteSize: integer('byte_size').notNull(),
-  objectKey: text('object_key').notNull(),
-  revision: uuid('revision').defaultRandom().notNull(),
-  processingToken: uuid('processing_token'),
-  status: text('status').$type<KnowledgeDocumentStatus>().notNull().default('pending'),
-  error: text('error'),
-  chunkCount: integer('chunk_count').notNull().default(0),
-  embeddedCount: integer('embedded_count').notNull().default(0),
-  contentHash: text('content_hash'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  processedAt: timestamp('processed_at', { withTimezone: true }),
-});
+export const webCrawls = pgTable(
+  'web_crawls',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    agentId: uuid('agent_id').notNull(),
+    runId: uuid('run_id').notNull(),
+    intentId: uuid('intent_id')
+      .notNull()
+      .unique()
+      .references(() => actionIntents.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id').references(() => jobs.id),
+    seedUrl: text('seed_url').notNull(),
+    originHash: text('origin_hash').notNull(),
+    providerJobId: text('provider_job_id'),
+    pageLimit: integer('page_limit').notNull(),
+    depthLimit: integer('depth_limit').notNull(),
+    status: text('status').$type<CrawlStatus>().notNull().default('queued'),
+    completedPages: integer('completed_pages').notNull().default(0),
+    discoveredPages: integer('discovered_pages').notNull().default(0),
+    creditsUsed: integer('credits_used'),
+    cursor: integer('cursor').notNull().default(0),
+    pollRequests: integer('poll_requests').notNull().default(0),
+    cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
+    cancellationSentAt: timestamp('cancellation_sent_at', { withTimezone: true }),
+    reason: text('reason'),
+    deadline: timestamp('deadline', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      name: 'web_crawls_owned_run_fk',
+      columns: [table.agentId, table.runId],
+      foreignColumns: [runs.agentId, runs.id],
+    }).onDelete('cascade'),
+    index('web_crawls_agent_created_idx').on(table.agentId, table.createdAt),
+    uniqueIndex('web_crawls_one_active_idx')
+      .on(table.agentId)
+      .where(sql`status IN ('queued','submitting','running','cancelling')`),
+  ],
+);
+
+export const webCitations = pgTable(
+  'web_citations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    agentId: uuid('agent_id').notNull(),
+    runId: uuid('run_id').notNull(),
+    intentId: uuid('intent_id')
+      .notNull()
+      .references(() => actionIntents.id, { onDelete: 'cascade' }),
+    crawlId: uuid('crawl_id').references(() => webCrawls.id, { onDelete: 'cascade' }),
+    tool: text('tool').$type<WebTool>().notNull(),
+    rank: integer('rank').notNull(),
+    url: text('url').notNull(),
+    title: text('title').notNull(),
+    excerpt: text('excerpt').notNull(),
+    content: text('content'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'web_citations_owned_run_fk',
+      columns: [table.agentId, table.runId],
+      foreignColumns: [runs.agentId, runs.id],
+    }).onDelete('cascade'),
+    unique('web_citations_intent_url_unique').on(table.intentId, table.url),
+    index('web_citations_run_idx').on(table.agentId, table.runId),
+  ],
+);
+
+export const knowledgeDocuments = pgTable(
+  'knowledge_documents',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
+    libraryId: uuid('library_id').references(() => knowledgeLibraries.id),
+    webCitationId: uuid('web_citation_id').references(() => webCitations.id, {
+      onDelete: 'set null',
+    }),
+    filename: text('filename').notNull(),
+    title: text('title').notNull(),
+    contentKind: text('content_kind').$type<KnowledgeContentKind>().notNull(),
+    mimeType: text('mime_type').notNull(),
+    byteSize: integer('byte_size').notNull(),
+    objectKey: text('object_key').notNull(),
+    revision: uuid('revision').defaultRandom().notNull(),
+    processingToken: uuid('processing_token'),
+    status: text('status').$type<KnowledgeDocumentStatus>().notNull().default('pending'),
+    error: text('error'),
+    chunkCount: integer('chunk_count').notNull().default(0),
+    embeddedCount: integer('embedded_count').notNull().default(0),
+    contentHash: text('content_hash'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+  },
+  (table) => [
+    unique('knowledge_documents_web_import_unique').on(table.libraryId, table.webCitationId),
+  ],
+);
 
 export const knowledgeChunks = pgTable(
   'knowledge_chunks',

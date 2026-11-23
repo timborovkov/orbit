@@ -146,6 +146,12 @@ routing edits.
 - Run `bun run test:knowledge` when knowledge upload/processing, embeddings,
   hybrid search or `knowledge.search` policy wiring changes (requires migrated
   `orbit_test` with pgvector and RustFS; embeddings may be stubbed).
+- For Firecrawl routing, credentials, grants or crawl recovery, run
+  `bun test tests/unit/firecrawl.test.ts` and
+  `bun test tests/firecrawl-integration.test.ts` against migrated `orbit_test`.
+  After a production build, run
+  `bunx playwright test --config playwright.openrouter-env.config.ts tests/web-research.spec.ts`
+  for Access, Activity and shared Knowledge import.
 - Run `bun run test:e2e` after a production build when UI flows, auth sessions,
   accessibility, or profile-picture storage change (requires `orbit_test` and
   RustFS for picture tests).

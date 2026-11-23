@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { ChevronDown, History } from 'lucide-react';
 
 import { type ActivityEventRow, ActivityTimeline } from '@/app/activity-timeline';
+import { ResearchActivity, type WebResearchActivity } from '@/app/research-activity';
 import { RunContent } from '@/app/run-content';
 import { SaveRunCaseForm } from '@/app/save-evaluation-case-form';
 import { formatUtcTimestamp } from '@/lib/format';
@@ -16,6 +17,7 @@ export function HistoryWorkbench({
   history,
   versions,
   activityEvents,
+  webResearch,
   focusRunId,
   versionFor,
 }: {
@@ -23,6 +25,7 @@ export function HistoryWorkbench({
   history: WorkspaceHistory;
   versions: WorkspaceVersions;
   activityEvents: ActivityEventRow[];
+  webResearch: WebResearchActivity;
   focusRunId?: string;
   versionFor: (configurationId: string) => number | string;
 }) {
@@ -85,6 +88,12 @@ export function HistoryWorkbench({
                 run={run}
                 interrupted={run.interrupted}
                 preferDraftAnswer={run.preferDraftAnswer}
+              />
+              <ResearchActivity
+                agentId={agentId}
+                libraries={webResearch.libraries}
+                crawls={webResearch.crawls.filter((item) => item.runId === run.id)}
+                citations={webResearch.citations.filter((item) => item.runId === run.id)}
               />
               {run.status === 'completed' && (
                 <SaveRunCaseForm

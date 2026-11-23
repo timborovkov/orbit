@@ -24,6 +24,10 @@ eligible X connection and an administrator’s channel grant, Live agents can re
 to eligible discovered posts. Administrators can require a review for each reply.
 Shadow agents keep editable proposals. The console shows recorded provider
 outcomes. See [replies to discovered X posts](docs/x-discovery-replies.md).
+Firecrawl provides independently granted web search, page reads and bounded crawls.
+Operators inspect progress and citations in Activity and can explicitly import
+saved pages into a shared Knowledge library. Provider activity, availability and
+successful actions displayed in the console come from recorded results.
 
 Administrators can grant an agent permission to schedule a follow-up or wait for
 a reply in a saved conversation. Activity records the deadline, outcome and

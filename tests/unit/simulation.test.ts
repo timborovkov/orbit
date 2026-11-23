@@ -10,6 +10,7 @@ import { decryptCredential, encryptCredential } from '@/lib/runtime/secrets';
 import {
   captureAndRelationshipDecisionSchema,
   captureDecisionSchema,
+  groundedAnswerFromResult,
   hasSimulationProgress,
   memoryGroundedDecisionSchema,
   type ModelCall,
@@ -847,6 +848,116 @@ test('memory response fields are required in the provider schemas and accept emp
       memoryCitations: [],
     }).memoryCitations,
   ).toEqual([]);
+  expect(
+    memoryGroundedDecisionSchema.parse({
+      ...decision,
+      answer: null,
+      citations: [],
+      memoryCitations: [],
+    }).webCitations,
+  ).toEqual([]);
+});
+
+test('web-only retrieval preserves a cited answer for Playground rendering', async () => {
+  const result = await simulate(
+    config,
+    'What does the public documentation say?',
+    async (request) => {
+      if (request.stage === 'main') {
+        expect(request.grounded).toBe(true);
+        expect(request.useMemory).toBe(true);
+        expect(request.maxToolSteps).toBe(4);
+        expect(Object.keys(request.tools ?? {})).toEqual(
+          expect.arrayContaining(['web_search', 'web_read']),
+        );
+        return {
+          decision: {
+            ...decision,
+            answer: 'The docs describe the public API.',
+            citations: [],
+            memoryCitations: [],
+            webCitations: [1],
+          },
+          inputTokens: 1,
+          outputTokens: 1,
+        };
+      }
+      return { decision, inputTokens: 1, outputTokens: 1 };
+    },
+    async () => {},
+    {
+      maxToolSteps: 4,
+      retrievalTools: (partial) => {
+        partial.web = {
+          sources: [
+            {
+              url: 'https://example.com/docs',
+              title: 'Public docs',
+              excerpt: 'Describes the public API.',
+            },
+          ],
+        };
+        return {
+          web_search: { description: 'search' } as never,
+          web_read: { description: 'read' } as never,
+        };
+      },
+    },
+  );
+  expect(result.web?.sources).toHaveLength(1);
+  expect(result.steps.find((step) => step.stage === 'main')?.decision).toMatchObject({
+    answer: 'The docs describe the public API.',
+    webCitations: [1],
+  });
+  expect(groundedAnswerFromResult(result)).toEqual({
+    answer: 'The docs describe the public API.',
+    sources: [],
+    memories: [],
+    webSources: [
+      {
+        id: 1,
+        url: 'https://example.com/docs',
+        title: 'Public docs',
+        excerpt: 'Describes the public API.',
+      },
+    ],
+  });
+});
+
+test('web retrieval tools receive the full tool-step budget', async () => {
+  let mainSteps: number | undefined;
+  await simulate(
+    config,
+    'Research then read',
+    async (request) => {
+      if (request.stage === 'main') mainSteps = request.maxToolSteps;
+      return { decision, inputTokens: 1, outputTokens: 1 };
+    },
+    async () => {},
+    {
+      maxToolSteps: 6,
+      retrievalTools: () => ({ web_search: { description: 'search' } as never }),
+    },
+  );
+  expect(mainSteps).toBe(6);
+});
+
+test('memory-only retrieval stays capped at one provider tool step', async () => {
+  let mainSteps: number | undefined;
+  await simulate(
+    config,
+    'Recall a fact',
+    async (request) => {
+      if (request.stage === 'main') mainSteps = request.maxToolSteps;
+      return { decision, inputTokens: 1, outputTokens: 1 };
+    },
+    async () => {},
+    {
+      maxToolSteps: 6,
+      retrievalTools: () => ({ search_memory: { description: 'memory' } as never }),
+    },
+  );
+  expect(mainSteps).toBe(1);
 });
 
 test('OpenRouter costMicros stays unknown unless every step has cost metadata', async () => {

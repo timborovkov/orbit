@@ -19,6 +19,7 @@ import {
 
 import { KnowledgeToolResult } from '@/app/knowledge-citations';
 import { MemoryToolResult } from '@/app/memory-citations';
+import { WebToolResult } from '@/app/web-citations';
 import {
   Conversation,
   ConversationContent,
@@ -484,6 +485,14 @@ function PlaygroundReasoningPart({ text, state }: { text: string; state?: 'strea
   );
 }
 
+function specializedToolResult(agentId: string, type: string, output: unknown) {
+  if (type === 'tool-knowledge.search')
+    return <KnowledgeToolResult agentId={agentId} output={output} />;
+  if (type === 'tool-memory.search') return <MemoryToolResult agentId={agentId} output={output} />;
+  if (type === 'tool-web.sources') return <WebToolResult output={output} />;
+  return null;
+}
+
 function PlaygroundToolPart({
   agentId,
   part,
@@ -494,12 +503,9 @@ function PlaygroundToolPart({
     { type: `tool-${string}` } | { type: 'dynamic-tool' }
   >;
 }) {
-  if ('output' in part) {
-    if (part.type === 'tool-knowledge.search')
-      return <KnowledgeToolResult agentId={agentId} output={part.output} />;
-    if (part.type === 'tool-memory.search')
-      return <MemoryToolResult agentId={agentId} output={part.output} />;
-  }
+  const specialized =
+    'output' in part ? specializedToolResult(agentId, part.type, part.output) : null;
+  if (specialized) return specialized;
   const title = part.type.replace(/^tool-/, '');
   const toolType: `tool-${string}` =
     part.type === 'dynamic-tool' ? `tool-${title || 'action'}` : part.type;
