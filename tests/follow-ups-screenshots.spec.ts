@@ -94,7 +94,9 @@ async function scheduleFollowUp(page: Page, subject: string, minutesAhead = 120)
   await expect(page.getByRole('heading', { name: 'Schedule a follow-up' })).toBeVisible();
   await page.getByLabel(/^Subject/).fill(subject);
   await page.getByLabel(/^Due/).fill(dueLocalInMinutes(minutesAhead));
-  await page.getByRole('textbox', { name: 'Note', exact: true }).fill('Screenshot note — internal only.');
+  await page
+    .getByRole('textbox', { name: 'Note', exact: true })
+    .fill('Screenshot note — internal only.');
   await page.getByRole('button', { name: 'Schedule follow-up', exact: true }).click();
   await expect(page.getByText(subject, { exact: true }).first()).toBeVisible({ timeout: 15000 });
 }
