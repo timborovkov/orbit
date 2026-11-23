@@ -14,6 +14,8 @@ import {
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
 import { channelAction } from '@/lib/runtime/channels/registry';
+import { introductionDisclosureFailure } from '@/lib/runtime/introductions/disclosure';
+import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
 import { enqueueOutbound } from '@/lib/runtime/outbound/dispatch';
 import { recordApprovalDecision } from '@/lib/runtime/telemetry';
 import { actionIntents, agents, audit, policyDecisions, recipientConsents } from '@/lib/schema';
@@ -62,7 +64,12 @@ export async function recordConsent(input: {
       .insert(recipientConsents)
       .values(input)
       .onConflictDoUpdate({
-        target: [recipientConsents.agentId, recipientConsents.recipient, recipientConsents.scope],
+        target: [
+          recipientConsents.agentId,
+          recipientConsents.recipient,
+          recipientConsents.scope,
+          recipientConsents.introductionId,
+        ],
         set: { granted, evidence, actor, updatedAt: new Date() },
       });
     await tx.insert(audit).values({
@@ -140,7 +147,23 @@ export async function reviewProposedAction(
         ? { ...intent.payload, ...options.editedPayload }
         : intent.payload;
     let approvalDecision: 'allow' | 'suppressed' = 'suppressed';
-    if (approved) {
+    if (approved && intent.actionType === INTRODUCTION_REVIEW) {
+      if (options.editedPayload) {
+        return { error: 'Changing the draft requires a new introduction and fresh consent.' };
+      }
+      const error = await introductionDisclosureFailure(tx, intent);
+      if (error) {
+        await tx.insert(policyDecisions).values({
+          agentId,
+          intentId,
+          actionType: intent.actionType,
+          decision: 'deny',
+          reasons: [error],
+          actor,
+        });
+        return { error };
+      }
+    } else if (approved) {
       const ctx = await loadPolicyContext(agentId, actor, intent.runId, tx);
       if (!ctx) return { error: 'Agent not found.' };
       const consent = await recipientConsentFailure(

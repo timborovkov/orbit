@@ -20,8 +20,9 @@ import { recipientConsentFailure } from '@/lib/policy/consent';
 import { type ExecutionContext, executionContextForOrigin } from '@/lib/policy/execution-context';
 import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
-import { channelAction, channelForRun } from '@/lib/runtime/channels/registry';
+import { channelAction, channelAdapter, channelForRun } from '@/lib/runtime/channels/registry';
 import { retryableStore } from '@/lib/runtime/errors';
+import { PEOPLE_INTRODUCE, peopleGrant } from '@/lib/runtime/introductions/types';
 import {
   HISTORY_SEARCH,
   MEMORY_CAPTURE,
@@ -202,6 +203,22 @@ export function evaluateCandidate(
     return { decision: 'deny', reasons };
   }
 
+  if (peopleGrant.safeParse(action.type).success) {
+    if (!ctx.runId || !ctx.runOrigin || !action.executionToken) {
+      return { decision: 'deny', reasons: ['People tools require an owned run.'] };
+    }
+    if (!ctx.enabledTools.includes(action.type)) {
+      return { decision: 'deny', reasons: [`Tool ${action.type} is not enabled for this agent.`] };
+    }
+    if (
+      action.type === PEOPLE_INTRODUCE &&
+      (ctx.executionContext === 'replay' || channelAdapter(ctx.runChannel)?.run.mode === 'draft')
+    ) {
+      return { decision: 'deny', reasons: ['This run can read People profiles only.'] };
+    }
+    return { decision: 'allow', reasons: ['People tool permitted for this agent.'] };
+  }
+
   // Internal memory operations are tied to a persisted, owned run. Capture does
   // not dispatch outbound actions or change any configuration or permissions.
   if (
@@ -244,7 +261,11 @@ export function evaluateCandidate(
   // knowledge.search is opt-in and must not flip empty-list semantics for other native tools.
   const nativeEnablementTools = ctx.enabledTools.filter((tool) => {
     const channelGrant = channelAction(tool)?.action;
-    return tool !== KNOWLEDGE_SEARCH_TOOL && (!channelGrant || channelGrant.usesProviderGrant);
+    return (
+      tool !== KNOWLEDGE_SEARCH_TOOL &&
+      !peopleGrant.safeParse(tool).success &&
+      (!channelGrant || channelGrant.usesProviderGrant)
+    );
   });
   const toolDenied = isMcp
     ? !mcpGranted
@@ -378,7 +399,9 @@ export async function authorizeAction(
             sql`${runs.expiresAt} > now()`,
           ),
         );
-      const owned = (await (action.type === MEMORY_CAPTURE ? query.for('update') : query)).at(0);
+      const storesInternalRecord =
+        action.type === MEMORY_CAPTURE || action.type === PEOPLE_INTRODUCE;
+      const owned = (await (storesInternalRecord ? query.for('update') : query)).at(0);
       if (!owned) throw new BudgetError('cancelled');
       if (action.type === MEMORY_CAPTURE && memoryCaptureOrigin(current.runOrigin)) {
         const sources = await tx

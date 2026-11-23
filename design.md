@@ -414,6 +414,24 @@ overflow, and automated accessibility in both themes at 390px.
 Chromium also verified the structured Company correction, the return from
 Memory to the agent’s People view, and the fact’s placement after unlinking.
 
+### Introductions
+
+Open Introductions from People. Use the same list and detail layout. Each
+proposal shows its originating agent and run, the reason for the match, and
+two independently labelled consent cards. Stack the cards on narrow screens.
+Show each person’s display name and blurb beside the name of the person who
+would receive them. Record an explicit decision and evidence reference for
+each person. Keep a revocation action available after agreement.
+
+The second agreement creates a read-only draft in Approvals with a link back
+to the disclosure and consent. If a person revokes an agreement after
+approval, show Blocked on the proposal and preserve the approval decision in
+history. Configure People tool grants in Access → Consent.
+
+Playwright recorded the first agreement at 1440px, then exercised drafting,
+approval, and revocation at 390px. It checked for horizontal overflow and ran
+automated accessibility checks on the draft view at 390px.
+
 ## Workspace libraries and approvals
 
 Templates are flat disclosure rows with title, role and revision. Expanded rows

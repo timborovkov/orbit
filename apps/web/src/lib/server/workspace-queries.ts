@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { budgetViolationMessage, parseBudgets } from '@/lib/budgets';
@@ -18,6 +18,7 @@ import {
   configurations,
   controls,
   credentials,
+  introductionProposals,
   jobs,
   personIdentities,
   recipientConsents,
@@ -63,7 +64,9 @@ async function loadOverviewData() {
 export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: string) {
   await requireAdmin();
   const agentFilter = filterAgentId ? eq(actionIntents.agentId, filterAgentId) : undefined;
-  const runFilter = filterRunId ? eq(actionIntents.runId, filterRunId) : undefined;
+  const runFilter = filterRunId
+    ? or(eq(actionIntents.runId, filterRunId), eq(introductionProposals.runId, filterRunId))
+    : undefined;
   const [team, items, pending, pendingTotal] = await Promise.all([
     db().select({ id: agents.id, name: agents.name }).from(agents).orderBy(asc(agents.name)),
     db()
@@ -71,7 +74,8 @@ export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: st
         id: actionIntents.id,
         agentId: actionIntents.agentId,
         agentName: agents.name,
-        runId: actionIntents.runId,
+        runId: sql<string | null>`coalesce(${actionIntents.runId}, ${introductionProposals.runId})`,
+        introductionId: introductionProposals.id,
         actionType: actionIntents.actionType,
         draft: sql<string | null>`${actionIntents.payload}->>'draft'`,
         reason: sql<string | null>`${actionIntents.payload}->>'reason'`,
@@ -85,12 +89,14 @@ export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: st
       })
       .from(actionIntents)
       .innerJoin(agents, eq(agents.id, actionIntents.agentId))
+      .leftJoin(introductionProposals, eq(introductionProposals.reviewIntentId, actionIntents.id))
       .where(and(isNotNull(actionIntents.reviewStatus), agentFilter, runFilter))
       .orderBy(sql`(${actionIntents.reviewStatus} = 'pending') DESC`, desc(actionIntents.createdAt))
       .limit(100),
     db()
       .select({ count: sql<number>`count(*)::int` })
       .from(actionIntents)
+      .leftJoin(introductionProposals, eq(introductionProposals.reviewIntentId, actionIntents.id))
       .where(and(eq(actionIntents.reviewStatus, 'pending'), agentFilter, runFilter)),
     countPendingApprovals(),
   ]);
@@ -169,8 +175,10 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
         status: actionIntents.reviewStatus,
         createdAt: actionIntents.createdAt,
         reviewedBy: actionIntents.reviewedBy,
+        introductionId: introductionProposals.id,
       })
       .from(actionIntents)
+      .leftJoin(introductionProposals, eq(introductionProposals.reviewIntentId, actionIntents.id))
       .where(and(eq(actionIntents.agentId, id), isNotNull(actionIntents.reviewStatus)))
       .orderBy(sql`(${actionIntents.reviewStatus} = 'pending') DESC`, desc(actionIntents.createdAt))
       .limit(50),
@@ -182,7 +190,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
         granted: recipientConsents.granted,
       })
       .from(recipientConsents)
-      .where(eq(recipientConsents.agentId, id))
+      .where(and(eq(recipientConsents.agentId, id), isNull(recipientConsents.introductionId)))
       .orderBy(desc(recipientConsents.updatedAt))
       .limit(50),
     db().select().from(usageCounters).where(eq(usageCounters.agentId, id)),
