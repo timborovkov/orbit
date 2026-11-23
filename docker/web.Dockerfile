@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.4-debian AS manifests
+FROM oven/bun:1.4.5-debian AS manifests
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/web/package.json apps/web/package.json
