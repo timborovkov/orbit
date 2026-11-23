@@ -27,7 +27,7 @@ import { agents, jobs, webCrawls } from '@/lib/schema';
 
 type Crawl = typeof webCrawls.$inferSelect;
 const pollIntervalMs = 5_000;
-const cleanupGraceMs = 45_000;
+export const crawlCleanupGraceMs = 45_000;
 const maxStatusRequests = 150;
 const timeoutReason = 'The crawl reached its time or polling limit.';
 const ambiguousReason =
@@ -36,6 +36,19 @@ const ambiguousReason =
 function originHash(origin: string) {
   // A queued job must never be sent to a different instance after a deployment change.
   return createHash('sha256').update(origin).digest('hex');
+}
+
+/**
+ * Cleanup grace starts when provider cancellation is first sent, not when pause/stop
+ * or access revocation timestamps the request. That guarantees at least one cancel
+ * attempt even if the worker was busy for longer than the grace window.
+ */
+export function crawlCleanupExpired(
+  crawl: Pick<Crawl, 'cancellationSentAt'>,
+  now = Date.now(),
+  graceMs = crawlCleanupGraceMs,
+) {
+  return Boolean(crawl.cancellationSentAt && now >= crawl.cancellationSentAt.getTime() + graceMs);
 }
 
 export async function enqueueWebCrawl(
@@ -211,7 +224,7 @@ async function prepare(tx: Tx, crawl: Crawl, agent: typeof agents.$inferSelect) 
   }
   if (status === 'cancelling') {
     const requestedAt = crawl.cancelRequestedAt ?? new Date();
-    if (Date.now() >= requestedAt.getTime() + cleanupGraceMs) {
+    if (crawlCleanupExpired(crawl)) {
       return finish(
         tx,
         crawl,

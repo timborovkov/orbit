@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 
+import { crawlCleanupExpired, crawlCleanupGraceMs } from '@/lib/runtime/research/crawls';
 import { firecrawlClient } from '@/lib/runtime/research/firecrawl';
 import { parseFirecrawlEnv } from '@/lib/runtime/research/settings';
 import {
@@ -194,4 +195,16 @@ test('uses the final crawl URL and distinguishes an unsupported read endpoint', 
   expect(status.pages.map(({ url, rank }) => ({ url, rank }))).toEqual([
     { url: 'https://example.com/docs/page', rank: 2 },
   ]);
+});
+
+test('cleanup grace waits for the first provider cancel attempt', () => {
+  const requestedAt = new Date('2026-01-01T00:00:00.000Z');
+  const sentAt = new Date(requestedAt.getTime() + crawlCleanupGraceMs + 60_000);
+  expect(
+    crawlCleanupExpired({ cancellationSentAt: null }, requestedAt.getTime() + crawlCleanupGraceMs),
+  ).toBe(false);
+  expect(crawlCleanupExpired({ cancellationSentAt: sentAt }, sentAt.getTime())).toBe(false);
+  expect(
+    crawlCleanupExpired({ cancellationSentAt: sentAt }, sentAt.getTime() + crawlCleanupGraceMs),
+  ).toBe(true);
 });

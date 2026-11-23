@@ -131,6 +131,7 @@ function toolsFor(
     signal,
     fetchRequest,
     web,
+    result: { steps: [], actions: [], error: null },
     gate: createToolStepGate(10),
     calls: [],
   });

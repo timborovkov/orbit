@@ -966,6 +966,7 @@ async function processSimulationRun(
                     ...webResearchTools({
                       web: webTools,
                       policy: basePolicy,
+                      result,
                       gate: resources.toolSteps,
                       calls: resources.toolCalls,
                       signal: requestSignal,
