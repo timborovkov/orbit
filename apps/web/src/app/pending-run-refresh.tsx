@@ -8,23 +8,24 @@ import { useRouter } from 'next/navigation';
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /**
- * Soft-refresh the agent workspace while runs or knowledge jobs are in flight.
- * When only a future follow-up is waiting, schedule a single refresh around its
- * due time instead of polling every two seconds for the whole delay.
+ * Soft-refresh the agent workspace while work is in flight. Time-only
+ * reminders schedule the next refresh at their deadline.
  */
 export function PendingRunRefresh({
   active,
   refreshAt,
+  intervalMs = 2000,
 }: {
   active: boolean;
   refreshAt?: Date | string | null;
+  intervalMs?: number;
 }) {
   const router = useRouter();
   useEffect(() => {
     if (active) {
       const id = setInterval(() => {
         router.refresh();
-      }, 2000);
+      }, intervalMs);
       return () => {
         clearInterval(id);
       };
@@ -43,6 +44,6 @@ export function PendingRunRefresh({
     return () => {
       clearTimeout(id);
     };
-  }, [active, refreshAt, router]);
+  }, [active, intervalMs, refreshAt, router]);
   return null;
 }

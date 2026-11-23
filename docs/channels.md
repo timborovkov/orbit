@@ -15,7 +15,10 @@ cursor, post formatting and reciprocal identity-claim checks.
    Omit secrets and authentication headers from the stored provider payload.
    Polling adapters that commit a cursor with a batch can use
    `persistChannelEvent` and `admitChannelEvent` inside the agent transaction.
-   The database deduplicates events per agent and channel.
+   The database deduplicates events per agent, channel and account. Set
+   `isReply` only when the adapter identifies a reply and supplies the
+   canonical thread ID. The shared intake resolves eligible commitments in
+   the same transaction as the saved reply.
 3. Use the evaluation run mode for model-proposed actions. Register supported
    actions as channel-qualified IDs such as `provider.reply`. An administrator
    grants each supported action from the agent’s Access settings. The adapter
@@ -33,3 +36,8 @@ agent-owned memory evidence. Replays use the saved case input and never
 dispatch or capture durable memory. The
 [fixture channel integration test](../tests/channel-framework.test.ts) covers
 registration through delivery against PostgreSQL without contacting a provider.
+
+Draft-mode adapters can expose `followUp` with an approval-required channel
+action and a function that loads an agent-owned conversation from the stored
+anchor. The adapter supplies the drafting input and delivery references from
+persisted data. See [durable follow-ups](follow-ups.md).
