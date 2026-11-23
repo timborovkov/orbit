@@ -14,10 +14,7 @@ export function ActivityTimeline({ events }: { events: ActivityEventRow[] }) {
     <section className="activity-timeline" aria-labelledby="activity-timeline-heading">
       <div className="editor-section-heading">
         <h2 id="activity-timeline-heading">Activity</h2>
-        <p className="muted">
-          Internal outcomes for durable commitments and other agent events. External writes are not
-          performed here.
-        </p>
+        <p className="muted">Follow-up outcomes and X reply delivery.</p>
       </div>
       {!events.length && <p className="muted">No activity events yet.</p>}
       <ol className="activity-timeline-list">

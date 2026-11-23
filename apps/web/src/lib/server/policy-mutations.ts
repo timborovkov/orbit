@@ -143,6 +143,9 @@ export async function reviewProposedAction(
     if (approved) {
       const ctx = await loadPolicyContext(agentId, actor, intent.runId, tx);
       if (!ctx) return { error: 'Agent not found.' };
+      if (ctx.lifecycle === 'shadow' && channelAction(intent.actionType)?.action.reviewInShadow) {
+        return { error: 'Switch the agent to Live before approving this reply.' };
+      }
       const consent = await recipientConsentFailure(
         tx,
         agentId,

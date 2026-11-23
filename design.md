@@ -446,6 +446,13 @@ run link when available, draft and age. Use one initial timestamp for relative
 ages on the server and browser and show the full UTC timestamp on demand.
 Support filtering by agent or run, and cap bulk selection at 50.
 
+Use the registered **X reply** label for reply proposals and channel
+permissions. Keep the author and source post fixed. Shadow proposals stay
+pending and Live agents can either send automatically or require individual
+approval. Show the connected account by handle and accept replacement tokens
+in a password field. Activity shows the reply outcome and provider reply ID
+when available. Label fixture delivery explicitly.
+
 ### Evaluations
 
 Global Evaluations navigation lists saved cases and comparisons. Cases come

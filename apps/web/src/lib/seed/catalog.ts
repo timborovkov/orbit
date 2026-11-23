@@ -4,6 +4,7 @@ import type { LifecycleState } from '@/lib/lifecycle';
 import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
 import type { AgentConfig } from '@/lib/runtime/config';
 import type { SimulationResult } from '@/lib/runtime/simulation';
+import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
 import type { ApprovalOnReject, ApprovalSettings, RunStatus } from '@/lib/schema';
 import { demoTime, utcDay, utcMonthStart } from '@/lib/seed/clock';
 import {
@@ -137,7 +138,7 @@ export function demoAgents(): DemoAgentSpec[] {
       approvalExpiresAfterHours: null,
       approvalOnReject: 'continue',
       approvalSpendCents: null,
-      enabledTools: [KNOWLEDGE_SEARCH_TOOL],
+      enabledTools: [KNOWLEDGE_SEARCH_TOOL, X_REPLY_ACTION],
       fakeOpenRouterKey: 'sk-or-demo-john-not-a-real-key',
     },
     {

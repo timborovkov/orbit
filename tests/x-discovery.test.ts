@@ -1,33 +1,54 @@
-import { afterAll, expect, test } from 'bun:test';
+import { afterAll, expect, spyOn, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
-import { processSimulationJob } from '@/lib/runtime/execute';
+import { claimJobs, completeJob, failJob } from '@/lib/queue/jobs';
+import type { ChannelAction } from '@/lib/runtime/channels/types';
+import { processSimulationJob, processSimulationRunForOrigin } from '@/lib/runtime/execute';
+import { processOutboundJob } from '@/lib/runtime/outbound/process';
+import { CHANNEL_OUTBOUND_JOB } from '@/lib/runtime/outbound/types';
+import { encryptSecret } from '@/lib/runtime/secrets';
 import type { ModelCall } from '@/lib/runtime/simulation';
 import { createFixtureXSearchAdapter, FIXTURE_X_POSTS } from '@/lib/runtime/x/fixture';
 import { ensureDiscoveryPollJob, processDiscoveryPoll } from '@/lib/runtime/x/poll';
+import { validateXReplyApproval, xReplySecretSubject } from '@/lib/runtime/x/reply';
+import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
 import { X_DISCOVERY_POLL_JOB, X_PROVIDER } from '@/lib/runtime/x/types';
 import { createAgentFromTemplate } from '@/lib/server/agents-mutations';
-import { persistLifecycle } from '@/lib/server/lifecycle-mutations';
+import { persistGlobalPause } from '@/lib/server/controls-mutations';
+import { persistBudgets, persistLifecycle } from '@/lib/server/lifecycle-mutations';
 import { selectAgentMemoryEvidence } from '@/lib/server/memory-queries';
+import {
+  persistChannelGrant,
+  recordConsent,
+  reviewProposedAction,
+} from '@/lib/server/policy-mutations';
 
 const databaseUrl =
   process.env.TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
   'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
+process.env.DATABASE_URL = databaseUrl;
 const sql = postgres(databaseUrl);
 const ids: string[] = [];
 const admin = 'admin@example.test';
 const signal = new AbortController().signal;
+const workerId = 'x-reply-test';
+const [initialControls] = await sql`SELECT paused FROM controls WHERE id=1`;
+const originalKey = process.env.OPENROUTER_API_KEY;
 
 afterAll(async () => {
   try {
+    if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalKey;
+    await sql`UPDATE controls SET paused=${initialControls!.paused} WHERE id=1`;
     for (const id of ids) {
       await sql`DELETE FROM source_events WHERE agent_id=${id}`;
       await sql`DELETE FROM discovery_cursors WHERE agent_id=${id}`;
       await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
+      await sql`DELETE FROM outbound_actions WHERE agent_id=${id}`;
       await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
       await sql`DELETE FROM usage_counters WHERE agent_id=${id}`;
       await sql`DELETE FROM simulation_runs WHERE agent_id=${id}`;
@@ -450,4 +471,265 @@ test('a discovery run can remember a project detail with evidence from its event
   await sql`DELETE FROM source_events WHERE id=${event!.id}`;
   expect(await sql`SELECT id FROM agent_memories WHERE id=${memory!.id}`).toHaveLength(0);
   expect(await selectAgentMemoryEvidence(agentId, memory!.id, memory!.revision)).toBeNull();
+});
+
+const replyInference: ModelCall = Object.assign<ModelCall, Pick<ModelCall, 'quote'>>(
+  async ({ stage }) => ({
+    decision: {
+      relevant: true,
+      priority: 1,
+      reason: 'The fixture author asked John a question.',
+      actions: [
+        {
+          type: X_REPLY_ACTION,
+          reason: 'Answer the author’s question.',
+          draft: stage === 'main' ? 'I can show you how The Timeline works.' : null,
+        },
+      ],
+    },
+    inputTokens: 1,
+    outputTokens: 1,
+    costMicros: 1,
+  }),
+  {
+    quote: async () => ({
+      upperBoundMicros: 1,
+      endpoint: 'fixture',
+      maxPrice: { prompt: 0, completion: 0, request: 0 },
+    }),
+  },
+);
+
+async function discoverReply(
+  lifecycle: 'live' | 'shadow' = 'live',
+  consent = true,
+  connect?: (agentId: string) => Promise<void>,
+) {
+  process.env.OPENROUTER_API_KEY = 'x-fixture-inference';
+  await persistGlobalPause(admin, false);
+  const agentId = await createAgent('John reply fixture', 'work-history', lifecycle);
+  await persistChannelGrant(admin, agentId, X_REPLY_ACTION, true);
+  if (consent) await setXConsent(agentId, true);
+  await connect?.(agentId);
+  const adapter = createFixtureXSearchAdapter();
+  const poll = () => processDiscoveryPoll({ payload: { agentId } }, signal, { adapter });
+  expect(await poll()).toMatchObject({ inserted: 1, evaluated: 1 });
+  const [run] =
+    await sql`SELECT id, configuration_id, input FROM simulation_runs WHERE agent_id=${agentId}`;
+  const work = () => processSimulationJob({ runId: run!.id }, () => replyInference, signal);
+  await work();
+  const rows = await sql`SELECT id, recipients, review_status, decision FROM action_intents
+    WHERE agent_id=${agentId} AND action_type=${X_REPLY_ACTION}`;
+  expect(rows).toHaveLength(1);
+  return { agentId, run: run!, intent: rows[0]!, poll, work };
+}
+
+function setXConsent(agentId: string, granted: boolean) {
+  return recordConsent({
+    actor: admin,
+    agentId,
+    recipient: 'x:12001',
+    scope: X_REPLY_ACTION,
+    evidence: 'The fixture author asked for a reply on the source post.',
+    granted,
+  });
+}
+
+async function claimXReply(agentId: string) {
+  const [job] = await claimJobs({ workerId, types: [CHANNEL_OUTBOUND_JOB], limit: 1 });
+  expect(job?.payload.agentId).toBe(agentId);
+  return job!;
+}
+
+type FixtureSend = Extract<
+  Awaited<ReturnType<ChannelAction['prepareDelivery']>>,
+  { send: unknown }
+>['send'];
+
+function fixtureXDelivery(outcomes: Awaited<ReturnType<FixtureSend>>[] = []) {
+  const sent: string[] = [];
+  const prepareDelivery: ChannelAction['prepareDelivery'] = async (tx, outbound, intent) => {
+    const error = await validateXReplyApproval(tx, intent);
+    if (error) return { error };
+    return {
+      recipients: intent.recipients,
+      provider: 'x-fixture',
+      send() {
+        sent.push(outbound.body);
+        return Promise.resolve(outcomes.shift() ?? { ok: true, id: '90001', raw: {} });
+      },
+    };
+  };
+  return { override: { actionType: X_REPLY_ACTION, prepareDelivery }, sent };
+}
+
+async function outboundFor(agentId: string) {
+  const rows = await sql`SELECT status, reason, provider, provider_message_id FROM outbound_actions
+    WHERE agent_id=${agentId}`;
+  expect(rows.length).toBeLessThanOrEqual(1);
+  return rows[0];
+}
+
+test('John keeps one editable X reply in Shadow and an administrator can approve it in Live', async () => {
+  const { agentId, intent, poll, work } = await discoverReply('shadow');
+  expect(intent).toMatchObject({ review_status: 'pending', recipients: ['x:12001'] });
+  expect(await poll()).toMatchObject({ inserted: 0, evaluated: 0 });
+  expect(await reviewProposedAction(admin, agentId, intent.id, 'approved')).toHaveProperty('error');
+  expect(await outboundFor(agentId)).toBeUndefined();
+  await persistLifecycle(admin, agentId, 'live');
+  await work();
+  expect(await outboundFor(agentId)).toBeUndefined();
+  const reviewed = await reviewProposedAction(admin, agentId, intent.id, 'approved', {
+    editedPayload: { draft: 'Here is how work history is recorded.' },
+  });
+  expect(reviewed).toHaveProperty('message');
+  const job = await claimXReply(agentId);
+  const fixture = fixtureXDelivery();
+  await processOutboundJob(job, signal, fixture.override);
+  await processOutboundJob(job, signal, fixture.override);
+  await completeJob(job.id, workerId);
+  expect(fixture.sent).toEqual(['Here is how work history is recorded.']);
+  expect(await outboundFor(agentId)).toMatchObject({
+    status: 'sent',
+    provider: 'x-fixture',
+    provider_message_id: '90001',
+  });
+});
+
+test('Live X grant queues the reply once and replay adds no write or approval', async () => {
+  const { agentId, intent, run, poll, work } = await discoverReply();
+  expect(intent).toMatchObject({ review_status: null, decision: 'allow' });
+  expect(await poll()).toMatchObject({ inserted: 0, evaluated: 0 });
+  await work();
+  const [replay] =
+    await sql`INSERT INTO simulation_runs(agent_id,configuration_id,origin,status,input,actor,expires_at,result)
+    VALUES(${agentId},${run.configuration_id},'replay','queued',${run.input},${admin},now(),'{"steps":[],"actions":[],"error":null}') RETURNING id`;
+  await processSimulationRunForOrigin(
+    replay!.id,
+    'replay',
+    () => replyInference,
+    signal,
+    undefined,
+    { channel: 'x', recallQuery: run.input },
+  );
+  const job = await claimXReply(agentId);
+  const fixture = fixtureXDelivery();
+  await processOutboundJob(job, signal, fixture.override);
+  await completeJob(job.id, workerId);
+  expect(fixture.sent).toEqual(['I can show you how The Timeline works.']);
+  const [row] = await sql`SELECT count(*)::int AS count FROM action_intents
+    WHERE agent_id=${agentId} AND review_status='pending'`;
+  expect(row?.count).toBe(0);
+  expect(await outboundFor(agentId)).toMatchObject({ status: 'sent' });
+});
+
+test.each([
+  ['global pause', async () => persistGlobalPause(admin, true), 'Global outbound pause'],
+  [
+    'agent grant',
+    async (id: string) => persistChannelGrant(admin, id, X_REPLY_ACTION, false),
+    'not enabled',
+  ],
+  ['recipient consent', async (id: string) => setXConsent(id, false), 'revoked consent'],
+  ['lifecycle', async (id: string) => persistLifecycle(admin, id, 'paused'), 'Agent is paused'],
+  [
+    'budget',
+    async (id: string) => persistBudgets(admin, id, { ...budgetDefaults, dailyOutboundActions: 0 }),
+    'outbound-action cap',
+  ],
+] as const)('queued X delivery rechecks %s', async (_name, change, reason) => {
+  const { agentId } = await discoverReply();
+  const job = await claimXReply(agentId);
+  await change(agentId);
+  const fixture = fixtureXDelivery();
+  await processOutboundJob(job, signal, fixture.override);
+  await completeJob(job.id, workerId);
+  expect(fixture.sent).toHaveLength(0);
+  expect(await outboundFor(agentId)).toMatchObject({
+    status: 'blocked',
+    reason: expect.stringContaining(reason),
+  });
+});
+
+test('reply requires consent and a real connection for the normal dispatcher', async () => {
+  const declined = await discoverReply('live', false);
+  expect(declined.intent).toMatchObject({ review_status: null, decision: 'deny' });
+  expect(await outboundFor(declined.agentId)).toBeUndefined();
+  const { agentId } = await discoverReply();
+  const job = await claimXReply(agentId);
+  await processOutboundJob(job, signal);
+  await completeJob(job.id, workerId);
+  expect(await outboundFor(agentId)).toMatchObject({
+    status: 'blocked',
+    reason: expect.stringContaining('Connect an X user'),
+  });
+});
+
+test('confirmed X rate limits can retry and an interrupted write cannot', async () => {
+  const { agentId } = await discoverReply();
+  const first = await claimXReply(agentId);
+  const fixture = fixtureXDelivery([{ ok: false, retryable: true, error: 'HTTP 429' }]);
+  await expect(processOutboundJob(first, signal, fixture.override)).rejects.toThrow('HTTP 429');
+  expect(await outboundFor(agentId)).toMatchObject({ status: 'queued' });
+  await failJob(first.id, workerId, 'HTTP 429');
+  await sql`UPDATE jobs SET available_at=now() WHERE id=${first.id}`;
+  const second = await claimXReply(agentId);
+  await processOutboundJob(first, signal, fixture.override);
+  await processOutboundJob(second, signal, fixture.override);
+  await completeJob(second.id, workerId);
+  expect(fixture.sent).toHaveLength(2);
+  expect(await outboundFor(agentId)).toMatchObject({ status: 'sent' });
+
+  const interrupted = await discoverReply();
+  const claimed = await claimXReply(interrupted.agentId);
+  await sql`UPDATE outbound_actions SET status='sending', dispatch_attempt=${claimed.attempts}, dispatched_at=now() WHERE job_id=${claimed.id}`;
+  await sql`UPDATE jobs SET claim_expires_at=now() - interval '1 second' WHERE id=${claimed.id}`;
+  const recovered = await claimXReply(interrupted.agentId);
+  await processOutboundJob(recovered, signal, fixture.override);
+  await completeJob(recovered.id, workerId);
+  expect(fixture.sent).toHaveLength(2);
+  expect(await outboundFor(interrupted.agentId)).toMatchObject({
+    status: 'failed',
+    reason: expect.stringContaining('could not be confirmed'),
+  });
+});
+
+test('the worker sends with the agent’s encrypted X token and records the provider reply ID', async () => {
+  const originalEncryptionKey = process.env.ORBIT_ENCRYPTION_KEY;
+  process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
+  const provider = spyOn(globalThis, 'fetch').mockImplementation((url, init) => {
+    const address = String(url);
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer fixture-x-user-token');
+    if (address.startsWith('https://api.x.com/2/tweets/1001?')) {
+      return Promise.resolve(
+        Response.json({
+          data: { id: '1001', author_id: '12001', entities: { mentions: [{ id: '12111' }] } },
+        }),
+      );
+    }
+    expect(address).toBe('https://api.x.com/2/tweets');
+    expect(init?.method).toBe('POST');
+    return Promise.resolve(Response.json({ data: { id: '12002' } }, { status: 201 }));
+  });
+  try {
+    const { agentId } = await discoverReply('live', true, async (id) => {
+      const encrypted = encryptSecret(xReplySecretSubject(id), 'fixture-x-user-token');
+      await sql`INSERT INTO x_reply_credentials(agent_id,user_id,username,encrypted_token)
+        VALUES(${id},'12111','orbit_fixture',${encrypted})`;
+    });
+    const job = await claimXReply(agentId);
+    await processOutboundJob(job, signal);
+    await processOutboundJob(job, signal);
+    await completeJob(job.id, workerId);
+    expect(provider).toHaveBeenCalledTimes(2);
+    expect(await outboundFor(agentId)).toMatchObject({
+      status: 'sent',
+      provider: 'x-api',
+      provider_message_id: '12002',
+    });
+  } finally {
+    provider.mockRestore();
+    if (originalEncryptionKey === undefined) delete process.env.ORBIT_ENCRYPTION_KEY;
+    else process.env.ORBIT_ENCRYPTION_KEY = originalEncryptionKey;
+  }
 });

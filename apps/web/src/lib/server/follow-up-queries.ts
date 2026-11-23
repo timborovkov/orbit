@@ -5,7 +5,8 @@ import { and, asc, desc, eq, ne } from 'drizzle-orm';
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { mergeFollowUpListViews } from '@/lib/runtime/follow-ups/list';
-import { agentActivityEvents, followUps, jobs } from '@/lib/schema';
+import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
+import { agentActivityEvents, followUps, jobs, outboundActions } from '@/lib/schema';
 
 const HISTORY_LIMIT = 100;
 
@@ -68,10 +69,44 @@ export async function selectFollowUpsForAgentView(agentId: string) {
 
 export async function listActivityEventsForAgent(agentId: string, limit = 50) {
   await requireAdmin();
-  return db()
-    .select()
-    .from(agentActivityEvents)
-    .where(eq(agentActivityEvents.agentId, agentId))
-    .orderBy(desc(agentActivityEvents.createdAt))
-    .limit(limit);
+  const store = db();
+  const [events, replies] = await Promise.all([
+    store
+      .select()
+      .from(agentActivityEvents)
+      .where(eq(agentActivityEvents.agentId, agentId))
+      .orderBy(desc(agentActivityEvents.createdAt))
+      .limit(limit),
+    store
+      .select({
+        id: outboundActions.id,
+        status: outboundActions.status,
+        reason: outboundActions.reason,
+        provider: outboundActions.provider,
+        providerMessageId: outboundActions.providerMessageId,
+        updatedAt: outboundActions.updatedAt,
+      })
+      .from(outboundActions)
+      .where(
+        and(eq(outboundActions.agentId, agentId), eq(outboundActions.actionType, X_REPLY_ACTION)),
+      )
+      .orderBy(desc(outboundActions.updatedAt))
+      .limit(limit),
+  ]);
+  return [
+    ...events,
+    ...replies.map((reply) => {
+      const fixture = reply.provider === 'x-fixture';
+      return {
+        id: reply.id,
+        followUpId: null,
+        kind: X_REPLY_ACTION,
+        summary: `${fixture ? 'Fixture X reply' : 'X reply'} ${reply.status}`,
+        detail: reply.providerMessageId ? `Reply ID ${reply.providerMessageId}` : reply.reason,
+        createdAt: reply.updatedAt,
+      };
+    }),
+  ]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, limit);
 }

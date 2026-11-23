@@ -66,6 +66,8 @@ import {
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
 import { nativeTools } from '@/lib/runtime/tools/native';
 import { retrievalTools } from '@/lib/runtime/tools/retrieval';
+import { loadXReplyTarget } from '@/lib/runtime/x/reply';
+import { X_REPLY_ACTION, xReplyDraft, xReplyKey } from '@/lib/runtime/x/reply-input';
 import {
   actionIntents,
   agents,
@@ -1074,12 +1076,37 @@ async function processSimulationRun(
                   effect: 'Agent unavailable for policy checks.',
                 }));
               }
+              const xDiscovery = origin !== 'replay' && adapter?.id === 'x';
+              const target =
+                xDiscovery && stage === 'main' && actions.length
+                  ? await retryableStore(() => loadXReplyTarget(db(), run.agentId, run.id))
+                  : null;
               return await Promise.all(
                 actions.map(async (action, index) => {
+                  const xReply =
+                    xDiscovery && (action.type === X_REPLY_ACTION || action.type === 'reply');
+                  const actionType = xReply ? X_REPLY_ACTION : action.type;
+                  if (xDiscovery && (!xReply || stage !== 'main')) {
+                    return {
+                      ...action,
+                      policy: 'suppressed' as const,
+                      effect: 'Discovery queues only final X replies.',
+                    };
+                  }
+                  const xDraft = xReply ? xReplyDraft.safeParse(action.draft) : null;
+                  if (xReply && (!target || !xDraft?.success)) {
+                    return {
+                      ...action,
+                      type: actionType,
+                      policy: 'deny' as const,
+                      effect:
+                        'An X reply needs a matching post, author and draft of up to 280 characters without additional mentions.',
+                    };
+                  }
                   const decision = await telemetry.withSpan(
                     'orbit.policy',
                     {
-                      tool: action.type,
+                      tool: actionType,
                       stage,
                       agent_id: run.agentId,
                       run_id: run.id,
@@ -1089,25 +1116,32 @@ async function processSimulationRun(
                     async () =>
                       retryableStore(() =>
                         authorizeAction(ctx, {
-                          type: action.type,
-                          recipients: run.recipients,
+                          type: actionType,
+                          recipients: xReply && target ? [target.recipient] : run.recipients,
                           preliminary: stage === 'evaluator',
                           executionToken,
-                          payload: { draft: action.draft, reason: action.reason },
-                          idempotencyKey: actionIdempotencyKey({
-                            runId: run.id,
-                            stage,
-                            actionType: action.type,
-                            index,
+                          payload: {
+                            draft: xDraft?.data ?? action.draft,
                             reason: action.reason,
-                          }),
+                            ...(xReply && target ? { xUserId: target.userId } : {}),
+                          },
+                          idempotencyKey:
+                            xReply && target
+                              ? xReplyKey(run.agentId, target.postId)
+                              : actionIdempotencyKey({
+                                  runId: run.id,
+                                  stage,
+                                  actionType: action.type,
+                                  index,
+                                  reason: action.reason,
+                                }),
                         }),
                       ),
                   );
                   await telemetry.withSpan(
                     'orbit.tool',
                     {
-                      tool: action.type,
+                      tool: actionType,
                       stage,
                       policy_decision: decision.decision,
                       agent_id: run.agentId,
@@ -1126,7 +1160,7 @@ async function processSimulationRun(
                   if (
                     stage === 'main' &&
                     decision.decision === 'allow' &&
-                    channelAction(action.type)
+                    channelAction(actionType)
                   ) {
                     await retryableStore(() =>
                       db().transaction(async (tx) => {
@@ -1159,6 +1193,7 @@ async function processSimulationRun(
                   }
                   return {
                     ...action,
+                    type: actionType,
                     draft,
                     intentId: decision.intentId,
                     policy: decision.decision,

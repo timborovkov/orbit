@@ -17,6 +17,57 @@ import {
 import { CHANNEL_OUTBOUND_JOB } from '@/lib/runtime/outbound/types';
 import { actionIntents, controls, jobs, outboundActions, policyDecisions } from '@/lib/schema';
 
+const uncertainDelivery =
+  'Delivery could not be confirmed. Check the original post before taking further action.';
+
+async function lockOwnedJob(tx: Tx, job: JobRecord, outboundId: string) {
+  const [row] = await tx.select().from(jobs).where(eq(jobs.id, job.id)).for('update');
+  if (!row || row.type !== job.type || row.payload.outboundId !== outboundId) return null;
+  if (row.status === 'cancelled') return row;
+  return row.status === 'claimed' &&
+    job.claimedBy &&
+    row.claimedBy === job.claimedBy &&
+    row.attempts === job.attempts &&
+    row.claimExpiresAt &&
+    row.claimExpiresAt > new Date()
+    ? row
+    : null;
+}
+
+async function reserveNonIdempotentDelivery(
+  job: JobRecord,
+  outbound: typeof outboundActions.$inferSelect,
+) {
+  return db().transaction(async (tx) => {
+    await lockApprovalAgent(tx, outbound.agentId);
+    const jobRow = await lockOwnedJob(tx, job, outbound.id);
+    if (jobRow?.status !== 'claimed') return false;
+    const [row] = await tx
+      .select()
+      .from(outboundActions)
+      .where(eq(outboundActions.id, outbound.id))
+      .for('update');
+    if (!row || row.jobId !== job.id) return false;
+    if (row.status === 'sending' && !row.providerMessageId) {
+      if (row.dispatchAttempt !== job.attempts) {
+        await markOutboundStatus(tx, row.id, {
+          status: 'failed',
+          reason: uncertainDelivery,
+          completedAt: new Date(),
+        });
+      }
+      return false;
+    }
+    if (row.status !== 'queued') return false;
+    await markOutboundStatus(tx, row.id, {
+      status: 'sending',
+      dispatchAttempt: job.attempts,
+      dispatchedAt: new Date(),
+    });
+    return true;
+  });
+}
+
 export async function processOutboundJob(
   job: JobRecord,
   signal: AbortSignal,
@@ -32,24 +83,16 @@ export async function processOutboundJob(
   if (override && override.actionType !== outbound.actionType) return;
   if (handler && job.type !== (handler.jobType ?? CHANNEL_OUTBOUND_JOB)) return;
   const prepare = override?.prepareDelivery ?? handler?.prepareDelivery;
+  const nonIdempotent = handler?.requiresDispatchMarker;
+  // Commit before attempting a provider call whose outcome can be ambiguous.
+  if (nonIdempotent && !(await reserveNonIdempotentDelivery(job, outbound))) return;
 
   // Agent and controls locks serialize the final policy check with pause/stop.
   const dispatch = await db().transaction(async (tx) => {
     await lockApprovalAgent(tx, outbound.agentId);
     await tx.select().from(controls).where(eq(controls.id, 1)).for('update');
-    const [jobRow] = await tx.select().from(jobs).where(eq(jobs.id, job.id)).for('update');
-    if (!jobRow || jobRow.type !== job.type || jobRow.payload.outboundId !== outbound.id)
-      return null;
-    if (outbound.jobId !== null && outbound.jobId !== job.id) return null;
-    if (
-      jobRow.status !== 'cancelled' &&
-      (jobRow.status !== 'claimed' ||
-        !job.claimedBy ||
-        jobRow.claimedBy !== job.claimedBy ||
-        jobRow.attempts !== job.attempts)
-    ) {
-      return null;
-    }
+    const jobRow = await lockOwnedJob(tx, job, outbound.id);
+    if (!jobRow || (outbound.jobId !== null && outbound.jobId !== job.id)) return null;
     const claimed = await claimOutboundForSending(tx, outbound.id);
     if (!claimed) return null;
     const { row } = claimed;
@@ -67,6 +110,7 @@ export async function processOutboundJob(
       return null;
     }
     if ('terminal' in claimed && claimed.terminal) return null;
+    if (nonIdempotent && row.dispatchAttempt !== job.attempts) return null;
     const block = (reason: string) =>
       markOutboundStatus(tx, row.id, { status: 'blocked', reason, completedAt: new Date() });
     if (jobRow.status === 'cancelled') {
@@ -79,7 +123,7 @@ export async function processOutboundJob(
       .where(and(eq(actionIntents.id, row.intentId), eq(actionIntents.agentId, row.agentId)));
     if (
       !intent ||
-      intent.reviewStatus === 'rejected' ||
+      (intent.reviewStatus !== null && intent.reviewStatus !== 'approved') ||
       intent.decision !== 'allow' ||
       (handler?.alwaysRequiresApproval && intent.reviewStatus !== 'approved')
     ) {
@@ -118,7 +162,7 @@ export async function processOutboundJob(
       },
       consent,
       false,
-      { skipApproval: true },
+      { skipApproval: intent.reviewStatus === 'approved' },
     );
     const audit = {
       agentId: row.agentId,
@@ -135,13 +179,33 @@ export async function processOutboundJob(
       return null;
     }
 
+    if (signal.aborted && nonIdempotent) {
+      await markOutboundStatus(tx, row.id, {
+        status: 'queued',
+        dispatchedAt: null,
+        dispatchAttempt: null,
+      });
+      return { retryable: 'Worker stopped before delivery.' };
+    }
     signal.throwIfAborted();
-    const outcome = await delivery.send(signal);
+    const provider = delivery.provider ?? handler.provider;
+    const outcome = await delivery.send(signal).catch(async (error: unknown) => {
+      if (!nonIdempotent) throw error;
+      await markOutboundStatus(tx, row.id, {
+        status: 'failed',
+        reason: uncertainDelivery,
+        provider,
+        providerResult: { outcome: 'uncertain' },
+        completedAt: new Date(),
+      });
+      return null;
+    });
+    if (!outcome) return null;
     if (outcome.ok) {
       await markOutboundStatus(tx, row.id, {
         status: 'sent',
         reason: null,
-        provider: handler.provider,
+        provider,
         providerMessageId: outcome.id,
         providerResult: outcome.raw,
         completedAt: new Date(),
@@ -152,11 +216,23 @@ export async function processOutboundJob(
         .values({ ...audit, decision: 'allow', reasons: ['Outbound action sent.'] });
       return null;
     }
-    if (outcome.retryable) return { retryable: outcome.error };
+    if (outcome.retryable && (!nonIdempotent || job.attempts < job.maxAttempts)) {
+      if (nonIdempotent) {
+        await markOutboundStatus(tx, row.id, {
+          status: 'queued',
+          provider,
+          reason: outcome.error,
+          providerResult: outcome.raw ?? null,
+          dispatchAttempt: null,
+          dispatchedAt: null,
+        });
+      }
+      return { retryable: outcome.error };
+    }
     await markOutboundStatus(tx, row.id, {
       status: 'failed',
       reason: outcome.error,
-      provider: handler.provider,
+      provider,
       providerResult: outcome.raw ?? null,
       completedAt: new Date(),
     });
@@ -205,7 +281,8 @@ export async function finalizeExhaustedOutboundJob(
     }
     await markOutboundStatus(tx, outboundId, {
       status: 'failed',
-      reason: inspectable,
+      reason:
+        row.status === 'sending' && row.dispatchAttempt !== null ? uncertainDelivery : inspectable,
       completedAt: new Date(),
     });
   });
@@ -226,6 +303,7 @@ export async function reconcileDeadOutboundJobs() {
       END,
       reason = CASE
         WHEN o.provider_message_id IS NOT NULL THEN NULL
+        WHEN o.status = 'sending' AND o.dispatch_attempt IS NOT NULL THEN ${uncertainDelivery}
         ELSE ${inspectable}
       END,
       provider_result = CASE
@@ -266,8 +344,8 @@ export async function finalizeOutboundForCancelledJobs(
   await store
     .update(outboundActions)
     .set({
-      status: 'blocked',
-      reason: message,
+      status: sql`CASE WHEN ${outboundActions.status} = 'sending' AND ${outboundActions.dispatchAttempt} IS NOT NULL THEN 'failed' ELSE 'blocked' END`,
+      reason: sql`CASE WHEN ${outboundActions.status} = 'sending' AND ${outboundActions.dispatchAttempt} IS NOT NULL THEN ${uncertainDelivery} ELSE ${message} END`,
       completedAt: now,
       updatedAt: now,
     })
@@ -285,8 +363,8 @@ export async function reconcileCancelledOutboundJobs() {
   await db().execute(sql`
     UPDATE outbound_actions AS o
     SET
-      status = 'blocked',
-      reason = coalesce(nullif(o.reason, ''), ${reason}),
+      status = CASE WHEN o.status = 'sending' AND o.dispatch_attempt IS NOT NULL THEN 'failed' ELSE 'blocked' END,
+      reason = CASE WHEN o.status = 'sending' AND o.dispatch_attempt IS NOT NULL THEN ${uncertainDelivery} ELSE coalesce(nullif(o.reason, ''), ${reason}) END,
       completed_at = coalesce(o.completed_at, now()),
       updated_at = now()
     WHERE o.status IN ('queued', 'sending')

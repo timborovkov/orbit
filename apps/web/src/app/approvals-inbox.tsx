@@ -23,10 +23,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { approvalReviewLimit } from '@/lib/approvals/rules';
 import { formatAge, formatUtcTimestamp } from '@/lib/format';
+import { X_REPLY_ACTION, xReplyDraftLength } from '@/lib/runtime/x/reply-input';
 import { cn } from '@/lib/utils';
 
 const actionLabels = {
   reply: 'Reply',
+  [X_REPLY_ACTION]: 'X reply',
   like: 'Like',
   repost: 'Repost',
   follow: 'Follow',
@@ -191,7 +193,7 @@ function PendingCard({
                   rows={3}
                   readOnly={pendingUi}
                   value={draft}
-                  maxLength={8000}
+                  maxLength={item.actionType === X_REPLY_ACTION ? xReplyDraftLength : 8000}
                   onChange={(event) => {
                     setDraft(event.target.value);
                   }}

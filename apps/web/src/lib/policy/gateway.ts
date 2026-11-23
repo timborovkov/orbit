@@ -294,7 +294,9 @@ export function evaluateCandidate(
       actionNeedsApproval({
         actionType: action.type,
         preliminary: action.preliminary,
-        requiredByAdapter: registered?.action.alwaysRequiresApproval,
+        requiredByAdapter:
+          registered?.action.alwaysRequiresApproval ||
+          (ctx.lifecycle === 'shadow' && registered?.action.reviewInShadow),
         approvalTools: ctx.approvalTools,
         approvalSpendCents: ctx.approvalSpendCents,
         daySpendMicros: ctx.usage.spendMicros,

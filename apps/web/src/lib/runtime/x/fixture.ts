@@ -9,8 +9,8 @@ import type {
 export const FIXTURE_X_POSTS: XSearchPost[] = [
   {
     id: '1001',
-    text: 'Looking for a work-history product that helps teams see what changed and why. Any recommendations?',
-    authorId: 'u-100',
+    text: '@orbit_fixture Looking for a work-history product that helps teams see what changed and why. Could you tell me about yours?',
+    authorId: '12001',
     authorUsername: 'ops_lead',
     createdAt: '2026-11-18T10:00:00.000Z',
     raw: { id: '1001', text: 'Looking for a work-history product…', fixture: true },

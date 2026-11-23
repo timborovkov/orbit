@@ -39,6 +39,7 @@ import { listMcpConnections } from '@/lib/server/mcp-queries';
 import { listAgentMemories } from '@/lib/server/memory-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
+import { getXReplyConnection } from '@/lib/server/x-reply-connection';
 import { storageConfigured } from '@/lib/storage/objects';
 
 interface WorkspaceSearch {
@@ -102,6 +103,7 @@ export default async function AgentWorkspace({
     inbox,
     followUps,
     activityEvents,
+    xReplyConnection,
     memory,
   ] = await Promise.all([
     listKnowledgeDocuments(id),
@@ -111,6 +113,7 @@ export default async function AgentWorkspace({
     getEmailInbox(id, selectedThread, emailPage, messagePage, focusMessageId),
     listFollowUpsForAgent(id),
     listActivityEventsForAgent(id),
+    getXReplyConnection(id),
     listAgentMemories(id, memoryPage),
   ]);
   const lifecycle = agent.lifecycle;
@@ -176,6 +179,7 @@ export default async function AgentWorkspace({
       approvalExpiresAfterHours={approvalSettings.approvalExpiresAfterHours}
       approvalOnReject={approvalSettings.approvalOnReject}
       approvalSpendCents={approvalSettings.approvalSpendCents}
+      xAccount={xReplyConnection?.username ?? null}
       channelActions={channelGrantOptions().map((option) => ({
         ...option,
         enabled: enabledTools.has(option.type),
