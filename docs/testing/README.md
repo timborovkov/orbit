@@ -134,6 +134,9 @@ routing edits.
   changes. It checks Sarah’s email intake, shared channel matching, draft
   approval, restart recovery and cancellation against a migrated `orbit_test`
   database. The same suites run in `test:integration`. See [follow-ups](../follow-ups.md).
+- Run the [introduction checks](../introductions.md#verify-the-workflow)
+  for changes to proposal consent, disclosure, or approval and dispatch
+  checks. The PostgreSQL scenarios also run in `test:integration`.
 - Run `bun run test:simulation` when simulation persistence, isolation, or shared
   runtime execution changes (requires migrated `orbit_test`).
 - Run `bun run test:knowledge` when knowledge upload/processing, embeddings,

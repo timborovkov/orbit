@@ -29,6 +29,7 @@ import {
   processSimulationJob,
 } from '@/lib/runtime/execute';
 import { FOLLOW_UP_JOB_TYPE, processFollowUpJob } from '@/lib/runtime/follow-ups/process';
+import { PEOPLE_INTRODUCE, PEOPLE_SEARCH } from '@/lib/runtime/introductions/types';
 import { stubEmbedders } from '@/lib/runtime/knowledge/embed';
 import { searchKnowledge } from '@/lib/runtime/knowledge/search';
 import { processMemoryEmbedding } from '@/lib/runtime/memory/store';
@@ -38,6 +39,7 @@ import { createFixtureXSearchAdapter } from '@/lib/runtime/x/fixture';
 import { processDiscoveryPoll } from '@/lib/runtime/x/poll';
 import { setEmailEnabled } from '@/lib/server/email-mutations';
 import { cancelFollowUp } from '@/lib/server/follow-up-mutations';
+import { persistPeopleGrant } from '@/lib/server/introduction-mutations';
 import { persistLifecycle } from '@/lib/server/lifecycle-mutations';
 import { saveAgentMemory } from '@/lib/server/memory-mutations';
 import { selectAgentMemoryEvidence } from '@/lib/server/memory-queries';
@@ -1292,6 +1294,9 @@ test('cancel, pause and stop close pending conversation commitments', async () =
 
 test('an unanswered Sarah conversation produces one draft awaiting administrator review', async () => {
   const { sarah, commitment } = await sarahCommitment();
+  for (const tool of [PEOPLE_SEARCH, PEOPLE_INTRODUCE] as const) {
+    expect(await persistPeopleGrant(admin, sarah.id, tool, true)).toHaveProperty('message');
+  }
   await sql.begin(async (tx) => {
     await tx`UPDATE follow_ups SET due_at=now() WHERE id=${commitment.id}`;
     await tx`UPDATE jobs SET available_at=now() WHERE id=${commitment.job_id}`;
@@ -1300,7 +1305,17 @@ test('an unanswered Sarah conversation produces one draft awaiting administrator
   await processFollowUpJob(timer, signal);
   await processFollowUpJob(timer, signal);
   await completeJob(timer.id, workerId);
-  await draft(model, 1);
+  const generate: ModelCall = (request) => {
+    if (request.stage === 'main') {
+      expect(request.tools?.search_people).toBeDefined();
+      expect(request.tools?.propose_introduction).toBeUndefined();
+      expect(request.tools?.wait_for_reply).toBeUndefined();
+      expect(request.tools?.schedule_follow_up).toBeUndefined();
+    }
+    return model(request);
+  };
+  generate.quote = model.quote;
+  await draft(generate, 1);
   const approvals = await sql`
     SELECT i.review_status FROM action_intents i JOIN follow_ups f ON f.approval_intent_id=i.id
     WHERE f.id=${commitment.id} AND f.reply_email_id IS NULL AND f.outcome_kind='draft_ready'

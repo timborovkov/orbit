@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
 import type { PolicyContext } from '@/lib/policy/gateway';
+import { introductionTools } from '@/lib/runtime/introductions/tools';
 import { loadMcpToolsForAgent, type McpConnectionConfig } from '@/lib/runtime/mcp';
 import {
   createLoadSkillTool,
@@ -69,7 +70,15 @@ export async function prepareRunTools(options: {
     await options.onCall?.(entry);
   };
 
-  const tools: Record<string, Tool> = {};
+  const tools: Record<string, Tool> = options.executionToken
+    ? introductionTools({
+        policy: options.policy,
+        executionToken: options.executionToken,
+        signal: options.signal,
+        toolSteps,
+        onCall: record,
+      })
+    : {};
   if (attachedSkills.length) {
     tools[LOAD_SKILL_TOOL] = createLoadSkillTool({
       skills: attachedSkills,

@@ -3,6 +3,7 @@ import { KNOWLEDGE_SEARCH_TOOL, type KnowledgeContentKind } from '@/lib/knowledg
 import type { LifecycleState } from '@/lib/lifecycle';
 import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
 import type { AgentConfig } from '@/lib/runtime/config';
+import { PEOPLE_INTRODUCE, PEOPLE_SEARCH } from '@/lib/runtime/introductions/types';
 import type { SimulationResult } from '@/lib/runtime/simulation';
 import type { ApprovalOnReject, ApprovalSettings, RunStatus } from '@/lib/schema';
 import { demoTime, utcDay, utcMonthStart } from '@/lib/seed/clock';
@@ -171,7 +172,7 @@ export function demoAgents(): DemoAgentSpec[] {
       approvalExpiresAfterHours: 72,
       approvalOnReject: 'end',
       approvalSpendCents: 1_500,
-      enabledTools: [],
+      enabledTools: [PEOPLE_SEARCH, PEOPLE_INTRODUCE],
     },
   ];
 }

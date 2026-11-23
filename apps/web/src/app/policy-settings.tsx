@@ -1,5 +1,8 @@
+import Link from 'next/link';
+
 import { Inbox } from 'lucide-react';
 
+import { savePeopleGrant } from '@/actions/introductions';
 import {
   reviewProposal,
   saveChannelGrant,
@@ -20,6 +23,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import type { ConsentScope } from '@/lib/policy/scopes';
+import { INTRODUCTION_REVIEW, peopleGrants } from '@/lib/runtime/introductions/types';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
 type Workspace = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>;
@@ -31,6 +35,7 @@ const actionLabels = {
   follow: 'Follow',
   bookmark: 'Bookmark',
   introduce: 'Introduce',
+  [INTRODUCTION_REVIEW]: 'Introduction draft',
   escalate: 'Escalate',
 } as Record<string, string>;
 
@@ -67,8 +72,7 @@ export function ReviewSettings({
         <h2>Approval requirements</h2>
         <p className="muted">
           Off by default. Enable actions that must pause for an administrator before continuing.
-          Introductions and escalations are optional here; recipient consent is configured
-          separately.
+          People introductions enter review after both participants agree.
         </p>
       </div>
       <ApprovalToolsForm
@@ -107,19 +111,46 @@ export function ConsentSettings({
   agentId,
   consents,
   consentRequiredTools,
+  enabledTools,
 }: {
   agentId: string;
   consents: Workspace['consents'];
+  enabledTools: string[];
   consentRequiredTools: ConsentScope[];
 }) {
+  const grantedTools = new Set(enabledTools);
   return (
     <section className="access-workbench">
       <div className="editor-section-heading">
         <h2>Recipient consent</h2>
         <p className="muted">
-          Record a recipient’s choice and the source of their consent for this agent.
+          <Link href="/people/introductions">People introductions</Link> require agreement from both
+          people on the proposed disclosure.
         </p>
       </div>
+      <section className="space-y-4" aria-labelledby="people-permissions">
+        <h3 id="people-permissions">People permissions</h3>
+        <div className="grid gap-4 md:grid-cols-2">
+          {peopleGrants.map(({ type, label, description }) => {
+            const enabled = grantedTools.has(type);
+            return (
+              <WorkspaceForm
+                key={type}
+                action={savePeopleGrant}
+                label={`${enabled ? 'Disable' : 'Enable'} ${label.toLowerCase()}`}
+              >
+                <input type="hidden" name="agentId" value={agentId} />
+                <input type="hidden" name="type" value={type} />
+                <input type="hidden" name="enabled" value={String(!enabled)} />
+                <p>
+                  <strong>{label}</strong> · {enabled ? 'Enabled' : 'Disabled'}
+                </p>
+                <p className="muted">{description}</p>
+              </WorkspaceForm>
+            );
+          })}
+        </div>
+      </section>
       <ActionRequirementsForm
         agentId={agentId}
         idPrefix="consent-tool"
@@ -128,7 +159,7 @@ export function ConsentSettings({
         action={saveConsentRequirements}
         label="Save consent requirements"
         legend="Require recipient consent"
-        description="Choose which actions require recorded permission from everyone involved. Recorded refusals and revocations always block the action."
+        description="Choose which scenario actions require recorded permission from everyone involved. Recorded refusals and revocations always block the action."
       />
       <div className="consent-records-block">
         <h3 className="consent-records-title">Existing consents</h3>
@@ -201,10 +232,7 @@ export function ProposalReview({
     <section className="access-workbench" aria-labelledby="proposal-review-title">
       <div className="editor-section-heading">
         <h2 id="proposal-review-title">Proposal review</h2>
-        <p className="muted">
-          Pending items suspend the run until approved or rejected. Edit a draft before approving
-          when needed.
-        </p>
+        <p className="muted">Review pending proposals and find past decisions.</p>
       </div>
       {reviews.length === 0 ? (
         <Empty className="border border-border py-10 md:py-12">
@@ -228,8 +256,14 @@ export function ProposalReview({
                   {proposal.status === 'pending' ? 'Pending review' : proposal.status}
                 </span>
               </div>
-              {proposal.recipients.length > 0 && (
-                <p className="muted">{proposal.recipients.join(' · ')}</p>
+              {proposal.introductionId ? (
+                <Link href={`/people/introductions/${proposal.introductionId}`}>
+                  View disclosure and consent
+                </Link>
+              ) : (
+                proposal.recipients.length > 0 && (
+                  <p className="muted">{proposal.recipients.join(' · ')}</p>
+                )
               )}
               {proposal.reason && <p>{proposal.reason}</p>}
               {proposal.status === 'pending' ? (
@@ -238,18 +272,22 @@ export function ProposalReview({
                     <input type="hidden" name="agentId" value={agentId} />
                     <input type="hidden" name="intentId" value={proposal.id} />
                     <input type="hidden" name="decision" value="approved" />
-                    <Field>
-                      <FieldLabel htmlFor={`draft-${proposal.id}`}>
-                        Draft (edit before approve)
-                      </FieldLabel>
-                      <Textarea
-                        id={`draft-${proposal.id}`}
-                        name="draft"
-                        rows={3}
-                        defaultValue={proposal.draft ?? ''}
-                        maxLength={8000}
-                      />
-                    </Field>
+                    {proposal.actionType === INTRODUCTION_REVIEW ? (
+                      <blockquote className="approvals-preview">{proposal.draft}</blockquote>
+                    ) : (
+                      <Field>
+                        <FieldLabel htmlFor={`draft-${proposal.id}`}>
+                          Draft (edit before approve)
+                        </FieldLabel>
+                        <Textarea
+                          id={`draft-${proposal.id}`}
+                          name="draft"
+                          rows={3}
+                          defaultValue={proposal.draft ?? ''}
+                          maxLength={8000}
+                        />
+                      </Field>
+                    )}
                   </WorkspaceForm>
                   <WorkspaceForm action={reviewProposal} label="Reject">
                     <input type="hidden" name="agentId" value={agentId} />

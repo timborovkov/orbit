@@ -31,6 +31,10 @@ import type {
   FollowUpStatus,
 } from '@/lib/runtime/follow-ups/types';
 import type {
+  IntroductionDecision,
+  IntroductionDisclosure,
+} from '@/lib/runtime/introductions/types';
+import type {
   MemoryNote,
   MemorySubject,
   PersonMemoryField,
@@ -402,6 +406,38 @@ export const actionIntents = pgTable('action_intents', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const introductionProposals = pgTable(
+  'introduction_proposals',
+  {
+    id: uuid('id')
+      .primaryKey()
+      .references(() => actionIntents.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id').notNull(),
+    runId: uuid('run_id').notNull(),
+    firstPersonId: uuid('first_person_id')
+      .notNull()
+      .references(() => people.id),
+    secondPersonId: uuid('second_person_id')
+      .notNull()
+      .references(() => people.id),
+    firstDisclosure: jsonb('first_disclosure').$type<IntroductionDisclosure>().notNull(),
+    secondDisclosure: jsonb('second_disclosure').$type<IntroductionDisclosure>().notNull(),
+    rationale: text('rationale').notNull(),
+    reviewIntentId: uuid('review_intent_id')
+      .unique()
+      .references(() => actionIntents.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique().on(table.id, table.agentId),
+    foreignKey({
+      columns: [table.agentId, table.runId],
+      foreignColumns: [runs.agentId, runs.id],
+    }).onDelete('cascade'),
+    index('introduction_proposals_created').on(table.createdAt.desc(), table.id.desc()),
+  ],
+);
+
 export const outboundActions = pgTable('outbound_actions', {
   id: uuid('id').defaultRandom().primaryKey(),
   agentId: uuid('agent_id')
@@ -471,8 +507,18 @@ export const recipientConsents = pgTable(
     granted: boolean('granted').notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     actor: text('actor').notNull(),
+    introductionId: uuid('introduction_id'),
+    introductionDecision: text('introduction_decision').$type<IntroductionDecision>(),
   },
-  (table) => [primaryKey({ columns: [table.agentId, table.recipient, table.scope] })],
+  (table) => [
+    unique('recipient_consents_scope_key')
+      .on(table.agentId, table.recipient, table.scope, table.introductionId)
+      .nullsNotDistinct(),
+    foreignKey({
+      columns: [table.introductionId, table.agentId],
+      foreignColumns: [introductionProposals.id, introductionProposals.agentId],
+    }).onDelete('cascade'),
+  ],
 );
 
 export const knowledgeLibraries = pgTable('knowledge_libraries', {
