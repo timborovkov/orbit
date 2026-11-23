@@ -163,6 +163,8 @@ export async function reviewProposal(form: FormData) {
   });
   revalidatePath(`/agents/${agentId}`);
   revalidatePath('/approvals');
+  revalidatePath('/people/introductions');
+  revalidatePath('/people/introductions/[id]', 'page');
   return result;
 }
 
@@ -184,6 +186,8 @@ export async function reviewProposalsBulk(form: FormData) {
   }
   const result = await reviewProposedActionsBulk(actor, items, decision.data);
   revalidatePath('/approvals');
+  revalidatePath('/people/introductions');
+  revalidatePath('/people/introductions/[id]', 'page');
   for (const item of items) revalidatePath(`/agents/${item.agentId}`);
   return result;
 }

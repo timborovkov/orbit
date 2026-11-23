@@ -79,7 +79,13 @@ export default async function PeoplePage({
         )}
         <div className="people-heading">
           <h1>{linkSource ? 'Choose a person to link' : 'People'}</h1>
-          {linkSource && <Link href={personHref(linkSource.personId)}>Cancel linking</Link>}
+          {linkSource ? (
+            <Link href={personHref(linkSource.personId)}>Cancel linking</Link>
+          ) : (
+            <Button variant="outline" asChild>
+              <Link href="/people/introductions">Introductions</Link>
+            </Button>
+          )}
         </div>
         <form action="/people" method="get" className="people-control-row" role="search">
           <label className="sr-only" htmlFor="people-search">
