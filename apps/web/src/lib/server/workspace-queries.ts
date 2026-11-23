@@ -1,10 +1,11 @@
 import 'server-only';
 
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { budgetViolationMessage, parseBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
+import { ACTIVE_CRAWL_STATES } from '@/lib/research';
 import { channelForRun } from '@/lib/runtime/channels/registry';
 import { openRouterKeySource } from '@/lib/runtime/openrouter-key';
 import { latestPersistedRun } from '@/lib/runtime/playground-ui';
@@ -26,6 +27,7 @@ import {
   runs,
   templates,
   usageCounters,
+  webCrawls,
 } from '@/lib/schema';
 
 async function countPendingApprovals() {
@@ -124,6 +126,19 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
   await requireAdmin();
   const agent = (await db().select().from(agents).where(eq(agents.id, id))).at(0);
   if (!agent) return null;
+  const activeCrawl = inArray(webCrawls.status, ACTIVE_CRAWL_STATES);
+  // Keep a newly finished crawl visible long enough for an operator to inspect its outcome.
+  const recentCrawl = db()
+    .select({ runId: webCrawls.runId })
+    .from(webCrawls)
+    .where(
+      and(
+        eq(webCrawls.agentId, id),
+        or(activeCrawl, gt(webCrawls.finishedAt, sql`now() - interval '10 minutes'`)),
+      ),
+    )
+    .orderBy(desc(activeCrawl), desc(webCrawls.finishedAt))
+    .limit(1);
   const [
     versions,
     keys,
@@ -162,6 +177,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
       .where(and(eq(runs.agentId, id), ne(runs.origin, 'replay')))
       .orderBy(
         ...(focusRunId ? [desc(sql`${runs.id} = ${focusRunId}::uuid`)] : []),
+        desc(sql`coalesce(${runs.id} = (${recentCrawl}), false)`),
         desc(runs.createdAt),
       )
       .limit(50),

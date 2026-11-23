@@ -32,7 +32,7 @@ Orbit is not a multi-tenant SaaS in its first incarnation, nor a single-purpose 
 | Authentication | Environment-configured administrator password login; OAuth/magic links planned; no public registration |
 | Hosting | Railway + Docker, single monorepo |
 | Email | Resend for sending and inbound routing; PostgreSQL-backed virtual inboxes |
-| Research | Exa web search; optional Firecrawl extraction and Browserbase later |
+| Research | Firecrawl v2 for search, page reads and controlled crawling |
 
 Deployment target: one web service, one worker service, PostgreSQL and RustFS on Railway. RustFS uses a persistent data volume; the web service accesses its private S3 endpoint. No Go, Redis, Kafka, Kubernetes or per-agent containers for the MVP. Separate credentials and data scopes provide logical isolation. Database migrations run automatically on Railway pre-deploy and again at web/worker process start under a shared Postgres advisory lock; operators do not apply SQL by hand for routine deploys.
 
@@ -103,7 +103,7 @@ Keep personality and operating rules in instructions, reference knowledge in RAG
 
 ## 9. Tool registry, MCP and real-world actions
 
-Native tools and MCP operations share a typed capability registry. Examples include web.search, web.read, knowledge.search, x.reply, x.follow, email.send, calendar.schedule, people.search, people.introduce, task.schedule, support.createTicket and phone.call. Each agent explicitly enables the individual tools it may use.
+Native tools and MCP operations share a typed capability registry. Examples include web.search, web.read, web.crawl, knowledge.search, x.reply, x.follow, email.send, calendar.schedule, people.search, people.introduce, task.schedule, support.createTicket and phone.call. Each agent explicitly enables the individual tools it may use.
 
 Tools may complete synchronously or return a pending external identifier. Long-running work is represented as durable tasks with deadlines, wait conditions, status, retries and cancellation. Inbound webhook results are first persisted to PostgreSQL, then resume the task. The agent can make commitments that survive restarts.
 
@@ -143,8 +143,7 @@ Administrators manage library records under global navigation; per-agent pickers
 | --- | --- |
 | X | First social source and action channel; polling/mentions through approved API access. |
 | Resend | Per-agent address on a dedicated subdomain; inbound webhooks, sending, replies, attachments, delivery outcomes. |
-| Exa | Provider-independent web.search tool for research and discovery. |
-| Firecrawl | Optional webpage extraction/crawling when basic web.read is insufficient. |
+| Firecrawl | Initial provider for the provider-neutral tools `web.search`, `web.read` and `web.crawl`. |
 | MCP | Agent-scoped remote authenticated tools; Sentry, product data, CRM or custom systems. |
 | Telegram | Future per-agent bot for external conversation and optional operator control. |
 | Calendar | Availability, booking and invitations; explicit participant agreement. |
@@ -152,6 +151,12 @@ Administrators manage library records under global navigation; per-agent pickers
 | Browserbase / Daytona | Optional isolated browser or code execution only when the capability genuinely requires it. |
 
 Credentials are encrypted centrally and assigned per agent: separate OpenRouter, X and Telegram credentials by default. OpenRouter may also use an optional deployment-wide `OPENROUTER_API_KEY` environment default; a per-agent encrypted key overrides it at inference time without copying the env value into storage. The runtime retrieves secrets for authorised connectors; LLM prompts and tool responses never receive raw keys. Support rotation, revocation and degraded-connection status.
+
+Administrators grant each web research tool independently in Agent Access. All three default to off and use the policy gateway. Search returns ranked public sources and excerpts. Read returns citable content from one public page. Crawl accepts approved origins or path prefixes per agent, including an explicit wildcard for any public site. Orbit limits discovery to the seed scope and checks the final page URL before accepting results. Firecrawl may follow redirects and fetch related resources. Server limits bound pages, depth, concurrent crawls, daily page usage and execution time.
+
+Set the server-only `FIRECRAWL_API_ORIGIN` to an HTTP(S) origin. It defaults to `https://api.firecrawl.dev`, and all `/v2` calls use that origin, including status, pagination and cancellation. An encrypted per-agent Firecrawl key takes precedence over the server-only `FIRECRAWL_API_KEY` deployment default. Firecrawl Local supports keyless reads and crawls on a trusted instance configured for public targets. Local forwards web search to Firecrawl Cloud and may use a Cloud fallback for blocked reads. `FIRECRAWL_CLOUD=off` on the Local process disables forwarding and fallback. Orbit surfaces unsupported operations as unavailable.
+
+Crawl returns an Orbit crawl ID and continues in the durable PostgreSQL queue. The persisted provider job ID and progress allow a restarted Orbit worker to resume polling. Activity shows progress, cancellation, cited results and failures. If Firecrawl Local loses its in-memory job, Orbit records the failure so an operator can decide whether to rerun. Web content is untrusted evidence linked to the originating run. Importing a saved page into a shared Knowledge library requires an explicit administrator action.
 
 ## 11. Scheduling and execution modes
 

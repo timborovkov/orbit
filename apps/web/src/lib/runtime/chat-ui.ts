@@ -35,6 +35,7 @@ export interface PlaygroundStreamProgress {
   emittedActions: Set<string>;
   emittedKnowledge: boolean;
   emittedMemory: boolean;
+  emittedWeb: boolean;
   textStarted: boolean;
   textFinished: boolean;
 }
@@ -45,6 +46,7 @@ export function createPlaygroundStreamProgress(): PlaygroundStreamProgress {
     emittedActions: new Set(),
     emittedKnowledge: false,
     emittedMemory: false,
+    emittedWeb: false,
     textStarted: false,
     textFinished: false,
   };
@@ -135,6 +137,23 @@ export function playgroundChunksFromResult(
         type: 'tool-output-available',
         toolCallId: MEMORY_SEARCH,
         output: grounded.memories,
+      },
+    );
+  }
+  if (grounded?.webSources.length && !progress.emittedWeb) {
+    progress.emittedWeb = true;
+    chunks.push(
+      {
+        type: 'tool-input-available',
+        toolCallId: 'web.sources',
+        toolName: 'web.sources',
+        title: 'Web sources',
+        input: {},
+      },
+      {
+        type: 'tool-output-available',
+        toolCallId: 'web.sources',
+        output: grounded.webSources,
       },
     );
   }

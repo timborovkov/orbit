@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import {
   BookOpen,
   CalendarClock,
+  Globe,
   KeyRound,
   PauseCircle,
   Plug,
@@ -18,6 +19,7 @@ import { AccessPanel } from '@/app/access-panel';
 import { BudgetSettings, type BudgetUsageView } from '@/app/budget-settings';
 import { LifecycleControls } from '@/app/lifecycle-controls';
 import { ConsentSettings, ReviewSettings } from '@/app/policy-settings';
+import { ResearchAccess } from '@/app/research-access';
 import { McpPicker, type McpPickerConnection, SkillPicker } from '@/app/resource-pickers';
 import { WorkspaceForm } from '@/app/workspace-form';
 import {
@@ -46,6 +48,7 @@ const sections = [
   { id: 'consent', title: 'Consent', icon: ShieldCheck },
   { id: 'skills', title: 'Skills', icon: BookOpen },
   { id: 'mcp', title: 'MCP', icon: Plug },
+  { id: 'research', title: 'Web research', icon: Globe },
   { id: 'openrouter', title: 'OpenRouter', icon: KeyRound },
 ] as const;
 
@@ -71,6 +74,7 @@ export function AccessWorkbench({
   skillIds,
   mcpConnections,
   mcpSelections,
+  research,
 }: {
   agentId: string;
   agentName: string;
@@ -93,6 +97,7 @@ export function AccessWorkbench({
   skillIds: string[];
   mcpConnections: McpPickerConnection[];
   mcpSelections: Workspace['mcpSelections'];
+  research: Omit<Parameters<typeof ResearchAccess>[0], 'agentId'>;
 }) {
   const [active, setActive] = useState<(typeof sections)[number]['id']>('lifecycle');
   const [compact, setCompact] = useState(false);
@@ -176,6 +181,7 @@ export function AccessWorkbench({
         selections={mcpSelections}
       />
     ),
+    research: <ResearchAccess agentId={agentId} {...research} />,
     openrouter: (
       <AccessPanel
         agentId={agentId}

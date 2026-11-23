@@ -26,6 +26,7 @@ import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
+import { ACTIVE_CRAWL_STATES, type CrawlStatus } from '@/lib/research';
 import { channelGrantOptions } from '@/lib/runtime/channels/registry';
 import { followUpWorkspaceRefresh } from '@/lib/runtime/follow-ups/refresh';
 import { isCommitmentTool } from '@/lib/runtime/follow-ups/types';
@@ -38,6 +39,7 @@ import {
 } from '@/lib/server/knowledge-queries';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
 import { listAgentMemories } from '@/lib/server/memory-queries';
+import { getWebResearchAccess, getWebResearchActivity } from '@/lib/server/research-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { storageConfigured } from '@/lib/storage/objects';
@@ -104,6 +106,8 @@ export default async function AgentWorkspace({
     followUps,
     activityEvents,
     memory,
+    webResearch,
+    webResearchAccess,
   ] = await Promise.all([
     listKnowledgeDocuments(id),
     listGrantedKnowledgeLibraries(id),
@@ -113,6 +117,11 @@ export default async function AgentWorkspace({
     listFollowUpsForAgent(id),
     listActivityEventsForAgent(id),
     listAgentMemories(id, memoryPage),
+    getWebResearchActivity(
+      id,
+      history.map(({ id: runId }) => runId),
+    ),
+    getWebResearchAccess(id),
   ]);
   const lifecycle = agent.lifecycle;
   const approvalSettings = current.approvalSettings ?? agent;
@@ -129,6 +138,8 @@ export default async function AgentWorkspace({
         waitForReply: item.waitForEvent === 'reply',
       })),
   });
+  const activeCrawlStates = new Set<CrawlStatus>(ACTIVE_CRAWL_STATES);
+  const activeCrawls = webResearch.crawls.some((crawl) => activeCrawlStates.has(crawl.status));
   const hasPendingRuns = history.some(
     (run) =>
       run.displayStatus === 'queued' ||
@@ -138,6 +149,7 @@ export default async function AgentWorkspace({
   const hasPendingKnowledge =
     knowledgeDocuments.some((doc) => doc.status === 'pending' || doc.status === 'processing') ||
     sharedLibraries.some((library) => library.pendingCount > 0);
+  const hasActiveWork = hasPendingRuns || hasPendingKnowledge || activeCrawls || inbox.pending;
   const knowledgeDocumentCount =
     knowledgeDocuments.length +
     sharedLibraries.reduce((sum, library) => sum + library.documentCount, 0);
@@ -203,6 +215,7 @@ export default async function AgentWorkspace({
           toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [],
       }))}
       mcpSelections={mcpSelections}
+      research={webResearchAccess}
     />
   );
   const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;
@@ -225,6 +238,7 @@ export default async function AgentWorkspace({
       history={history}
       versions={versions}
       activityEvents={activityEvents}
+      webResearch={webResearch}
       focusRunId={focusRunId}
       versionFor={versionFor}
     />
@@ -264,15 +278,9 @@ export default async function AgentWorkspace({
           </div>
         </div>
         <PendingRunRefresh
-          active={
-            hasPendingRuns || hasPendingKnowledge || inbox.pending || followUpRefresh.pollFrequently
-          }
+          active={hasActiveWork || followUpRefresh.pollFrequently}
           refreshAt={followUpRefresh.refreshAt}
-          intervalMs={
-            hasPendingRuns || hasPendingKnowledge || inbox.pending
-              ? undefined
-              : followUpRefresh.intervalMs
-          }
+          intervalMs={hasActiveWork ? undefined : followUpRefresh.intervalMs}
         />
         <Suspense
           fallback={

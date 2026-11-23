@@ -305,6 +305,16 @@ linked job status and the provider's recorded cost. Label missing cost
 explicitly. Use a flexible primary column and a 280px version column,
 stacked at 900px and narrower. Preserve source citations with saved runs.
 
+Show web citations inside the originating run in Activity. Crawl results show
+the target, status, pages read, page limit and depth limit. Keep an active crawl
+run in Activity when newer runs fill History. Keep the most recently finished
+crawl visible for ten minutes. Keep cancellation available while the crawl is pending. Show a final cancellation or failure reason
+in the same row. Source excerpts render as plain text. An import disclosure
+lets the administrator pick a shared library and then confirm the import.
+
+Chromium verified grant and credential controls at desktop width and the
+390px layout for cancellation, citation inspection, and explicit import.
+
 ### Follow-ups
 
 Administrators create internal reminders from the Follow-ups tab. Agent-created
@@ -387,9 +397,9 @@ send-outcome rendering, and the mobile layout in both themes at 1440px and 390px
 
 ### Access
 
-Use a left navigator for Lifecycle, Budgets, Approvals, Commitments, Consent, Skills,
-MCP and OpenRouter. At 900px and narrower, switch to a Select. Keep panels
-mounted to preserve unsaved fields.
+Use a left navigator for Lifecycle, Budgets, Approvals, Commitments, Consent,
+Skills, MCP, Web research and OpenRouter. At 900px and narrower, switch to a
+Select. Keep panels mounted to preserve unsaved fields.
 
 - **Lifecycle** uses radio cards and explicitly describes the current limits of Live mode.
 - **Budgets** group related values in a two-column desktop grid. Align each No cap Switch with its spend label on wide screens and put it below the label on phones. Keep units next to the input.
@@ -397,6 +407,9 @@ mounted to preserve unsaved fields.
 - **Commitments** shows the two independent opt-in grants with their current state and enable or disable controls.
 - **Consent** shows independent People search and proposal grants. Scenario consent settings and evidence records follow. People proposals collect both participants’ decisions on the introduction detail page.
 - **Skills and MCP** use checkboxes to assign library entries. Attached MCP connections show a nested checklist of administrator-classified read-only tools. New attachments start with an empty checklist.
+- **Web research** shows independent grant checkboxes and a multiline list of
+  approved crawl targets. The Firecrawl key uses the shared credential form.
+  Show the credential source next to the Firecrawl heading.
 - **OpenRouter** identifies the active source as an agent override, environment default or missing key. Use a password input for the override and clear it after submission. Removing the override falls back to the environment default if configured. Display only the source label.
 
 ## People
