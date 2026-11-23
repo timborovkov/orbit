@@ -86,8 +86,9 @@ test('edits independent grants, cancels a pending crawl and imports a cited page
   await openAccessSection(page, 'Web research');
   await expect(page.getByLabel('Approved crawl sites or paths')).toHaveValue(target);
   await openWorkspaceTab(page, 'History');
-  await expect(page.getByText('Inspect crawl documentation', { exact: true })).toBeVisible();
-  await page.getByText('Inspect crawl documentation', { exact: true }).click();
+  const runSummary = page.locator('#run-' + runId + ' > summary');
+  await expect(runSummary).toBeVisible();
+  await runSummary.click();
   const crawl = page.getByRole('region', { name: 'Crawl ' + target });
   await expect(crawl).toContainText('Queued');
   await expect(crawl).toContainText('depth limit 1');
