@@ -22,7 +22,11 @@ import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
 import { X_DISCOVERY_POLL_JOB, X_PROVIDER } from '@/lib/runtime/x/types';
 import { createAgentFromTemplate } from '@/lib/server/agents-mutations';
 import { persistGlobalPause } from '@/lib/server/controls-mutations';
-import { persistBudgets, persistLifecycle } from '@/lib/server/lifecycle-mutations';
+import {
+  persistApprovalTools,
+  persistBudgets,
+  persistLifecycle,
+} from '@/lib/server/lifecycle-mutations';
 import { selectAgentMemoryEvidence } from '@/lib/server/memory-queries';
 import {
   persistChannelGrant,
@@ -640,6 +644,17 @@ test.each([
     'budget',
     async (id: string) => persistBudgets(admin, id, { ...budgetDefaults, dailyOutboundActions: 0 }),
     'outbound-action cap',
+  ],
+  [
+    'current approval requirements',
+    async (id: string) =>
+      persistApprovalTools(admin, id, 1, {
+        approvalTools: [X_REPLY_ACTION],
+        approvalSpendCents: null,
+        approvalExpiresAfterHours: null,
+        approvalOnReject: 'continue',
+      }),
+    'An administrator must review',
   ],
 ] as const)('queued X delivery rechecks %s', async (_name, change, reason) => {
   const { agentId } = await discoverReply();

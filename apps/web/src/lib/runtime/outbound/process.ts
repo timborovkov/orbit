@@ -140,7 +140,9 @@ export async function processOutboundJob(
       return null;
     }
 
-    const ctx = await loadPolicyContext(row.agentId, actor, intent.runId, tx);
+    const ctx = await loadPolicyContext(row.agentId, actor, intent.runId, tx, {
+      currentApproval: intent.reviewStatus === null,
+    });
     if (!ctx) {
       await block('Agent unavailable for dispatch policy checks.');
       return null;

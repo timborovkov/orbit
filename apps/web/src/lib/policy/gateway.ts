@@ -99,6 +99,7 @@ export async function loadPolicyContext(
   actor: string,
   runId?: string | null,
   store: Store = db(),
+  options: { currentApproval?: boolean } = {},
 ): Promise<PolicyContext | null> {
   const agent = (await store.select().from(agents).where(eq(agents.id, agentId))).at(0);
   if (!agent) return null;
@@ -115,7 +116,7 @@ export async function loadPolicyContext(
           .where(and(eq(runs.id, runId), eq(runs.agentId, agentId)))
       ).at(0)
     : undefined;
-  const approval = runRow?.settings ?? agent;
+  const approval = options.currentApproval ? agent : (runRow?.settings ?? agent);
   const executionContext = executionContextForOrigin(runRow?.origin);
   const global = (await store.select().from(controls).where(eq(controls.id, 1))).at(0);
   const today = new Date().toISOString().slice(0, 10);
