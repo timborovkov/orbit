@@ -28,7 +28,7 @@ docker build -f docker/worker.Dockerfile -t orbit-worker .
 
 `NEXT_PUBLIC_SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` are inlined into the browser bundle at image build. Unset, browser Sentry stays off. Setting them only on the running web container cannot enable capture. Compose forwards them from the host env as web build args. Railway injects matching service variables because the Dockerfile declares those `ARG` names. Server-side Sentry still uses runtime `SENTRY_DSN` on web and worker.
 
-The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker claims simulation and knowledge-processing jobs, heartbeats leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
+The web image includes the self-hosted fonts, favicon and brand assets. `/health` checks the web process; authenticated pages require a working database. The worker heartbeats queue leases, recovers expired claims, and drains in-flight work on SIGTERM. Set the same `DATABASE_URL`, optional `ORBIT_ENCRYPTION_KEY` and optional `OPENROUTER_API_KEY` on the worker as on the web service.
 
 The Dockerfiles use the base image's trust store for dependency installation. Railway's Docker builder does not support BuildKit secret mounts.
 
@@ -71,9 +71,10 @@ keys. Avoid `docker compose down -v` unless intentionally deleting local data.
 Replacement/removal deletes the previous object after committing its new database
 reference. Failed deletions produce an audit entry containing the object key for
 manual cleanup. A process crash between object upload and database commit can leave
-an unreferenced object; reconcile `agents/*/pictures/*` against `agents.picture_key`
-and `agents/*/knowledge/*` and `knowledge-libraries/*` against
-`knowledge_documents.object_key` before deleting orphans.
+an unreferenced object. Reconcile `agents/*/pictures/*` against `agents.picture_key`
+before deleting orphaned pictures. For orphaned documents, check both
+`agents/*/knowledge/*` and `knowledge-libraries/*` against
+`knowledge_documents.object_key`.
 
 ## Runtime telemetry
 
