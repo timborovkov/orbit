@@ -458,9 +458,10 @@ Use the registered **X reply** label for reply proposals and channel
 permissions. Keep the author and source post fixed. Shadow proposals stay
 pending and Live agents can either send automatically or require individual
 approval. Show the connected account by handle and accept replacement tokens
-in a password field. Activity shows the reply outcome and provider reply ID
-when available, and links to the originating run. Label fixture delivery
-explicitly.
+in a password field. Link the scope instructions to the token field and give
+the required X approval checkbox its own labeled row. Activity shows the reply
+outcome and provider reply ID when available, and links to the originating run.
+Label fixture delivery explicitly.
 
 The Chromium approval flow covers editing John’s proposal in Shadow and
 approving it in Live at 1440px. At 390px it checks the fixture outcome,

@@ -158,6 +158,12 @@ test('John reviews a discovered X reply and sees its fixture delivery in Activit
     await openAccessApprovals(page);
     await expect(page.getByRole('button', { name: 'Disable X reply', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'X account', exact: true })).toBeVisible();
+    await expect(page.getByLabel('X user access token')).toHaveAccessibleDescription(
+      'Use a user token with tweet.read, tweet.write and users.read access.',
+    );
+    await expect(
+      page.getByRole('checkbox', { name: 'X has approved this account for AI replies.' }),
+    ).toHaveAttribute('required', '');
     await page
       .getByRole('heading', { name: 'Channel permissions', exact: true })
       .scrollIntoViewIfNeeded();

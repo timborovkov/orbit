@@ -18,7 +18,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import type { ConsentScope } from '@/lib/policy/scopes';
@@ -117,24 +117,29 @@ export function ReviewSettings({
           label={xAccount ? 'Replace X token' : 'Connect X account'}
         >
           <input type="hidden" name="agentId" value={agentId} />
-          <Field>
-            <FieldLabel htmlFor="x-user-token">X user access token</FieldLabel>
-            <Input
-              id="x-user-token"
-              name="token"
-              type="password"
-              autoComplete="new-password"
-              required
-              maxLength={4096}
-            />
-            <p className="field-hint">
-              Use a user token with tweet.read, tweet.write and users.read access.
-            </p>
-          </Field>
-          <label className="flex items-start gap-2">
-            <input type="checkbox" name="platformApproval" required />X has approved this account
-            for AI replies.
-          </label>
+          <FieldGroup className="gap-4">
+            <Field>
+              <FieldLabel htmlFor="x-user-token">X user access token</FieldLabel>
+              <Input
+                id="x-user-token"
+                name="token"
+                type="password"
+                autoComplete="new-password"
+                aria-describedby="x-user-token-help"
+                required
+                maxLength={4096}
+              />
+              <FieldDescription id="x-user-token-help">
+                Use a user token with tweet.read, tweet.write and users.read access.
+              </FieldDescription>
+            </Field>
+            <Field orientation="horizontal">
+              <input type="checkbox" id="x-platform-approval" name="platformApproval" required />
+              <FieldLabel htmlFor="x-platform-approval">
+                X has approved this account for AI replies.
+              </FieldLabel>
+            </Field>
+          </FieldGroup>
         </WorkspaceForm>
         {xAccount && (
           <WorkspaceForm action={saveXReplyConnection} label="Disconnect X account">

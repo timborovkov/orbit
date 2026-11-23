@@ -1,4 +1,6 @@
-# Durable commitments checklist
+# Implementation checklist
+
+## Durable commitments
 
 The [architecture](architecture.md#184-durable-commitments-and-tool-outcomes)
 owns the product scope. [Durable follow-ups](docs/follow-ups.md) describes the
