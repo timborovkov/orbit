@@ -14,6 +14,7 @@ import {
 } from '@/lib/runtime/people/identity';
 import { createXSearchAdapter } from '@/lib/runtime/x/adapter';
 import { compareSnowflake } from '@/lib/runtime/x/fixture';
+import { xPostId } from '@/lib/runtime/x/reply-input';
 import {
   X_DISCOVERY_ACTOR,
   X_DISCOVERY_POLL_INTERVAL_MS,
@@ -511,6 +512,8 @@ async function admitDiscoveryEvents(
     actor: X_DISCOVERY_ACTOR,
     configurationId,
     input: formatDiscoveryInput(post),
+    recipients:
+      event.authorId && xPostId.safeParse(event.authorId).success ? [`x:${event.authorId}`] : [],
   });
   if ('waitForCapacity' in admitted && admitted.waitForCapacity) {
     return {

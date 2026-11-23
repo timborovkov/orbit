@@ -173,6 +173,31 @@ test('replay execution context suppresses writes before approval', () => {
   expect(result.reasons.join(' ')).toContain('Replay execution suppresses');
 });
 
+test('replay x.reply denies without an author binding and suppresses once bound', () => {
+  const ctx = {
+    ...base,
+    lifecycle: 'live' as const,
+    executionContext: 'replay' as const,
+    enabledTools: ['x.reply'],
+    runChannel: 'x',
+  };
+  const missingAuthor = evaluateActionForTest(
+    ctx,
+    { type: 'x.reply', idempotencyKey: 'x-replay-empty', recipients: [] },
+    { consentFailure: 'An X reply requires one author.' },
+  );
+  expect(missingAuthor.decision).toBe('deny');
+  expect(missingAuthor.reasons.join(' ')).toContain('one author');
+
+  const bound = evaluateActionForTest(ctx, {
+    type: 'x.reply',
+    idempotencyKey: 'x-replay-bound',
+    recipients: ['x:12001'],
+  });
+  expect(bound.decision).toBe('suppressed');
+  expect(bound.reasons.join(' ')).toContain('Replay execution suppresses');
+});
+
 test('outbound dispatch gate refuses replay even when an adapter is available', () => {
   const denied = authorizeOutboundDispatch({
     executionContext: 'replay',

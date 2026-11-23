@@ -749,8 +749,12 @@ async function processSimulationRun(
       return;
     }
 
-    const xDiscovery = origin !== 'replay' && adapter?.id === X_PROVIDER;
-    const xReplyEnabled = xDiscovery && basePolicy.enabledTools.includes(X_REPLY_ACTION);
+    // Replay still evaluates x.reply against the case's author binding; only live
+    // discovery loads the source-event target used for dispatch keys and delivery.
+    const xChannel = adapter?.id === X_PROVIDER;
+    const xReplyEnabled = xChannel && basePolicy.enabledTools.includes(X_REPLY_ACTION);
+    const xDiscovery = origin !== 'replay' && xChannel;
+    const xReplyLive = xDiscovery && xReplyEnabled;
     const source = memoryCaptureOrigin(run.origin)
       ? await retryableStore(() => memoryRunSource(run))
       : null;
@@ -1126,7 +1130,7 @@ async function processSimulationRun(
                 }));
               }
               const target =
-                xReplyEnabled && stage === 'main' && actions.length
+                xReplyLive && stage === 'main' && actions.length
                   ? await retryableStore(() => loadXReplyTarget(db(), run.agentId, run.id))
                   : null;
               return await Promise.all(
@@ -1142,13 +1146,22 @@ async function processSimulationRun(
                     };
                   }
                   const xDraft = xReply ? xReplyDraft.safeParse(action.draft) : null;
-                  if (xReply && (!target || !xDraft?.success)) {
+                  if (xReplyLive && (!target || !xDraft?.success)) {
                     return {
                       ...action,
                       type: actionType,
                       policy: 'deny' as const,
                       effect:
                         'An X reply needs a matching post, author and draft of up to 280 characters without additional mentions.',
+                    };
+                  }
+                  if (xReply && !xReplyLive && xDraft && !xDraft.success) {
+                    return {
+                      ...action,
+                      type: actionType,
+                      policy: 'deny' as const,
+                      effect:
+                        'An X reply needs a draft of up to 280 characters without additional mentions.',
                     };
                   }
                   const decision = await telemetry.withSpan(
@@ -1165,16 +1178,16 @@ async function processSimulationRun(
                       retryableStore(() =>
                         authorizeAction(ctx, {
                           type: actionType,
-                          recipients: xReply && target ? [target.recipient] : run.recipients,
+                          recipients: xReplyLive && target ? [target.recipient] : run.recipients,
                           preliminary: stage === 'evaluator',
                           executionToken,
                           payload: {
                             draft: xDraft?.data ?? action.draft,
                             reason: action.reason,
-                            ...(xReply && target ? { xUserId: target.userId } : {}),
+                            ...(xReplyLive && target ? { xUserId: target.userId } : {}),
                           },
                           idempotencyKey:
-                            xReply && target
+                            xReplyLive && target
                               ? xReplyKey(run.agentId, target.postId)
                               : actionIdempotencyKey({
                                   runId: run.id,

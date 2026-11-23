@@ -18,9 +18,13 @@ import {
   saveEvaluationCase,
   startEvaluationComparison,
 } from '@/lib/runtime/evaluation';
+import { processSimulationRunForOrigin } from '@/lib/runtime/execute';
 import { encryptCredential } from '@/lib/runtime/secrets';
 import { draftAnswerFromResult, type ModelCall } from '@/lib/runtime/simulation';
+import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
+import { X_PROVIDER } from '@/lib/runtime/x/types';
 import { DEMO_SARAH_EMAIL_CASE_INPUT } from '@/lib/seed/modules/evaluations';
+import { recordConsent } from '@/lib/server/policy-mutations';
 
 const databaseUrl =
   process.env.TEST_DATABASE_URL ??
@@ -42,9 +46,11 @@ afterAll(async () => {
     await sql`DELETE FROM evaluation_cases WHERE agent_id=${id}`;
     await sql`DELETE FROM email_messages WHERE agent_id=${id}`;
     await sql`DELETE FROM email_threads WHERE agent_id=${id}`;
+    await sql`DELETE FROM recipient_consents WHERE agent_id=${id}`;
     await sql`DELETE FROM policy_decisions WHERE agent_id=${id}`;
     await sql`DELETE FROM action_intents WHERE agent_id=${id}`;
     await sql`DELETE FROM usage_counters WHERE agent_id=${id}`;
+    await sql`DELETE FROM source_events WHERE agent_id=${id}`;
     await sql`DELETE FROM simulation_runs WHERE agent_id=${id}`;
     await sql`DELETE FROM jobs WHERE payload->>'agentId'=${id}`;
     await sql`DELETE FROM agent_credentials WHERE agent_id=${id}`;
@@ -229,6 +235,146 @@ test('replay runs cannot dispatch an external write through the policy gateway',
     SELECT decision FROM action_intents WHERE run_id=${run.id} ORDER BY created_at DESC LIMIT 1
   `;
   expect(intent.decision).toBe('suppressed');
+});
+
+test('X discovery evaluation cases preserve the author binding for suppressed replay', async () => {
+  const { id, v1 } = await seedAgent();
+  await sql`UPDATE agents SET enabled_tools=${sql.json([X_REPLY_ACTION])} WHERE id=${id}`;
+  const input = 'X post 1001 by @ops_lead: Looking for a work-history product.';
+  const [sourceRun] = await sql`
+    INSERT INTO simulation_runs(
+      agent_id, configuration_id, origin, channel, input, status, result, actor, expires_at, recipients
+    )
+    VALUES (
+      ${id},
+      ${v1.id},
+      'discovery',
+      ${X_PROVIDER},
+      ${input},
+      'completed',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      ${admin},
+      now() + interval '1 hour',
+      ${sql.json([])}
+    )
+    RETURNING id
+  `;
+  await sql`
+    INSERT INTO source_events(
+      agent_id, provider, provider_event_id, payload, text, author_id, author_username, run_id
+    )
+    VALUES (
+      ${id},
+      ${X_PROVIDER},
+      '1001',
+      ${sql.json({ id: '1001' })},
+      ${input},
+      '12001',
+      'ops_lead',
+      ${sourceRun.id}
+    )
+  `;
+  await recordConsent({
+    actor: admin,
+    agentId: id,
+    recipient: 'x:12001',
+    scope: X_REPLY_ACTION,
+    evidence: 'The fixture author invited a reply on the source post.',
+    granted: true,
+  });
+
+  const saved = await saveEvaluationCase({
+    actor: admin,
+    agentId: id,
+    title: 'X discovery reply',
+    sourceKind: 'channel',
+    sourceRunId: sourceRun.id,
+    caseInput: '',
+  });
+  expect('caseId' in saved).toBe(true);
+  if (!('caseId' in saved)) return;
+
+  const [savedCase] =
+    await sql`SELECT recipients, source_channel FROM evaluation_cases WHERE id=${saved.caseId}`;
+  expect(savedCase).toMatchObject({
+    source_channel: X_PROVIDER,
+    recipients: ['x:12001'],
+  });
+
+  const [replay] = await sql`
+    INSERT INTO simulation_runs(
+      agent_id, configuration_id, origin, channel, input, status, result, actor, expires_at, recipients
+    )
+    VALUES (
+      ${id},
+      ${v1.id},
+      'replay',
+      ${X_PROVIDER},
+      ${input},
+      'queued',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      ${admin},
+      now() + interval '1 hour',
+      ${sql.json(['x:12001'])}
+    )
+    RETURNING id
+  `;
+  const xReplyInference: ModelCall = Object.assign<ModelCall, Pick<ModelCall, 'quote'>>(
+    async ({ stage }) => ({
+      decision: {
+        relevant: true,
+        priority: 0.9,
+        reason: 'fixture',
+        actions: [
+          {
+            type: X_REPLY_ACTION,
+            reason: 'Answer the discovery post',
+            draft: stage === 'main' ? 'Happy to walk through The Timeline.' : null,
+          },
+        ],
+      },
+      inputTokens: 3,
+      outputTokens: 5,
+      costMicros: 0,
+    }),
+    {
+      quote: async () => ({
+        upperBoundMicros: 1,
+        endpoint: 'fixture',
+        maxPrice: { prompt: 0, completion: 0, request: 0 },
+      }),
+    },
+  );
+  const priorKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = 'eval-x-fixture';
+  try {
+    await processSimulationRunForOrigin(
+      replay.id,
+      'replay',
+      () => xReplyInference,
+      undefined,
+      undefined,
+      { channel: X_PROVIDER, recallQuery: input },
+    );
+  } finally {
+    if (priorKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = priorKey;
+  }
+
+  const intents = await sql`
+    SELECT action_type, recipients, decision, reasons
+    FROM action_intents
+    WHERE run_id=${replay.id}
+    ORDER BY created_at
+  `;
+  expect(intents).toHaveLength(1);
+  expect(intents[0]).toMatchObject({
+    action_type: X_REPLY_ACTION,
+    recipients: ['x:12001'],
+    decision: 'suppressed',
+  });
+  expect(String(intents[0]?.reasons ?? '')).toContain('Replay');
+  expect(String(intents[0]?.reasons ?? '')).not.toContain('one author');
 });
 
 test('retry reuses each side run instead of admitting duplicates', async () => {

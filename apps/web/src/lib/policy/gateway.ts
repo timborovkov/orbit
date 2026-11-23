@@ -857,7 +857,7 @@ export function evaluateActionForTest(
     executionContext?: ExecutionContext;
   },
   action: CandidateAction,
-  options?: { skipApproval?: boolean },
+  options?: { skipApproval?: boolean; consentFailure?: string | null },
 ) {
   return evaluateCandidate(
     {
@@ -877,7 +877,7 @@ export function evaluateActionForTest(
       ...ctx,
     },
     action,
-    null,
+    options?.consentFailure ?? null,
     false,
     options,
   );

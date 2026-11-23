@@ -238,6 +238,18 @@ test('new events enqueue shadow discovery evaluation runs', async () => {
   expect(events[0]?.run_id).toBeTruthy();
 });
 
+test('discovery admission binds the numeric author as the run recipient', async () => {
+  const agentId = await createAgent('Author bind John', 'work-history');
+  const adapter = createFixtureXSearchAdapter([FIXTURE_X_REPLY_POST]);
+  expect(await processDiscoveryPoll({ payload: { agentId } }, signal, { adapter })).toMatchObject({
+    inserted: 1,
+    evaluated: 1,
+  });
+  const [run] =
+    await sql`SELECT recipients FROM simulation_runs WHERE agent_id=${agentId} AND origin='discovery'`;
+  expect(run?.recipients).toEqual(['x:12001']);
+});
+
 test('ensureDiscoveryPollJob is idempotent while pending and recreates after cancel', async () => {
   const agentId = await createAgent('Poll Job', 'work-history');
   const first = await ensureDiscoveryPollJob(agentId);
