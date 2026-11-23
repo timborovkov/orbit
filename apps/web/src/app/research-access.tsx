@@ -94,6 +94,7 @@ export function ResearchAccess({
           hasAgentCredential={keySource === 'agent'}
           credentialAction={saveFirecrawlCredential}
           placeholder="Enter a Firecrawl key for this agent"
+          credentialLabel="Firecrawl agent API key"
         />
       </section>
     </div>

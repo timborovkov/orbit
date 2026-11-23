@@ -12,11 +12,13 @@ export function AccessCredentialForms({
   hasAgentCredential,
   credentialAction = saveCredential,
   placeholder = 'Enter an OpenRouter key for this agent',
+  credentialLabel = 'Agent API key',
 }: {
   agentId: string;
   hasAgentCredential: boolean;
   credentialAction?: (form: FormData) => Promise<{ error?: string; message?: string }>;
   placeholder?: string;
+  credentialLabel?: string;
 }) {
   const inputId = useId();
   const saveForm = useRef<HTMLFormElement>(null);
@@ -50,7 +52,7 @@ export function AccessCredentialForms({
         <fieldset disabled={pending}>
           <input type="hidden" name="agentId" value={agentId} />
           <Field>
-            <FieldLabel htmlFor={inputId}>Agent API key</FieldLabel>
+            <FieldLabel htmlFor={inputId}>{credentialLabel}</FieldLabel>
             <Input
               id={inputId}
               type="password"

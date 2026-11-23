@@ -8,6 +8,7 @@ import { closeDb } from '@/lib/db';
 import { loadPolicyContext } from '@/lib/policy/gateway';
 import { claimJobs, completeJob, recoverExpiredLeases, releaseClaim } from '@/lib/queue/jobs';
 import { WEB_CRAWL, WEB_CRAWL_JOB, WEB_READ, WEB_SEARCH, type WebTool } from '@/lib/research';
+import { executeSimulation } from '@/lib/runtime/execute';
 import { loadFirecrawlConfig } from '@/lib/runtime/research/connection';
 import { processWebCrawl } from '@/lib/runtime/research/crawls';
 import { webResearchTools } from '@/lib/runtime/research/tools';
@@ -71,7 +72,7 @@ async function setup(grants: WebTool[]) {
     values (${runId}, ${agentId}, ${configId}, 'running', ${executionToken}, 'Research test',
       ${sql.json({ steps: [], actions: [] })}, ${actor}, now() + interval '1 minute')`;
   const policy = (await loadPolicyContext(agentId, actor, runId))!;
-  return { agentId, runId, policy, executionToken };
+  return { agentId, runId, configId, policy, executionToken };
 }
 
 function mockProvider(records: string[], mode: 'complete' | 'lose' | 'cancel') {
@@ -302,4 +303,60 @@ test('records unavailable when the endpoint has no crawl operation', async () =>
     status: 'unavailable',
     reason: 'The configured Firecrawl endpoint does not support this operation.',
   });
+});
+
+test('the normal simulation entry point exposes only granted web tools and persists their evidence', async () => {
+  const scope = await setup([WEB_SEARCH, WEB_READ]);
+  await sql`update simulation_runs set status = 'completed', finished_at = now() where id = ${scope.runId}`;
+  await sql`update agents set budgets = ${sql.json({
+    ...budgetDefaults,
+    dailySpendCents: null,
+    monthlySpendCents: null,
+  })} where id = ${scope.agentId}`;
+  const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.OPENROUTER_API_KEY = 'simulation-provider-test-key';
+  const requests: string[] = [];
+  globalThis.fetch = mockProvider(requests, 'complete');
+  try {
+    const simulation = await executeSimulation(
+      {
+        actor,
+        agentId: scope.agentId,
+        configurationId: scope.configId,
+        input: 'Find public documentation.',
+      },
+      () => async (request) => {
+        if (request.stage === 'main') {
+          expect(Object.keys(request.tools ?? {}).sort()).toEqual(['web_read', 'web_search']);
+          await request.tools!.web_search.execute!(
+            { query: 'public documentation' },
+            call('main-search'),
+          );
+        }
+        return {
+          decision: {
+            relevant: true,
+            priority: 1,
+            reason: 'Find documentation',
+            actions: [],
+            ...(request.stage === 'main'
+              ? { answer: 'Documentation found.', citations: [], memoryCitations: [] }
+              : {}),
+          },
+          inputTokens: 1,
+          outputTokens: 1,
+        };
+      },
+    );
+    expect(requests).toEqual(['POST /v2/search']);
+    const [run] = await sql`select status from simulation_runs where id = ${simulation.runId!}`;
+    expect(run.status).toBe('completed');
+    const evidence = await sql`select tool from web_citations where run_id = ${simulation.runId!}`;
+    expect(evidence.map(({ tool }) => tool)).toEqual([WEB_SEARCH]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previousOpenRouterKey;
+  }
 });

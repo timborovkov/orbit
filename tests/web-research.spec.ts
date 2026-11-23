@@ -71,10 +71,10 @@ test('edits independent grants, cancels a pending crawl and imports a cited page
   expect(agent.enabled_tools).toEqual(['web.search', 'web.read', 'web.crawl']);
 
   const fixtureKey = 'playwright-firecrawl-agent-override';
-  await page.getByLabel('Agent API key', { exact: true }).fill(fixtureKey);
+  await page.getByLabel('Firecrawl agent API key', { exact: true }).fill(fixtureKey);
   await page.getByRole('button', { name: 'Save agent key', exact: true }).click();
   await expect(page.getByText('Agent key saved.', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Agent API key', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('Firecrawl agent API key', { exact: true })).toHaveValue('');
   await expect(page.locator('body')).not.toContainText(fixtureKey);
   await page.getByRole('button', { name: 'Remove agent key', exact: true }).click();
   await expect(page.getByText('Agent key removed.', { exact: true })).toBeVisible();
