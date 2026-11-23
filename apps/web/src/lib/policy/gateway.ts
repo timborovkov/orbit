@@ -210,11 +210,11 @@ export function evaluateCandidate(
     if (!ctx.enabledTools.includes(action.type)) {
       return { decision: 'deny', reasons: [`Tool ${action.type} is not enabled for this agent.`] };
     }
-    if (
-      action.type === PEOPLE_INTRODUCE &&
-      (ctx.executionContext === 'replay' || channelAdapter(ctx.runChannel)?.run.mode === 'draft')
-    ) {
-      return { decision: 'deny', reasons: ['This run can read People profiles only.'] };
+    if (ctx.executionContext === 'replay') {
+      return { decision: 'deny', reasons: ['Replay uses the saved case and its memory snapshot.'] };
+    }
+    if (action.type === PEOPLE_INTRODUCE && channelAdapter(ctx.runChannel)?.run.mode === 'draft') {
+      return { decision: 'deny', reasons: ['Draft runs can read People profiles only.'] };
     }
     return { decision: 'allow', reasons: ['People tool permitted for this agent.'] };
   }
@@ -239,6 +239,18 @@ export function evaluateCandidate(
       return { decision: 'deny', reasons: ['Memory capture requires a persisted source.'] };
     }
     return { decision: 'allow', reasons: ['Agent memory operation permitted.'] };
+  }
+
+  if (
+    action.type === 'introduce' &&
+    action.executionToken &&
+    ctx.executionContext !== 'replay' &&
+    ctx.enabledTools.includes(PEOPLE_INTRODUCE)
+  ) {
+    return {
+      decision: 'deny',
+      reasons: ['Use the People introduction tool for proposal-specific consent.'],
+    };
   }
 
   if (!action.readOnly && !canAcceptBackgroundWork(ctx.lifecycle)) {

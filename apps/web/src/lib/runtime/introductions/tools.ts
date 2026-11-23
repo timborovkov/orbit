@@ -25,7 +25,7 @@ export function introductionTools(options: {
 }) {
   const { policy, executionToken, signal, toolSteps, onCall } = options;
   const runId = policy.runId;
-  if (!runId) return {};
+  if (!runId || policy.executionContext === 'replay') return {};
 
   const key = (type: string, toolCallId: string) => `${runId}:${type}:${toolCallId}`;
   const denied = async (type: string, error: string) => {
@@ -68,8 +68,7 @@ export function introductionTools(options: {
         },
       }),
     }),
-    ...(policy.executionContext !== 'replay' &&
-      channelAdapter(policy.runChannel)?.run.mode !== 'draft' &&
+    ...(channelAdapter(policy.runChannel)?.run.mode !== 'draft' &&
       policy.enabledTools.includes(PEOPLE_INTRODUCE) && {
         propose_introduction: tool({
           description:

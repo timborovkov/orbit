@@ -162,7 +162,15 @@ async function propose(
       }
     }
     return {
-      decision: { relevant: true, priority: 1, reason: 'An introduction fits.', actions: [] },
+      decision: {
+        relevant: true,
+        priority: 1,
+        reason: 'An introduction fits.',
+        actions:
+          request.stage === 'main' && expectTools
+            ? [{ type: 'introduce', reason: 'A redundant legacy candidate', draft: null }]
+            : [],
+      },
       inputTokens: 3,
       outputTokens: 3,
       costMicros: 0,
@@ -174,6 +182,11 @@ async function propose(
   `;
   expect(run.result.error).toBeNull();
   expect(run.status).toBe('completed');
+  if (expectTools) {
+    const [legacy] = await sql`select decision, review_status from action_intents
+      where run_id = ${runId} and action_type = 'introduce'`;
+    expect(legacy).toMatchObject({ decision: 'deny', review_status: null });
+  }
   expect(Boolean(introductionId)).toBe(expectAccess);
   return { introductionId, search, requests, runId };
 }
@@ -455,6 +468,18 @@ test('linked identities preserve agent-owned observations and private history bo
       type: PEOPLE_INTRODUCE,
       executionToken: token,
       idempotencyKey: `${ungrantedRun}:replay`,
+    }),
+  ).toHaveProperty('decision', 'deny');
+
+  expect(await persistPeopleGrant(actor, observer.id, PEOPLE_SEARCH, true)).toHaveProperty(
+    'message',
+  );
+  expect(
+    await authorizeAction(replay, {
+      type: PEOPLE_SEARCH,
+      readOnly: true,
+      executionToken: token,
+      idempotencyKey: `${ungrantedRun}:replay-search`,
     }),
   ).toHaveProperty('decision', 'deny');
 

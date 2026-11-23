@@ -431,6 +431,10 @@ history. Configure People tool grants in Access → Consent.
 Playwright recorded the first agreement at 1440px, then exercised drafting,
 approval, and revocation at 390px. It checked for horizontal overflow and ran
 automated accessibility checks on the draft view at 390px.
+A live-mode run used OpenRouter to generate Maya’s proposal for synthetic
+participants. The browser recorded both decisions, approval, and revocation.
+Both saved-case replays completed with live inference and left the proposal
+and delivery records untouched.
 
 ## Workspace libraries and approvals
 
