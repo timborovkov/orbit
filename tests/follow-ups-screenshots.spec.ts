@@ -7,6 +7,8 @@ import postgres from 'postgres';
 import { closeDb } from '@/lib/db';
 import { startJobWorker } from '@/lib/queue/worker';
 import { FOLLOW_UP_JOB_TYPE, processFollowUpJob } from '@/lib/runtime/follow-ups/process';
+import { runDemoSeed } from '@/lib/seed';
+import { DEMO_AGENTS, DEMO_EMAIL } from '@/lib/seed/ids';
 
 import { openWorkspaceTab } from './workspace-nav';
 
@@ -94,7 +96,7 @@ async function scheduleFollowUp(page: Page, subject: string, minutesAhead = 120)
   await expect(page.getByRole('heading', { name: 'Schedule a follow-up' })).toBeVisible();
   await page.getByLabel(/^Subject/).fill(subject);
   await page.getByLabel(/^Due/).fill(dueLocalInMinutes(minutesAhead));
-  await page.getByLabel(/^Note/).fill('Screenshot note — internal only.');
+  await page.getByLabel('Note', { exact: true }).fill('Screenshot note — internal only.');
   await page.getByRole('button', { name: 'Schedule follow-up', exact: true }).click();
   await expect(page.getByText(subject, { exact: true }).first()).toBeVisible({ timeout: 15000 });
 }
@@ -146,9 +148,7 @@ for (const viewport of [
       const worker = startJobWorker({
         workerId: `follow-ups-shot-${viewport.name}`,
         handlers: {
-          [FOLLOW_UP_JOB_TYPE]: async (job) => {
-            await processFollowUpJob(job.payload, job.attempts);
-          },
+          [FOLLOW_UP_JOB_TYPE]: processFollowUpJob,
         },
         pollMs: 50,
         recoveryMs: 5_000,
@@ -176,3 +176,44 @@ for (const viewport of [
     });
   });
 }
+
+test('Sarah’s commitment grants and saved reply are visible from the workspace', async ({
+  page,
+}) => {
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = databaseUrl;
+  try {
+    await runDemoSeed({ reset: false, allowNonLocal: false, releaseGlobalPause: false });
+  } finally {
+    if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = originalDatabaseUrl;
+  }
+  await sql`UPDATE email_messages SET body = body || ' Reference ' || repeat('a', 180)
+    WHERE id=${DEMO_EMAIL.messageId}`;
+  await page.goto(`/agents/${DEMO_AGENTS.sarah}`);
+  await openWorkspaceTab(page, 'Access');
+  await page.getByRole('button', { name: 'Commitments', exact: true }).click();
+  await expect(page.getByText('Wait for reply · Disabled', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Enable wait for reply', exact: true }).click();
+  await expect(page.getByText('Wait for reply · Enabled', { exact: true })).toBeVisible();
+  await expect(page.getByText('Schedule follow-up · Disabled', { exact: true })).toBeVisible();
+  await openWorkspaceTab(page, 'History');
+  const reply = page.locator('.activity-timeline li', { hasText: 'Reply received' });
+  await expect(reply).toContainText('Where can I find my invoices?');
+  await expect(reply.getByRole('link', { name: 'View continuation' })).toBeVisible();
+  await screenshotToArtifacts(page, 'follow-ups-reply-evidence.png', { fullPage: true });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setTheme(page, 'dark');
+  await expect(reply.getByRole('link', { name: 'View reply' })).toBeVisible();
+  const fitsViewport = await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth,
+  );
+  expect(fitsViewport).toBe(true);
+  await screenshotToArtifacts(page, 'follow-ups-reply-evidence-mobile.png', { fullPage: true });
+  await reply.getByRole('link', { name: 'View reply' }).click();
+  await expect(page.getByRole('heading', { name: 'Thread', exact: true })).toBeVisible();
+  await expect(
+    page.locator('article').filter({ hasText: 'Where can I find my invoices?' }),
+  ).toBeVisible();
+});

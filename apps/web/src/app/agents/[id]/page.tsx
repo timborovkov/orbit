@@ -29,6 +29,7 @@ import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { ACTIVE_CRAWL_STATES, type CrawlStatus } from '@/lib/research';
 import { channelGrantOptions } from '@/lib/runtime/channels/registry';
 import { followUpWorkspaceRefresh } from '@/lib/runtime/follow-ups/refresh';
+import { isCommitmentTool } from '@/lib/runtime/follow-ups/types';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { getEmailInbox } from '@/lib/server/email-queries';
 import { listActivityEventsForAgent, listFollowUpsForAgent } from '@/lib/server/follow-up-queries';
@@ -131,7 +132,11 @@ export default async function AgentWorkspace({
     now,
     scheduled: followUps
       .filter((item) => item.status === 'scheduled')
-      .map((item) => ({ dueAt: item.dueAt, jobStatus: item.jobStatus })),
+      .map((item) => ({
+        dueAt: item.dueAt,
+        jobStatus: item.jobStatus,
+        waitForReply: item.waitForEvent === 'reply',
+      })),
   });
   const activeCrawlStates = new Set<CrawlStatus>(ACTIVE_CRAWL_STATES);
   const activeCrawls = webResearch.crawls.some((crawl) => activeCrawlStates.has(crawl.status));
@@ -144,6 +149,7 @@ export default async function AgentWorkspace({
   const hasPendingKnowledge =
     knowledgeDocuments.some((doc) => doc.status === 'pending' || doc.status === 'processing') ||
     sharedLibraries.some((library) => library.pendingCount > 0);
+  const hasActiveWork = hasPendingRuns || hasPendingKnowledge || activeCrawls || inbox.pending;
   const knowledgeDocumentCount =
     knowledgeDocuments.length +
     sharedLibraries.reduce((sum, library) => sum + library.documentCount, 0);
@@ -187,6 +193,7 @@ export default async function AgentWorkspace({
       approvalExpiresAfterHours={approvalSettings.approvalExpiresAfterHours}
       approvalOnReject={approvalSettings.approvalOnReject}
       approvalSpendCents={approvalSettings.approvalSpendCents}
+      enabledCommitmentTools={agent.enabledTools.filter(isCommitmentTool)}
       channelActions={channelGrantOptions().map((option) => ({
         ...option,
         enabled: enabledTools.has(option.type),
@@ -270,14 +277,9 @@ export default async function AgentWorkspace({
           </div>
         </div>
         <PendingRunRefresh
-          active={
-            hasPendingRuns ||
-            hasPendingKnowledge ||
-            activeCrawls ||
-            inbox.pending ||
-            followUpRefresh.pollFrequently
-          }
+          active={hasActiveWork || followUpRefresh.pollFrequently}
           refreshAt={followUpRefresh.refreshAt}
+          intervalMs={hasActiveWork ? undefined : followUpRefresh.intervalMs}
         />
         <Suspense
           fallback={

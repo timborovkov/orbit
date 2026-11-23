@@ -849,6 +849,22 @@ export const followUps = pgTable('follow_ups', {
   outcome: text('outcome'),
   outcomeKind: text('outcome_kind').$type<FollowUpOutcomeKind>(),
   waitForEvent: text('wait_for_event'),
+  channel: text('channel'),
+  accountId: text('account_id'),
+  conversationId: text('conversation_id'),
+  anchorId: uuid('anchor_id'),
+  originatingRunId: uuid('originating_run_id').references(() => runs.id, { onDelete: 'set null' }),
+  replyEventId: uuid('reply_event_id').references(() => sourceEvents.id, { onDelete: 'set null' }),
+  replyEmailId: uuid('reply_email_id').references(() => emailMessages.id, { onDelete: 'set null' }),
+  continuationRunId: uuid('continuation_run_id').references(() => runs.id, {
+    onDelete: 'set null',
+  }),
+  draftRunId: uuid('draft_run_id')
+    .unique()
+    .references(() => runs.id, { onDelete: 'set null' }),
+  approvalIntentId: uuid('approval_intent_id').references(() => actionIntents.id, {
+    onDelete: 'set null',
+  }),
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

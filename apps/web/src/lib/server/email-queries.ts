@@ -207,6 +207,7 @@ export async function getEmailInbox(
             and(
               eq(actionIntents.agentId, agentId),
               eq(actionIntents.actionType, EMAIL_SEND_ACTION),
+              sql`${actionIntents.idempotencyKey} NOT LIKE 'followup:%:draft'`,
               sql`${actionIntents.payload}->>'emailMessageId' IN (${sql.join(
                 messageIds.map((id) => sql`${id}`),
                 sql`, `,
@@ -227,6 +228,7 @@ export async function getEmailInbox(
             and(
               eq(outboundActions.agentId, agentId),
               inArray(outboundActions.emailMessageId, messageIds),
+              sql`${outboundActions.idempotencyKey} NOT LIKE 'followup:%:draft'`,
             ),
           ),
       ])

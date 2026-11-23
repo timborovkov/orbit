@@ -3,13 +3,11 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_JOB_TYPE } from '@/lib/knowledge/types';
 import { cancelPendingJobsForAgent } from '@/lib/queue/jobs';
-import { WEB_CRAWL_JOB } from '@/lib/research';
 import { lockApprovalAgent, recordApprovalReviews } from '@/lib/runtime/approval-work';
 import { EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import { finalizeCancelledEvaluationComparisons } from '@/lib/runtime/evaluation';
-import { skipScheduledFollowUpsForLifecycle } from '@/lib/runtime/follow-ups/process';
 import { finalizeOutboundForCancelledJobs } from '@/lib/runtime/outbound/process';
-import { requestCrawlCancellation } from '@/lib/runtime/research/crawls';
+import { pendingWork } from '@/lib/runtime/pending-work';
 import { actionIntents, agents, emailMessages, runs } from '@/lib/schema';
 
 /**
@@ -44,13 +42,14 @@ export async function cancelWorkForLifecycle(
   const includeClaimed = next === 'stopped';
   const cancelledIds = await cancelPendingJobsForAgent(agentId, store, {
     includeClaimed,
-    excludeTypes: [KNOWLEDGE_JOB_TYPE, EMAIL_RECEIVE_JOB, WEB_CRAWL_JOB],
+    excludeTypes: [
+      KNOWLEDGE_JOB_TYPE,
+      EMAIL_RECEIVE_JOB,
+      ...pendingWork.flatMap(({ type, keepJobForCancellation }) =>
+        keepJobForCancellation ? [type] : [],
+      ),
+    ],
   });
-  await requestCrawlCancellation(
-    store,
-    agentId,
-    'Crawl cancellation requested because the agent was ' + next + '.',
-  );
   await finalizeCancelledEvaluationComparisons(
     store,
     cancelledIds,
@@ -58,9 +57,15 @@ export async function cancelWorkForLifecycle(
       ? 'Agent stopped; pending comparison cancelled.'
       : 'Agent paused; queued comparison cancelled.',
   );
-  // Follow-ups use skip-and-record: mark scheduled commitments skipped and
-  // write activity events when pause/stop cancels their delayed jobs.
-  await skipScheduledFollowUpsForLifecycle(agentId, next, store);
+  await Promise.all(
+    pendingWork.map((work) =>
+      work.finalizeLifecycle(store, {
+        agentId,
+        lifecycle: next,
+        cancelledJobIds: cancelledIds,
+      }),
+    ),
+  );
   // Cancelled outbound jobs never reach dispatch. Finalize the linked actions here.
   await finalizeOutboundForCancelledJobs(
     store,
