@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.4-debian
+FROM oven/bun:1.4.5-debian
 WORKDIR /app
 COPY --chown=bun:bun package.json bun.lock ./
 COPY --chown=bun:bun apps/web/package.json apps/web/package.json
