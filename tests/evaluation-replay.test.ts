@@ -377,6 +377,89 @@ test('X discovery evaluation cases preserve the author binding for suppressed re
   expect(String(intents[0]?.reasons ?? '')).not.toContain('one author');
 });
 
+test('X evaluation replay without x.reply keeps the legacy discovery action vocabulary', async () => {
+  const { id, v1 } = await seedAgent();
+  const input = 'X post 1002 by @ops_lead: Anyone still bookmarking useful threads?';
+  const [replay] = await sql`
+    INSERT INTO simulation_runs(
+      agent_id, configuration_id, origin, channel, input, status, result, actor, expires_at, recipients
+    )
+    VALUES (
+      ${id},
+      ${v1.id},
+      'replay',
+      ${X_PROVIDER},
+      ${input},
+      'queued',
+      ${sql.json({ steps: [], actions: [], error: null })},
+      ${admin},
+      now() + interval '1 hour',
+      ${sql.json([])}
+    )
+    RETURNING id
+  `;
+  const legacyInference: ModelCall = Object.assign<ModelCall, Pick<ModelCall, 'quote'>>(
+    async ({ stage }) => ({
+      decision: {
+        relevant: true,
+        priority: 0.6,
+        reason: 'Useful thread without a reply invite',
+        actions: [
+          {
+            type: 'like',
+            reason: 'Acknowledge the post',
+            draft: null,
+          },
+          {
+            type: 'repost',
+            reason: 'Share with the network',
+            draft: null,
+          },
+          {
+            type: 'reply',
+            reason: 'Offer a short note',
+            draft: stage === 'main' ? 'Happy to compare notes.' : null,
+          },
+        ],
+      },
+      inputTokens: 3,
+      outputTokens: 5,
+      costMicros: 0,
+    }),
+    {
+      quote: async () => ({
+        upperBoundMicros: 1,
+        endpoint: 'fixture',
+        maxPrice: { prompt: 0, completion: 0, request: 0 },
+      }),
+    },
+  );
+  const priorKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = 'eval-x-legacy';
+  try {
+    await processSimulationRunForOrigin(
+      replay.id,
+      'replay',
+      () => legacyInference,
+      undefined,
+      undefined,
+      { channel: X_PROVIDER, recallQuery: input },
+    );
+  } finally {
+    if (priorKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = priorKey;
+  }
+
+  const [run] = await sql`SELECT status, result FROM simulation_runs WHERE id=${replay.id}`;
+  expect(run?.status).toBe('completed');
+  expect(run?.result?.error).toBeNull();
+  const types = (run?.result?.actions ?? []).map(
+    (action: { type: string }) => action.type,
+  ) as string[];
+  expect(types).toEqual(expect.arrayContaining(['like', 'repost', 'reply']));
+  expect(types).not.toContain(X_REPLY_ACTION);
+});
+
 test('retry reuses each side run instead of admitting duplicates', async () => {
   const { id, v1, v2 } = await seedAgent();
   const saved = await saveEvaluationCase({

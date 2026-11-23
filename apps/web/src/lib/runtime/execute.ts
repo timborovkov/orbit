@@ -18,7 +18,6 @@ import { db, type Tx } from '@/lib/db';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
-import { proposalTypes } from '@/lib/policy/scopes';
 import { activeJobClaim, completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
 import type { JobClaimIdentity } from '@/lib/queue/types';
 import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
@@ -70,6 +69,7 @@ import {
 import { createRunTelemetry, reportFailure } from '@/lib/runtime/telemetry';
 import { nativeTools } from '@/lib/runtime/tools/native';
 import { retrievalTools } from '@/lib/runtime/tools/retrieval';
+import { xEvaluateActionTypes } from '@/lib/runtime/x/evaluate-actions';
 import { loadXReplyTarget } from '@/lib/runtime/x/reply';
 import { X_REPLY_ACTION, xReplyDraft, xReplyKey } from '@/lib/runtime/x/reply-input';
 import { X_PROVIDER } from '@/lib/runtime/x/types';
@@ -922,9 +922,11 @@ async function processSimulationRun(
             replyCommitments,
             actionTypes:
               channelMode === 'evaluate'
-                ? xDiscovery && !xReplyEnabled
-                  ? proposalTypes
-                  : (profile?.proposalTypes ?? adapter?.actions?.map(({ type }) => type) ?? [])
+                ? xEvaluateActionTypes(
+                    xChannel,
+                    xReplyEnabled,
+                    profile?.proposalTypes ?? adapter?.actions?.map(({ type }) => type) ?? [],
+                  )
                 : undefined,
             memoryCapture: source
               ? {
