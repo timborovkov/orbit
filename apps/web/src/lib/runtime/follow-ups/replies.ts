@@ -1,12 +1,18 @@
-import { and, eq, gt, inArray, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, lte, notExists, or, sql } from 'drizzle-orm';
 
 import type { Tx } from '@/lib/db';
 import { cancelAgentJobs } from '@/lib/queue/jobs';
 import { commitmentClock, recordFollowUpOutcomes } from '@/lib/runtime/follow-ups/state';
 import type { CommitmentConversation } from '@/lib/runtime/follow-ups/types';
-import { followUps } from '@/lib/schema';
+import { emailMessages, followUps } from '@/lib/schema';
 
-type ReplyEvidence = { kind: 'event' | 'email'; id: string };
+type ReplyEvidence =
+  | { kind: 'event'; id: string }
+  | {
+      kind: 'email';
+      id: string;
+      messageId?: string | null;
+    };
 
 function evidenceColumn(kind: ReplyEvidence['kind']) {
   return kind === 'email' ? followUps.replyEmailId : followUps.replyEventId;
@@ -19,6 +25,26 @@ export async function resolveConversationReply(
   evidence: ReplyEvidence,
 ) {
   const now = await commitmentClock(tx);
+  // A late ancestor can merge a provisional thread without answering a wait
+  // created on one of its descendants.
+  const messageId = evidence.kind === 'email' ? evidence.messageId : null;
+  const followsAnchor = messageId
+    ? notExists(
+        tx
+          .select({ id: emailMessages.id })
+          .from(emailMessages)
+          .where(
+            and(
+              eq(emailMessages.id, followUps.anchorId),
+              eq(emailMessages.agentId, followUps.agentId),
+              or(
+                sql`${messageId} = ANY(${emailMessages.inReplyTo})`,
+                sql`${messageId} = ANY(${emailMessages.referenceIds})`,
+              ),
+            ),
+          ),
+      )
+    : undefined;
   const waits = await tx
     .select({ id: followUps.id, jobId: followUps.jobId })
     .from(followUps)
@@ -32,6 +58,7 @@ export async function resolveConversationReply(
         eq(followUps.status, 'scheduled'),
         lte(followUps.createdAt, now),
         gt(followUps.dueAt, now),
+        followsAnchor,
       ),
     );
   if (!waits.length) return;
@@ -68,6 +95,15 @@ export async function mergeCommitmentConversations(
         inArray(followUps.conversationId, replaced),
       ),
     );
+}
+
+export async function hasReplyCommitment(tx: Tx, agentId: string, evidence: ReplyEvidence) {
+  const [commitment] = await tx
+    .select({ id: followUps.id })
+    .from(followUps)
+    .where(and(eq(followUps.agentId, agentId), eq(evidenceColumn(evidence.kind), evidence.id)))
+    .limit(1);
+  return Boolean(commitment);
 }
 
 export async function linkReplyCommitments(

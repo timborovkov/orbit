@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { db, type Tx } from '@/lib/db';
 import { canAcceptBackgroundWork } from '@/lib/lifecycle';
 import { recipientId } from '@/lib/policy/scopes';
-import { enqueueJob } from '@/lib/queue/jobs';
+import { activeJobClaim, enqueueJob } from '@/lib/queue/jobs';
 import type { JobRecord } from '@/lib/queue/types';
 import { channelAdapter } from '@/lib/runtime/channels/registry';
 import { admitRun } from '@/lib/runtime/execute';
@@ -140,13 +140,7 @@ export async function processChannelEventJob(job: JobRecord) {
       .select({ id: jobs.id })
       .from(jobs)
       .where(
-        and(
-          eq(jobs.id, job.id),
-          eq(jobs.type, CHANNEL_EVENT_JOB),
-          eq(jobs.status, 'claimed'),
-          eq(jobs.claimedBy, job.claimedBy ?? ''),
-          eq(jobs.attempts, job.attempts),
-        ),
+        and(activeJobClaim(job.id, job.claimedBy ?? '', job), eq(jobs.type, CHANNEL_EVENT_JOB)),
       )
       .for('update');
     if (!claim) return;

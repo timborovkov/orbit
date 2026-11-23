@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 
 import { type Db, db, sqlClient, type Tx } from '@/lib/db';
 import {
@@ -7,11 +7,26 @@ import {
   DEFAULT_LEASE_MS,
   DEFAULT_MAX_ATTEMPTS,
   type EnqueueInput,
+  type JobClaimIdentity,
   type JobRecord,
 } from '@/lib/queue/types';
 import { jobs } from '@/lib/schema';
 
 type Store = Db | Tx;
+
+/** A worker may only mutate a live lease from the claim it processed. */
+export function activeJobClaim(jobId: string, workerId: string, claim?: JobClaimIdentity) {
+  return and(
+    eq(jobs.id, jobId),
+    eq(jobs.status, 'claimed'),
+    eq(jobs.claimedBy, workerId),
+    gt(jobs.claimExpiresAt, sql`clock_timestamp()`),
+    claim ? eq(jobs.attempts, claim.attempts) : undefined,
+    claim?.claimedAt
+      ? sql`date_trunc('milliseconds', ${jobs.claimedAt}) = ${claim.claimedAt.toISOString()}::timestamptz`
+      : undefined,
+  );
+}
 
 function mapJob(row: typeof jobs.$inferSelect): JobRecord {
   return {
@@ -129,7 +144,7 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
             OR (
               status = 'claimed'
               AND claim_expires_at IS NOT NULL
-              AND claim_expires_at < now()
+              AND claim_expires_at <= now()
               AND attempts < max_attempts
             )
           )
@@ -158,7 +173,7 @@ export async function claimJobs(options: ClaimOptions): Promise<JobRecord[]> {
             OR (
               status = 'claimed'
               AND claim_expires_at IS NOT NULL
-              AND claim_expires_at < now()
+              AND claim_expires_at <= now()
               AND attempts < max_attempts
             )
           )
@@ -187,13 +202,15 @@ export async function heartbeatJob(
   workerId: string,
   leaseMs = DEFAULT_LEASE_MS,
   store: Store = db(),
+  claim?: JobClaimIdentity,
 ): Promise<boolean> {
-  const now = new Date();
-  const expiry = new Date(now.getTime() + leaseMs);
   const updated = await store
     .update(jobs)
-    .set({ claimExpiresAt: expiry, updatedAt: now })
-    .where(and(eq(jobs.id, jobId), eq(jobs.status, 'claimed'), eq(jobs.claimedBy, workerId)))
+    .set({
+      claimExpiresAt: sql`clock_timestamp() + ${leaseMs}::double precision * interval '1 millisecond'`,
+      updatedAt: sql`clock_timestamp()`,
+    })
+    .where(activeJobClaim(jobId, workerId, claim))
     .returning({ id: jobs.id });
   return updated.length > 0;
 }
@@ -202,6 +219,7 @@ export async function completeJob(
   jobId: string,
   workerId: string,
   store: Store = db(),
+  claim?: JobClaimIdentity,
 ): Promise<void> {
   const now = new Date();
   await store
@@ -213,7 +231,7 @@ export async function completeJob(
       updatedAt: now,
       lastError: null,
     })
-    .where(and(eq(jobs.id, jobId), eq(jobs.claimedBy, workerId), eq(jobs.status, 'claimed')));
+    .where(activeJobClaim(jobId, workerId, claim));
 }
 
 /**
@@ -225,6 +243,7 @@ export async function releaseClaim(
   workerId: string,
   store: Store = db(),
   availableAt = new Date(),
+  claim?: JobClaimIdentity,
 ): Promise<JobRecord | null> {
   const now = new Date();
   const updated = (
@@ -239,7 +258,7 @@ export async function releaseClaim(
         claimedBy: null,
         updatedAt: now,
       })
-      .where(and(eq(jobs.id, jobId), eq(jobs.claimedBy, workerId), eq(jobs.status, 'claimed')))
+      .where(activeJobClaim(jobId, workerId, claim))
       .returning()
   ).at(0);
   return updated ? mapJob(updated) : null;
@@ -250,17 +269,18 @@ export async function failJob(
   workerId: string,
   error: string,
   store?: Store,
+  claim?: JobClaimIdentity,
 ): Promise<JobRecord | null> {
   // FOR UPDATE only holds across statements inside a transaction; wrap by default.
   if (!store) {
-    return db().transaction((tx) => failJob(jobId, workerId, error, tx));
+    return db().transaction((tx) => failJob(jobId, workerId, error, tx, claim));
   }
   const now = new Date();
   const current = (
     await store
       .select()
       .from(jobs)
-      .where(and(eq(jobs.id, jobId), eq(jobs.claimedBy, workerId), eq(jobs.status, 'claimed')))
+      .where(activeJobClaim(jobId, workerId, claim))
       .for('update')
   ).at(0);
   if (!current) return null;
@@ -280,7 +300,7 @@ export async function failJob(
         finishedAt: dead ? now : null,
         updatedAt: now,
       })
-      .where(and(eq(jobs.id, jobId), eq(jobs.claimedBy, workerId), eq(jobs.status, 'claimed')))
+      .where(eq(jobs.id, current.id))
       .returning()
   ).at(0);
   return updated ? mapJob(updated) : null;
@@ -295,9 +315,10 @@ export async function deadLetterJob(
   workerId: string,
   error: string,
   store?: Store,
+  claim?: JobClaimIdentity,
 ): Promise<JobRecord | null> {
   if (!store) {
-    return db().transaction((tx) => deadLetterJob(jobId, workerId, error, tx));
+    return db().transaction((tx) => deadLetterJob(jobId, workerId, error, tx, claim));
   }
   const now = new Date();
   const updated = (
@@ -313,7 +334,7 @@ export async function deadLetterJob(
         finishedAt: now,
         updatedAt: now,
       })
-      .where(and(eq(jobs.id, jobId), eq(jobs.claimedBy, workerId), eq(jobs.status, 'claimed')))
+      .where(activeJobClaim(jobId, workerId, claim))
       .returning()
   ).at(0);
   return updated ? mapJob(updated) : null;
@@ -341,7 +362,7 @@ export async function recoverExpiredLeases(store: Store = db()): Promise<JobReco
       available_at = ${now}::timestamptz
     WHERE status = 'claimed'
       AND claim_expires_at IS NOT NULL
-      AND claim_expires_at < ${now}::timestamptz
+      AND claim_expires_at <= clock_timestamp()
     RETURNING *
   `);
   if (!Array.isArray(result)) return [];

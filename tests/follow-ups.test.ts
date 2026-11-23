@@ -142,6 +142,53 @@ test('survives a worker restart before the due time', async () => {
   expect(events[0]!.kind).toBe('follow_up.completed');
 });
 
+test('an expired worker acknowledgement leaves the follow-up recoverable', async () => {
+  const agentId = await createAgent('Expired acknowledgement');
+  const scheduled = await scheduleFollowUp(admin, {
+    agentId,
+    subject: 'Recover from a lost lease',
+    dueAt: new Date(Date.now() - 1000),
+  });
+  if ('error' in scheduled) throw new Error(scheduled.error);
+
+  const handled = Promise.withResolvers<void>();
+  const workerId = 'follow-up-reused-worker';
+  const worker = startJobWorker({
+    workerId,
+    handlers: {
+      [FOLLOW_UP_JOB_TYPE]: async (job, signal) => {
+        try {
+          expect(job.id).toBe(scheduled.jobId);
+          await sql`UPDATE jobs SET claim_expires_at = now() - interval '1 second' WHERE id = ${job.id}`;
+          await processFollowUpJob(job, signal);
+          handled.resolve();
+        } catch (error) {
+          handled.reject(error);
+          throw error;
+        }
+      },
+    },
+    pollMs: 60_000,
+    heartbeatIntervalMs: 60_000,
+    recoveryMs: 60_000,
+  });
+  try {
+    await handled.promise;
+  } finally {
+    await worker.stop();
+  }
+
+  const [stale] = await sql`SELECT status FROM jobs WHERE id=${scheduled.jobId}`;
+  expect(stale?.status).toBe('claimed');
+  const [reclaimed] = await claimJobs({ workerId, types: [FOLLOW_UP_JOB_TYPE] });
+  expect(reclaimed?.id).toBe(scheduled.jobId);
+  await processFollowUpJob(reclaimed!, new AbortController().signal);
+  await completeJob(reclaimed!.id, workerId, undefined, reclaimed);
+  const events =
+    await sql`SELECT kind FROM agent_activity_events WHERE follow_up_id=${scheduled.followUpId}`;
+  expect(events.map(({ kind }) => kind)).toEqual(['follow_up.completed']);
+});
+
 test('executes exactly once when retried or duplicated', async () => {
   const agentId = await createAgent('Follow-up once');
   const followUpId = randomUUID();

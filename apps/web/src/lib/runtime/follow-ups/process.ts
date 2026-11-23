@@ -3,7 +3,8 @@ import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 import { db, type Tx } from '@/lib/db';
 import { canAcceptBackgroundWork } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
-import type { JobRecord } from '@/lib/queue/types';
+import { activeJobClaim } from '@/lib/queue/jobs';
+import type { JobClaimIdentity, JobRecord } from '@/lib/queue/types';
 import { lockApprovalAgent } from '@/lib/runtime/approval-work';
 import { channelAction, channelAdapter } from '@/lib/runtime/channels/registry';
 import {
@@ -109,12 +110,8 @@ export async function finalizeFollowUpExecution(
         .from(jobs)
         .where(
           and(
-            eq(jobs.id, options.job.id),
+            activeJobClaim(options.job.id, options.job.claimedBy ?? '', options.job),
             eq(jobs.type, FOLLOW_UP_JOB_TYPE),
-            eq(jobs.status, 'claimed'),
-            eq(jobs.claimedBy, options.job.claimedBy ?? ''),
-            eq(jobs.attempts, options.job.attempts),
-            gt(jobs.claimExpiresAt, sql`clock_timestamp()`),
           ),
         )
         .for('update');
@@ -238,7 +235,7 @@ export async function finalizeCommitmentDraft(
   run: typeof runs.$inferSelect,
   executionToken: string,
   result: SimulationResult,
-  claim?: { jobId: string; workerId: string; attempts?: number },
+  claim?: { jobId: string; workerId: string; lease?: JobClaimIdentity },
 ) {
   const agent = await lockApprovalAgent(tx, run.agentId);
   if (!agent || !canAcceptBackgroundWork(agent.lifecycle)) return false;
@@ -252,15 +249,7 @@ export async function finalizeCommitmentDraft(
     const [ownedJob] = await tx
       .select({ id: jobs.id })
       .from(jobs)
-      .where(
-        and(
-          eq(jobs.id, claim.jobId),
-          eq(jobs.status, 'claimed'),
-          eq(jobs.claimedBy, claim.workerId),
-          claim.attempts === undefined ? undefined : eq(jobs.attempts, claim.attempts),
-          gt(jobs.claimExpiresAt, now),
-        ),
-      )
+      .where(activeJobClaim(claim.jobId, claim.workerId, claim.lease))
       .for('update');
     if (!ownedJob) return false;
   }

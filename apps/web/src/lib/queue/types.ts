@@ -18,6 +18,8 @@ export interface JobRecord {
   updatedAt: Date;
 }
 
+export type JobClaimIdentity = Pick<JobRecord, 'attempts' | 'claimedAt'>;
+
 export interface EnqueueInput {
   type: string;
   payload: Record<string, unknown>;

@@ -13,8 +13,10 @@ must be new, persisted inbound evidence for the same agent, channel, account
 and conversation. Resend uses the canonical thread assigned from message
 headers. New replies on the same thread close waiting commitments before the
 database deadline and become evidence in the normal channel run. Retries of
-the same delivery reuse the saved evidence. Explicitly scheduled follow-ups
-remain due at their chosen time.
+the same delivery reuse the saved evidence. A late ancestor can merge an
+email thread while the wait stays open for a new reply. A matched email stays
+queued for continuation while the agent is over budget. Explicitly scheduled
+follow-ups remain due at their chosen time.
 
 At or after the deadline, the timer starts one draft run. It uses the stored
 conversation, the originating configuration and existing agent budgets. A
@@ -38,7 +40,8 @@ using a stable idempotency key and `payload.agentId`. Add its job type to
   `{ deferUntil }` to release the lease until the next poll.
 - `finalizeLifecycle(tx, change)` runs with the agent row locked after generic
   queue cancellation. It fences any domain-owned claims and records the local
-  outcome in the same transaction.
+  outcome in the same transaction. Set `keepJobForCancellation` for work
+  that must keep polling or contact its provider to confirm cancellation.
 - `onDeadLetter(job, reason)` and `reconcile()` idempotently close stranded
   domain rows. Reconciliation covers crashes between a queue update and its
   domain finalizer.
@@ -46,4 +49,5 @@ using a stable idempotency key and `payload.agentId`. Add its job type to
 A domain keeps its own evidence and provider work identifiers. The follow-up
 worker serializes the terminal transition under the same agent lock as inbound
 resolution and cancellation. The existing worker owns claim recovery and
-backoff. See [the channel framework](channels.md) for the inbound contract.
+backoff. Heartbeats and acknowledgements check the current claim and lease
+deadline. See [the channel framework](channels.md) for the inbound contract.

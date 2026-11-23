@@ -12,6 +12,8 @@ import {
 export interface PendingWorkDefinition {
   type: string;
   handle: JobHandler;
+  /** Keep the job claimable during pause or stop when the provider needs cleanup. */
+  keepJobForCancellation?: boolean;
   onDeadLetter: (job: JobRecord, reason: string) => Promise<void>;
   reconcile: () => Promise<unknown>;
   /** Called with the agent lock held after the generic queue cancellation. */

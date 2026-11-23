@@ -70,6 +70,30 @@ test('lease expiry recovery returns jobs to pending', async () => {
   expect(await heartbeatJob(job.id, `${prefix}-lease-2`)).toBe(false);
 });
 
+test('expired and replaced leases cannot acknowledge, renew, or reschedule work', async () => {
+  const workerId = `${prefix}-reused-worker`;
+  const type = `${prefix}.expired-ack`;
+  await enqueueJob(db(), { type, payload: {} });
+  const [first] = await claimJobs({ workerId, types: [type] });
+  await sqlClient()`UPDATE jobs SET claim_expires_at = now() - interval '1 second' WHERE id = ${first.id}`;
+
+  await completeJob(first.id, workerId, undefined, first);
+  expect(await heartbeatJob(first.id, workerId, 30_000, undefined, first)).toBe(false);
+  expect(await failJob(first.id, workerId, 'late error', undefined, first)).toBeNull();
+  expect(await deadLetterJob(first.id, workerId, 'late error', undefined, first)).toBeNull();
+  expect(await releaseClaim(first.id, workerId, undefined, new Date(), first)).toBeNull();
+  const [second] = await claimJobs({ workerId, types: [type] });
+  expect(second.attempts).toBe(first.attempts + 1);
+
+  await completeJob(first.id, workerId, undefined, first);
+  expect(await heartbeatJob(first.id, workerId, 30_000, undefined, first)).toBe(false);
+  expect(await releaseClaim(first.id, workerId, undefined, new Date(), first)).toBeNull();
+  expect(await heartbeatJob(second.id, workerId, 30_000, undefined, second)).toBe(true);
+  await completeJob(second.id, workerId, undefined, second);
+  const [row] = await sqlClient()`SELECT status, attempts FROM jobs WHERE id = ${first.id}`;
+  expect(row).toMatchObject({ status: 'completed', attempts: second.attempts });
+});
+
 test('expired leases at max attempts are dead-lettered instead of reclaimed', async () => {
   const job = await enqueueJob(db(), {
     type: `${prefix}.exhausted`,

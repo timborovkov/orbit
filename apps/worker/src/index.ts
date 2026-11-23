@@ -157,7 +157,7 @@ const worker = startJobWorker({
             await processSimulationJob(job.payload, undefined, signal, {
               jobId: job.id,
               workerId,
-              attempts: job.attempts,
+              lease: job,
               jobType: job.type,
             });
           } catch (error) {

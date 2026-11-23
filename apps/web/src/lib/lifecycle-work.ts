@@ -42,7 +42,13 @@ export async function cancelWorkForLifecycle(
   const includeClaimed = next === 'stopped';
   const cancelledIds = await cancelPendingJobsForAgent(agentId, store, {
     includeClaimed,
-    excludeTypes: [KNOWLEDGE_JOB_TYPE, EMAIL_RECEIVE_JOB],
+    excludeTypes: [
+      KNOWLEDGE_JOB_TYPE,
+      EMAIL_RECEIVE_JOB,
+      ...pendingWork.flatMap(({ type, keepJobForCancellation }) =>
+        keepJobForCancellation ? [type] : [],
+      ),
+    ],
   });
   await finalizeCancelledEvaluationComparisons(
     store,

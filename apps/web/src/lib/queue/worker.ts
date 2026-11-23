@@ -43,7 +43,7 @@ export interface WorkerOptions {
   releaseClaim?: typeof releaseClaim;
   recoverExpiredLeases?: typeof recoverExpiredLeases;
   /** Must return false only for confirmed lease loss; transport errors should throw. */
-  heartbeat?: (jobId: string, workerId: string, leaseMs?: number) => Promise<boolean>;
+  heartbeat?: typeof heartbeatJob;
   /** Override heartbeat cadence (tests); production uses max(1s, lease/3). */
   heartbeatIntervalMs?: number;
 }
@@ -106,9 +106,11 @@ export function startJobWorker(options: WorkerOptions) {
             // Release unexecuted claims without burning attempts or dead-lettering.
             await Promise.all(
               claimed.map((job) =>
-                release(job.id, options.workerId).catch((error: unknown) => {
-                  options.onError?.(error);
-                }),
+                release(job.id, options.workerId, undefined, undefined, job).catch(
+                  (error: unknown) => {
+                    options.onError?.(error);
+                  },
+                ),
               ),
             );
             return;
@@ -143,7 +145,7 @@ export function startJobWorker(options: WorkerOptions) {
     const jobCancel = new AbortController();
     const heartbeat = setInterval(
       () => {
-        void beat(job.id, options.workerId, leaseMs)
+        void beat(job.id, options.workerId, leaseMs, undefined, job)
           .then((ok) => {
             if (!ok) jobCancel.abort();
           })
@@ -155,7 +157,7 @@ export function startJobWorker(options: WorkerOptions) {
     );
     const deadLetter = async (errorMessage: string) => {
       try {
-        const failed = await fail(job.id, options.workerId, errorMessage);
+        const failed = await fail(job.id, options.workerId, errorMessage, undefined, job);
         if (failed?.status === 'dead') {
           await notifyDeadLetter(job, errorMessage);
         }
@@ -173,7 +175,7 @@ export function startJobWorker(options: WorkerOptions) {
       let delayMs = 250;
       for (;;) {
         try {
-          const failed = await forceDead(job.id, options.workerId, errorMessage);
+          const failed = await forceDead(job.id, options.workerId, errorMessage, undefined, job);
           if (failed?.status === 'dead') {
             await notifyDeadLetter(job, errorMessage);
             return;
@@ -191,8 +193,8 @@ export function startJobWorker(options: WorkerOptions) {
     try {
       const result = await handler(job, jobCancel.signal);
       try {
-        if (result) await release(job.id, options.workerId, undefined, result.deferUntil);
-        else await complete(job.id, options.workerId);
+        if (result) await release(job.id, options.workerId, undefined, result.deferUntil, job);
+        else await complete(job.id, options.workerId, undefined, job);
       } catch (error: unknown) {
         options.onError?.(error);
         await deadLetter(result ? 'Failed to reschedule job' : 'Failed to mark job completed');
