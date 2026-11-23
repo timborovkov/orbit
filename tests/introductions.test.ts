@@ -391,6 +391,7 @@ test('linked identities preserve agent-owned observations and private history bo
     'Other agent private conversation marker.',
   );
   const sarahPartner = await observe(sarah.id, 'Morgan Lee');
+  const unsafeName = await observe(maya.id, 'Spoofed \u202e display name');
   await sql`insert into person_relationship_notes (agent_id, source_event_id, summary, excerpt)
     values (${sarah.id}, ${sarahAlex.sourceId}, 'Other agent private note marker.', 'private conversation marker')`;
   const [sarahRun] = await sql<{ id: string }[]>`insert into simulation_runs
@@ -436,9 +437,10 @@ test('linked identities preserve agent-owned observations and private history bo
     ]),
   });
   expect(JSON.stringify([proposal.search, ...proposal.requests])).not.toMatch(
-    /Other agent private|Private Alex Label|Confidential company|Morgan Lee/i,
+    /Other agent private|Private Alex Label|Confidential company|Morgan Lee|Spoofed/i,
   );
   await propose(maya, linkedAlex, sarahPartner, false);
+  await propose(maya, linkedAlex, unsafeName, false);
   await propose(sarah, sarahAlex, sarahPartner);
   await propose(observer, sarahAlex, sarahPartner, false, false);
 

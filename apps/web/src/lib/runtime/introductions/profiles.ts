@@ -5,6 +5,8 @@ import type { IntroductionDisclosure } from '@/lib/runtime/introductions/types';
 
 type ObservedProfile = Omit<IntroductionDisclosure, 'blurb'> & { personId: string };
 
+const directionalFormatting = '[\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]';
+
 // Filter each source by the acting agent before reading identity membership.
 export async function observedProfiles(
   store: Db | Tx,
@@ -44,6 +46,7 @@ export async function observedProfiles(
       WHERE char_length(display_name) BETWEEN 1 AND 100
         AND display_name ~ '[[:alpha:]]'
         AND display_name !~* '[@<>[:cntrl:]]|https?://|www[.]|([0-9][ .()+-]*){7}'
+        AND display_name !~ ${directionalFormatting}
         ${peopleFilter} ${sourceFilter}
       ORDER BY identity.person_id, observed_at DESC, source_kind, source_id
     )

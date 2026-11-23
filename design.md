@@ -307,13 +307,20 @@ stacked at 900px and narrower. Preserve source citations with saved runs.
 
 ### Follow-ups
 
-Administrators schedule durable follow-ups for an agent from the Follow-ups
-tab: subject, optional note and due time. Rows use the same disclosure
-pattern as History. Expand a row to inspect source, actor, attempts, job
-status, cancellation and the recorded outcome. Cancel is available only
-while status is scheduled. Due execution writes an internal activity
-outcome only — no external side effects. Paused and stopped agents
-skip-and-record due follow-ups (see [docs/follow-ups.md](docs/follow-ups.md)).
+Administrators create internal reminders from the Follow-ups tab. Agent-created
+commitments appear in the same list with the reply deadline or due time.
+Use the History disclosure pattern for notes, source and attempts. Keep
+cancellation available while the timer or draft is pending. Use “Waiting
+for reply” and “Preparing draft” for those states.
+
+Activity shows the deadline and channel, then the outcome. Show a saved reply
+excerpt as plain text with links to the message and continuation when available.
+A ready draft links to Approvals filtered to the corresponding run. See
+[durable follow-ups](docs/follow-ups.md).
+
+Chromium verified reminder scheduling and cancellation at 1440px and 390px,
+and Sarah’s commitment permissions and reply evidence links. The 390px Dark
+view wrapped a long evidence string within the viewport.
 
 ### Knowledge
 
@@ -380,14 +387,15 @@ send-outcome rendering, and the mobile layout in both themes at 1440px and 390px
 
 ### Access
 
-Use a left navigator for Lifecycle, Budgets, Approvals, Consent, Skills,
+Use a left navigator for Lifecycle, Budgets, Approvals, Commitments, Consent, Skills,
 MCP and OpenRouter. At 900px and narrower, switch to a Select. Keep panels
 mounted to preserve unsaved fields.
 
 - **Lifecycle** uses radio cards and explicitly describes the current limits of Live mode.
 - **Budgets** group related values in a two-column desktop grid. Align each No cap Switch with its spend label on wide screens and put it below the label on phones. Keep units next to the input.
 - **Approvals** uses Switch rows with an action label and description, plus the optional spend threshold, expiry and rejection behavior. Saving these settings creates a configuration version.
-- **Consent** shows saved recipient, scope, choice and evidence records above the form. Let administrators decide whether introductions and escalations require recorded consent.
+- **Commitments** shows the two independent opt-in grants with their current state and enable or disable controls.
+- **Consent** shows independent People search and proposal grants. Scenario consent settings and evidence records follow. People proposals collect both participants’ decisions on the introduction detail page.
 - **Skills and MCP** use checkboxes to assign library entries. Attached MCP connections show a nested checklist of administrator-classified read-only tools. New attachments start with an empty checklist.
 - **OpenRouter** identifies the active source as an agent override, environment default or missing key. Use a password input for the override and clear it after submission. Removing the override falls back to the environment default if configured. Display only the source label.
 
@@ -426,7 +434,8 @@ each person. Keep a revocation action available after agreement.
 The second agreement creates a read-only draft in Approvals with a link back
 to the disclosure and consent. If a person revokes an agreement after
 approval, show Blocked on the proposal and preserve the approval decision in
-history. Configure People tool grants in Access → Consent.
+history. Configure People tool grants in Access → Consent. See
+[consent-based introductions](docs/introductions.md).
 
 Playwright recorded the first agreement at 1440px, then exercised drafting,
 approval, and revocation at 390px. It checked for horizontal overflow and ran

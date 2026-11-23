@@ -24,6 +24,8 @@ export interface FollowUpRow {
   attempts: number;
   createdBy: string;
   source: string;
+  channel: string | null;
+  waitForEvent: string | null;
   cancelledAt: Date | null;
   cancelledBy: string | null;
   cancelReason: string | null;
@@ -98,8 +100,8 @@ export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items:
         <div className="editor-section-heading">
           <h2 id="follow-ups-schedule-heading">Schedule a follow-up</h2>
           <p className="muted">
-            Durable commitments survive worker restarts. When due, Orbit records an internal outcome
-            on the activity timeline — no external actions.
+            Create an internal reminder for this agent. Conversation commitments created by the
+            agent appear below.
           </p>
         </div>
         <WorkspaceForm action={scheduleFollowUpWithUtcDue} label="Schedule follow-up">
@@ -169,14 +171,21 @@ export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items:
               <div>
                 <span className="follow-up-title">{item.subject}</span>
                 <time dateTime={item.dueAt.toISOString()}>
-                  Due {formatUtcTimestamp(item.dueAt)}
+                  {item.waitForEvent === 'reply' ? 'Reply deadline' : 'Due'}{' '}
+                  {formatUtcTimestamp(item.dueAt)}
                   {item.jobStatus ? ` · job ${item.jobStatus}` : ''}
                   {item.attempts > 0
                     ? ` · ${item.attempts} attempt${item.attempts === 1 ? '' : 's'}`
                     : ''}
                 </time>
               </div>
-              <span className="state-label">{followUpStatusLabels[item.status]}</span>
+              <span className="state-label">
+                {item.status === 'running' && item.channel
+                  ? 'Preparing draft'
+                  : item.status === 'scheduled' && item.waitForEvent === 'reply'
+                    ? 'Waiting for reply'
+                    : followUpStatusLabels[item.status]}
+              </span>
               <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
             </summary>
             <dl className="follow-up-inspect">
@@ -208,12 +217,6 @@ export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items:
                   <dd>{item.outcome}</dd>
                 </div>
               ) : null}
-              {item.outcomeKind ? (
-                <div>
-                  <dt>Outcome kind</dt>
-                  <dd>{item.outcomeKind}</dd>
-                </div>
-              ) : null}
               {item.finishedAt ? (
                 <div>
                   <dt>Finished</dt>
@@ -234,7 +237,7 @@ export function FollowUpsWorkbench({ agentId, items }: { agentId: string; items:
                 </div>
               ) : null}
             </dl>
-            {item.status === 'scheduled' && (
+            {(item.status === 'scheduled' || item.status === 'running') && (
               <CancelFollowUpButton agentId={agentId} followUpId={item.id} />
             )}
           </details>

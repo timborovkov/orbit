@@ -2,6 +2,7 @@ import type { Tx } from '@/lib/db';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import type { JobRecord } from '@/lib/queue/types';
 import type { AgentConfig } from '@/lib/runtime/config';
+import type { CommitmentAnchor } from '@/lib/runtime/follow-ups/types';
 import type { SimulationResult } from '@/lib/runtime/simulation';
 import type { actionIntents, outboundActions, runs } from '@/lib/schema';
 
@@ -71,6 +72,19 @@ export interface ChannelAdapter {
     evaluationInput?: (tx: Tx, agentId: string, sourceId: string) => Promise<string | null>;
     complete?: (input: CompletedChannelRun) => Promise<unknown>;
     recover?: (input: CompletedChannelRun) => Promise<unknown>;
+  };
+  /** Draft-capable channels can prepare a reviewable follow-up for a stored conversation. */
+  followUp?: {
+    actionType: string;
+    prepare: (
+      tx: Tx,
+      anchor: CommitmentAnchor,
+      commitment: { subject: string; note: string },
+    ) => Promise<{
+      input: string;
+      recipients: string[];
+      payload: Record<string, unknown>;
+    } | null>;
   };
   actions?: readonly ChannelAction[];
   schedule?: (tx: Tx, agentId: string, config: AgentConfig) => Promise<unknown>;

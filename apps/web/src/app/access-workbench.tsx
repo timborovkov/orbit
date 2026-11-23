@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 
 import {
   BookOpen,
+  CalendarClock,
   KeyRound,
   PauseCircle,
   Plug,
@@ -12,11 +13,13 @@ import {
   WalletCards,
 } from 'lucide-react';
 
+import { saveCommitmentGrant } from '@/actions/policy';
 import { AccessPanel } from '@/app/access-panel';
 import { BudgetSettings, type BudgetUsageView } from '@/app/budget-settings';
 import { LifecycleControls } from '@/app/lifecycle-controls';
 import { ConsentSettings, ReviewSettings } from '@/app/policy-settings';
 import { McpPicker, type McpPickerConnection, SkillPicker } from '@/app/resource-pickers';
+import { WorkspaceForm } from '@/app/workspace-form';
 import {
   Select,
   SelectContent,
@@ -27,6 +30,7 @@ import {
 import type { AgentBudgets } from '@/lib/budgets';
 import type { LifecycleState } from '@/lib/lifecycle';
 import type { ConsentScope } from '@/lib/policy/scopes';
+import { commitmentGrants, type CommitmentTool } from '@/lib/runtime/follow-ups/types';
 import type { OpenRouterKeySource } from '@/lib/runtime/openrouter-key';
 import { accessSectionPanelHidden } from '@/lib/runtime/playground-ui';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
@@ -38,6 +42,7 @@ const sections = [
   { id: 'lifecycle', title: 'Lifecycle', icon: PauseCircle },
   { id: 'budgets', title: 'Budgets', icon: WalletCards },
   { id: 'approvals', title: 'Approvals', icon: Scale },
+  { id: 'commitments', title: 'Commitments', icon: CalendarClock },
   { id: 'consent', title: 'Consent', icon: ShieldCheck },
   { id: 'skills', title: 'Skills', icon: BookOpen },
   { id: 'mcp', title: 'MCP', icon: Plug },
@@ -57,6 +62,7 @@ export function AccessWorkbench({
   approvalSpendCents,
   channelActions,
   enabledTools,
+  enabledCommitmentTools,
   consentRequiredTools,
   consents,
   hasAgentCredential,
@@ -77,6 +83,7 @@ export function AccessWorkbench({
   approvalOnReject: 'continue' | 'end';
   approvalSpendCents: number | null;
   enabledTools: string[];
+  enabledCommitmentTools: CommitmentTool[];
   channelActions: Parameters<typeof ReviewSettings>[0]['channelActions'];
   consentRequiredTools: ConsentScope[];
   consents: Workspace['consents'];
@@ -109,6 +116,7 @@ export function AccessWorkbench({
       ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
   }, [active, compact]);
 
+  const commitmentToolSet = new Set(enabledCommitmentTools);
   const panels: Record<(typeof sections)[number]['id'], ReactNode> = {
     lifecycle: <LifecycleControls agentId={agentId} lifecycle={lifecycle} />,
     budgets: <BudgetSettings agentId={agentId} budgets={budgets} usage={usage} />,
@@ -122,6 +130,34 @@ export function AccessWorkbench({
         approvalSpendCents={approvalSpendCents}
         channelActions={channelActions}
       />
+    ),
+    commitments: (
+      <section className="access-workbench space-y-4" aria-labelledby="commitment-permissions">
+        <div className="editor-section-heading">
+          <h2 id="commitment-permissions">Commitment permissions</h2>
+          <p className="muted">
+            Allow this agent to create commitments in its current conversation. Follow-up drafts go
+            to Approvals.
+          </p>
+        </div>
+        {commitmentGrants.map(({ type, label }) => {
+          const enabled = commitmentToolSet.has(type);
+          return (
+            <WorkspaceForm
+              key={type}
+              action={saveCommitmentGrant}
+              label={`${enabled ? 'Disable' : 'Enable'} ${label.toLowerCase()}`}
+            >
+              <input type="hidden" name="agentId" value={agentId} />
+              <input type="hidden" name="type" value={type} />
+              <input type="hidden" name="enabled" value={String(!enabled)} />
+              <p>
+                {label} · {enabled ? 'Enabled' : 'Disabled'}
+              </p>
+            </WorkspaceForm>
+          );
+        })}
+      </section>
     ),
     consent: (
       <ConsentSettings
