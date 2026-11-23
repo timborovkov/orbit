@@ -4631,3 +4631,45 @@ details[open] > summary > .disclosure-chevron {
 .email-message[id] {
   scroll-margin-block-start: 112px;
 }
+
+.research-activity,
+.research-crawl,
+.research-sources li,
+.research-activity-form {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.research-activity {
+  margin-block: 16px;
+}
+
+.research-crawl {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.research-sources {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+.research-sources a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.research-sources blockquote {
+  white-space: pre-wrap;
+}
+
+.research-access {
+  display: grid;
+  gap: 24px;
+}

@@ -9,6 +9,7 @@ import { registerErrorCapture } from '@/lib/observability/errors';
 import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import type { JobRecord } from '@/lib/queue/types';
 import { startJobWorker } from '@/lib/queue/worker';
+import { WEB_CRAWL_JOB } from '@/lib/research';
 import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
 import { CHANNEL_EVENT_JOB, processChannelEventJob } from '@/lib/runtime/channels/ingest';
 import {
@@ -55,6 +56,7 @@ import {
   processOutboundJob,
   reconcileDeadOutboundJobs,
 } from '@/lib/runtime/outbound/process';
+import { processWebCrawl, reconcileDeadWebCrawls } from '@/lib/runtime/research/crawls';
 import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
 import { workerEnvConfig } from '@/lib/worker-env';
 
@@ -119,6 +121,7 @@ const providerJobs = channelJobs(workerId, [
   KNOWLEDGE_JOB_TYPE,
   SHARED_KNOWLEDGE_JOB_TYPE,
   FOLLOW_UP_JOB_TYPE,
+  WEB_CRAWL_JOB,
 ]);
 
 async function runKnowledgeJob(job: JobRecord, signal: AbortSignal) {
@@ -191,6 +194,7 @@ const worker = startJobWorker({
     [MEMORY_EMBED_JOB]: (job, signal) => processMemoryEmbedding(job.payload, signal),
     [KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
     [SHARED_KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
+    [WEB_CRAWL_JOB]: (job, signal) => processWebCrawl(job, workerId, signal),
     [FOLLOW_UP_JOB_TYPE]: async (job) => {
       try {
         await processFollowUpJob(job.payload, job.attempts);
@@ -218,6 +222,7 @@ const worker = startJobWorker({
       await finalizeFailedKnowledgeJob(job.payload, error);
       return;
     }
+    if (job.type === WEB_CRAWL_JOB) await reconcileDeadWebCrawls();
     if (job.type === FOLLOW_UP_JOB_TYPE) {
       await finalizeFailedFollowUpJob(job.payload, error);
     }
@@ -228,6 +233,7 @@ const worker = startJobWorker({
       reconcileDeadEvaluationReplayJobs(),
       reconcileDeadKnowledgeJobs(),
       reconcileDeadFollowUpJobs(),
+      reconcileDeadWebCrawls(),
       reconcileDeadOutboundJobs(),
       scheduleMemoryMaintenance(),
       expireStaleApprovals(),

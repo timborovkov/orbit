@@ -15,6 +15,8 @@ export const orbitTestWebServer = {
     ORBIT_ENCRYPTION_KEY: 'a'.repeat(64),
     // Explicitly empty so a developer shell export cannot leak into Access "none" states.
     OPENROUTER_API_KEY: '',
+    FIRECRAWL_API_KEY: '',
+    FIRECRAWL_API_ORIGIN: 'https://api.firecrawl.dev',
     ORBIT_ADMIN_EMAIL: 'admin@example.com',
     ORBIT_ADMIN_PASSWORD: 'test-only-password-123456',
     ORBIT_WORKER_ID: 'playwright-worker',
@@ -34,6 +36,7 @@ export default defineConfig({
     'inbound-email.spec.ts',
     'memory.spec.ts',
     'people.spec.ts',
+    'web-research.spec.ts',
   ],
   workers: 1,
   use: {

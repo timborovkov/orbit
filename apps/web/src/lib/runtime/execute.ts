@@ -19,6 +19,7 @@ import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
+import { isWebTool } from '@/lib/research';
 import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
 import {
   lockApprovalAgent,
@@ -56,6 +57,7 @@ import {
   searchRunHistory,
   storeRelationshipNote,
 } from '@/lib/runtime/people/history';
+import { webResearchTools } from '@/lib/runtime/research/tools';
 import { prepareRunTools } from '@/lib/runtime/resources';
 import {
   hasSimulationProgress,
@@ -767,6 +769,7 @@ async function processSimulationRun(
         workspaceReview: origin === 'playground' || origin === 'replay',
       };
       const knowledgeEnabled = agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL);
+      const webTools = origin === 'replay' ? [] : agent.enabledTools.filter(isWebTool);
       const [deepMemory, deepHistory] =
         budgets.maxToolStepsPerRun > 0 && origin !== 'replay'
           ? await retryableStore(() =>
@@ -904,9 +907,9 @@ async function processSimulationRun(
             skillCatalog: resources.skillCatalog,
             tools: resources.tools,
             retrievalTools:
-              deepMemory || deepHistory || deepKnowledge
-                ? (result, requestSignal) =>
-                    retrievalTools({
+              deepMemory || deepHistory || deepKnowledge || webTools.length
+                ? (result, requestSignal) => ({
+                    ...retrievalTools({
                       run: recallScope,
                       policy: basePolicy,
                       result,
@@ -916,7 +919,16 @@ async function processSimulationRun(
                       knowledge: deepKnowledge,
                       gate: resources.toolSteps,
                       calls: resources.toolCalls,
-                    })
+                    }),
+                    ...webResearchTools({
+                      web: webTools,
+                      policy: basePolicy,
+                      gate: resources.toolSteps,
+                      calls: resources.toolCalls,
+                      signal: requestSignal,
+                      executionToken,
+                    }),
+                  })
                 : undefined,
             skillVersions: resources.skillVersions,
             mcpConnections: resources.mcpConnections,

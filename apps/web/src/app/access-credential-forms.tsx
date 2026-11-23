@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useId, useRef, useState, useTransition } from 'react';
 
 import { saveCredential } from '@/actions/workspace';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
@@ -10,10 +10,15 @@ import { SubmitButton } from '@/components/ui/submit-button';
 export function AccessCredentialForms({
   agentId,
   hasAgentCredential,
+  credentialAction = saveCredential,
+  placeholder = 'Enter an OpenRouter key for this agent',
 }: {
   agentId: string;
   hasAgentCredential: boolean;
+  credentialAction?: (form: FormData) => Promise<{ error?: string; message?: string }>;
+  placeholder?: string;
 }) {
+  const inputId = useId();
   const saveForm = useRef<HTMLFormElement>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -24,7 +29,7 @@ export function AccessCredentialForms({
       setError('');
       setMessage('');
       try {
-        const result = await saveCredential(form);
+        const result = await credentialAction(form);
         if (result.error) {
           setError(result.error);
           return;
@@ -45,15 +50,15 @@ export function AccessCredentialForms({
         <fieldset disabled={pending}>
           <input type="hidden" name="agentId" value={agentId} />
           <Field>
-            <FieldLabel htmlFor="credential-key">Agent API key</FieldLabel>
+            <FieldLabel htmlFor={inputId}>Agent API key</FieldLabel>
             <Input
-              id="credential-key"
+              id={inputId}
               type="password"
               name="credential"
               autoComplete="new-password"
               required
               maxLength={512}
-              placeholder="Enter an OpenRouter key for this agent"
+              placeholder={placeholder}
               className="m-0"
             />
             <FieldDescription>

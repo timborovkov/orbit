@@ -305,6 +305,12 @@ linked job status and the provider's recorded cost. Label missing cost
 explicitly. Use a flexible primary column and a 280px version column,
 stacked at 900px and narrower. Preserve source citations with saved runs.
 
+Show web citations inside the originating run in Activity. Crawl results show
+the target, status, pages read and page limit. Keep cancellation available
+while the crawl is pending. Show a final cancellation or failure reason
+in the same row. Source excerpts render as plain text. An import disclosure
+lets the administrator pick a shared library and then confirm the import.
+
 ### Follow-ups
 
 Administrators schedule durable follow-ups for an agent from the Follow-ups
@@ -381,7 +387,7 @@ send-outcome rendering, and the mobile layout in both themes at 1440px and 390px
 ### Access
 
 Use a left navigator for Lifecycle, Budgets, Approvals, Consent, Skills,
-MCP and OpenRouter. At 900px and narrower, switch to a Select. Keep panels
+MCP, Web research and OpenRouter. At 900px and narrower, switch to a Select. Keep panels
 mounted to preserve unsaved fields.
 
 - **Lifecycle** uses radio cards and explicitly describes the current limits of Live mode.
@@ -389,6 +395,9 @@ mounted to preserve unsaved fields.
 - **Approvals** uses Switch rows with an action label and description, plus the optional spend threshold, expiry and rejection behavior. Saving these settings creates a configuration version.
 - **Consent** shows saved recipient, scope, choice and evidence records above the form. Let administrators decide whether introductions and escalations require recorded consent.
 - **Skills and MCP** use checkboxes to assign library entries. Attached MCP connections show a nested checklist of administrator-classified read-only tools. New attachments start with an empty checklist.
+- **Web research** shows independent grant checkboxes and a multiline list of
+  approved crawl targets. The Firecrawl key uses the shared credential form.
+  Show the credential source next to the Firecrawl heading.
 - **OpenRouter** identifies the active source as an agent override, environment default or missing key. Use a password input for the override and clear it after submission. Removing the override falls back to the environment default if configured. Display only the source label.
 
 ## People
