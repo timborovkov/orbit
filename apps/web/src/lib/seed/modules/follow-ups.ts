@@ -4,6 +4,7 @@ import {
   DEMO_ACTIVITY,
   DEMO_ACTOR,
   DEMO_AGENTS,
+  DEMO_EMAIL,
   DEMO_FOLLOW_UP_JOBS,
   DEMO_FOLLOW_UPS,
 } from '@/lib/seed/ids';
@@ -166,5 +167,40 @@ export const followUpsModule: SeedModule = {
           createdAt: sarahFinished,
         },
       });
+    const replyOutcome = 'A reply was saved in the conversation before the deadline.';
+    await tx
+      .insert(followUps)
+      .values({
+        id: DEMO_FOLLOW_UPS.sarahReplyReceived,
+        agentId: DEMO_AGENTS.sarah,
+        source: 'agent',
+        createdBy: DEMO_ACTOR,
+        subject: 'Wait for the customer’s billing question',
+        waitForEvent: 'reply',
+        channel: 'email',
+        conversationId: DEMO_EMAIL.threadId,
+        replyEmailId: DEMO_EMAIL.messageId,
+        continuationRunId: DEMO_EMAIL.runId,
+        dueAt: demoTime(now, 60 * 60 * 1000),
+        status: 'completed',
+        outcomeKind: 'reply_received',
+        outcome: replyOutcome,
+        createdAt: demoTime(now, -60 * 60 * 1000),
+        finishedAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing();
+    await tx
+      .insert(agentActivityEvents)
+      .values({
+        id: DEMO_ACTIVITY.sarahReplyReceived,
+        agentId: DEMO_AGENTS.sarah,
+        followUpId: DEMO_FOLLOW_UPS.sarahReplyReceived,
+        kind: 'follow_up.reply_received',
+        summary: 'Reply received: Wait for the customer’s billing question',
+        detail: replyOutcome,
+        createdAt: now,
+      })
+      .onConflictDoNothing();
   },
 };

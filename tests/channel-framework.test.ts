@@ -599,3 +599,77 @@ test('a channel run keeps conversation context within its own agent, account and
     else process.env.ORBIT_ENCRYPTION_KEY = encryptionKey;
   }
 });
+
+test('persisted replies match the agent, channel, account and conversation through shared intake', async () => {
+  const lastKey = process.env.ORBIT_ENCRYPTION_KEY;
+  const unregister = registerChannel({
+    id: 'fixture-replies',
+    label: 'Fixture replies',
+    run: { mode: 'evaluate' },
+  });
+  const unregisterOther = registerChannel({
+    id: 'wrong-replies',
+    label: 'Wrong channel',
+    run: { mode: 'evaluate' },
+  });
+  try {
+    process.env.ORBIT_ENCRYPTION_KEY = 'a'.repeat(64);
+    const owner = await seedAgent([]);
+    const other = await seedAgent([]);
+    const [wait] = await sql`
+      INSERT INTO follow_ups (agent_id, source, created_by, subject, due_at, wait_for_event,
+        channel, account_id, conversation_id)
+      VALUES (${owner.id}, 'agent', ${admin}, 'Wait for proof', now()+interval '1 minute', 'reply',
+        'fixture-replies', 'account-1', 'thread-1') RETURNING id
+    `;
+    const reply = {
+      agentId: owner.id,
+      channel: 'fixture-replies',
+      accountId: 'account-1',
+      threadId: 'thread-1',
+      externalId: 'first-reply',
+      text: 'The requested evidence.',
+      isReply: true,
+    };
+    await ingestChannelEvent({ ...reply, agentId: other.id });
+    await ingestChannelEvent({ ...reply, channel: 'wrong-replies' });
+    await ingestChannelEvent({ ...reply, accountId: 'account-2' });
+    await ingestChannelEvent({ ...reply, threadId: 'thread-2', externalId: 'other-thread' });
+    await ingestChannelEvent({ ...reply, isReply: false, externalId: 'not-a-reply' });
+    expect((await sql`SELECT status FROM follow_ups WHERE id=${wait!.id}`)[0]?.status).toBe(
+      'scheduled',
+    );
+
+    const saved = await ingestChannelEvent(reply);
+    expect(saved).toBeTruthy();
+    expect(await ingestChannelEvent(reply)).toBeNull();
+    const claimed = await claimJobs({ workerId, types: [CHANNEL_EVENT_JOB], limit: 20 });
+    const first = claimed.find((job) => job.id === saved!.jobId);
+    if (!first) throw new Error('Expected the persisted reply intake job.');
+    await processChannelEventJob(first);
+    await processChannelEventJob(first);
+    await completeJob(first.id, workerId);
+    const [resolved] = await sql`
+      SELECT f.status, f.outcome_kind, f.reply_event_id, f.continuation_run_id, s.run_id
+      FROM follow_ups f JOIN source_events s ON s.id=f.reply_event_id WHERE f.id=${wait!.id}
+    `;
+    expect(resolved).toMatchObject({
+      status: 'completed',
+      outcome_kind: 'reply_received',
+      reply_event_id: saved!.sourceId,
+    });
+    expect(resolved?.continuation_run_id).toBeTruthy();
+    expect(resolved?.continuation_run_id).toBe(resolved?.run_id);
+    expect(
+      await sql`SELECT id FROM agent_activity_events WHERE follow_up_id=${wait!.id}`,
+    ).toHaveLength(1);
+    for (const { id } of claimed) {
+      if (id !== first.id) await releaseClaim(id, workerId);
+    }
+  } finally {
+    if (lastKey === undefined) delete process.env.ORBIT_ENCRYPTION_KEY;
+    else process.env.ORBIT_ENCRYPTION_KEY = lastKey;
+    unregister();
+    unregisterOther();
+  }
+});

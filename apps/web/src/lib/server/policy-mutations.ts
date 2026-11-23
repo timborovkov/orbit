@@ -14,6 +14,7 @@ import {
   settleApprovalRun,
 } from '@/lib/runtime/approval-work';
 import { channelAction } from '@/lib/runtime/channels/registry';
+import { isCommitmentTool } from '@/lib/runtime/follow-ups/types';
 import { enqueueOutbound } from '@/lib/runtime/outbound/dispatch';
 import { recordApprovalDecision } from '@/lib/runtime/telemetry';
 import { actionIntents, agents, audit, policyDecisions, recipientConsents } from '@/lib/schema';
@@ -84,11 +85,31 @@ export async function persistChannelGrant(
 ) {
   const action = channelAction(type)?.action;
   if (!action || action.usesProviderGrant) return { error: 'Choose a valid channel action.' };
+  return persistAgentToolGrant(actor, agentId, type, enabled, 'Channel permission saved.');
+}
+
+export async function persistCommitmentGrant(
+  actor: string,
+  agentId: string,
+  type: string,
+  enabled: boolean,
+) {
+  if (!isCommitmentTool(type)) return { error: 'Choose a valid commitment tool.' };
+  return persistAgentToolGrant(actor, agentId, type, enabled, 'Commitment permission saved.');
+}
+
+async function persistAgentToolGrant(
+  actor: string,
+  agentId: string,
+  type: string,
+  enabled: boolean,
+  message: string,
+) {
   return db().transaction(async (tx) => {
     const agent = await lockApprovalAgent(tx, agentId);
     if (!agent) return { error: 'Agent not found.' };
     const tools = new Set(agent.enabledTools);
-    if (enabled === tools.has(type)) return { message: 'Channel permission saved.' };
+    if (enabled === tools.has(type)) return { message };
     if (enabled) tools.add(type);
     else tools.delete(type);
     await tx
@@ -99,7 +120,7 @@ export async function persistChannelGrant(
       actor,
       action: `${enabled ? 'Enabled' : 'Disabled'} ${type} for ${agent.name}`,
     });
-    return { message: 'Channel permission saved.' };
+    return { message };
   });
 }
 

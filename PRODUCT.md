@@ -14,12 +14,21 @@ and infrastructure specification is [architecture.md](architecture.md).
 
 ## Capabilities and constraints
 
-This milestone provides editable database-backed templates, immutable agent
-configuration versions, an optional OpenRouter environment default with encrypted
-per-agent key overrides, and persisted manual simulations. Inference is real; every
-proposed external action is suppressed.
-Schedules, channel integrations and live actions are outside this milestone.
-No invented metrics, provider activity or successful model responses belong in the UI.
+Administrators manage versioned agent configurations, reusable templates, Skills,
+MCP connections, shared Knowledge, People and agent-private Memory. They can run
+Playground simulations and compare saved evaluations. Background work, read-only
+tools, outbound approvals and lifecycle controls use the shared policy and queue.
+
+Orbit supports X discovery and administrator-approved email replies. With an
+eligible X connection and an administrator’s channel grant, Live agents can reply
+to eligible discovered posts. Administrators can require a review for each reply.
+Shadow agents keep editable proposals. The console shows recorded provider
+outcomes. See [replies to discovered X posts](docs/x-discovery-replies.md).
+
+Administrators can grant an agent permission to schedule a follow-up or wait for
+a reply in a saved conversation. Activity records the deadline, outcome and
+evidence. A deadline can produce a draft for administrator review. See
+[durable follow-ups](docs/follow-ups.md).
 
 ## Confirmed commitments
 

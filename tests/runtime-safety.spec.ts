@@ -45,7 +45,7 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
   await openAccessSection(page, 'Lifecycle');
   await expect(page.getByRole('heading', { name: 'Lifecycle', exact: true })).toBeVisible();
   await expect(
-    page.getByText('no external action adapters exist yet', { exact: false }),
+    page.getByText('Live sends still depend on the channel connection', { exact: false }),
   ).toBeVisible();
   const lifecycle = page.getByRole('list', { name: 'Agent lifecycle' });
   const pause = lifecycle.getByRole('button', { name: 'Set Paused', exact: true });
@@ -60,7 +60,7 @@ test('lifecycle controls, budgets and run states on desktop and mobile', async (
   await expect(page.locator('.agent-name-line .state-label')).toContainText('Live');
   await expect(page.locator('#lifecycle .lifecycle-card.is-selected h3')).toHaveText('Live');
   await expect(
-    page.getByText('no external action adapters exist yet', { exact: false }),
+    page.getByText('Live sends still depend on the channel connection', { exact: false }),
   ).toBeVisible();
 
   await openAccessSection(page, 'Budgets');

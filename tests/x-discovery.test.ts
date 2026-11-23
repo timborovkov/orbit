@@ -631,6 +631,25 @@ test('Live X grant queues the reply once and replay adds no write or approval', 
   expect(await outboundFor(agentId)).toMatchObject({ status: 'sent' });
 });
 
+test('a global pause after approval blocks the reviewed reply before sending', async () => {
+  const { agentId, intent } = await discoverReply('shadow');
+  await persistLifecycle(admin, agentId, 'live');
+  expect(await reviewProposedAction(admin, agentId, intent.id, 'approved')).toHaveProperty(
+    'message',
+  );
+  expect(await outboundFor(agentId)).toMatchObject({ status: 'queued' });
+  await persistGlobalPause(admin, true);
+  const job = await claimXReply(agentId);
+  const fixture = fixtureXDelivery();
+  await processOutboundJob(job, signal, fixture.override);
+  await completeJob(job.id, workerId);
+  expect(fixture.sent).toHaveLength(0);
+  expect(await outboundFor(agentId)).toMatchObject({
+    status: 'blocked',
+    reason: expect.stringContaining('Global outbound pause'),
+  });
+});
+
 test.each([
   ['global pause', async () => persistGlobalPause(admin, true), 'Global outbound pause'],
   [

@@ -7,11 +7,12 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { enqueueJob } from '@/lib/queue/jobs';
 import {
-  FOLLOW_UP_ACTIVITY_KINDS,
-  FOLLOW_UP_JOB_TYPE,
-  scheduleFollowUpInputSchema,
-} from '@/lib/runtime/follow-ups/types';
-import { agentActivityEvents, agents, audit, followUps, jobs } from '@/lib/schema';
+  cancelCommitmentJobs,
+  commitmentClock,
+  recordFollowUpOutcome,
+} from '@/lib/runtime/follow-ups/state';
+import { FOLLOW_UP_JOB_TYPE, scheduleFollowUpInputSchema } from '@/lib/runtime/follow-ups/types';
+import { agents, audit, followUps } from '@/lib/schema';
 
 export async function scheduleFollowUp(
   actor: string,
@@ -68,8 +69,6 @@ export async function scheduleFollowUp(
 }
 
 export async function cancelFollowUp(actor: string, agentId: string, followUpId: string) {
-  const now = new Date();
-
   return db().transaction(async (tx) => {
     const agent = (
       await tx
@@ -88,45 +87,17 @@ export async function cancelFollowUp(actor: string, agentId: string, followUpId:
         .for('update')
     ).at(0);
     if (!row) return { error: 'Follow-up not found.' as const };
-    if (row.status !== 'scheduled') {
+    if (row.status !== 'scheduled' && row.status !== 'running') {
       return { error: `Follow-up is already ${row.status}.` as const };
     }
 
-    if (row.jobId) {
-      await tx
-        .update(jobs)
-        .set({
-          status: 'cancelled',
-          finishedAt: now,
-          claimExpiresAt: null,
-          claimedBy: null,
-          updatedAt: now,
-        })
-        .where(and(eq(jobs.id, row.jobId), eq(jobs.status, 'pending')));
-    }
-
-    const outcome = `Follow-up cancelled by administrator: ${row.subject}.`;
-    await tx
-      .update(followUps)
-      .set({
-        status: 'cancelled',
-        cancelledAt: now,
-        cancelledBy: actor,
-        cancelReason: 'Cancelled by administrator.',
-        finishedAt: now,
-        outcome,
-        outcomeKind: 'cancelled',
-        updatedAt: now,
-      })
-      .where(and(eq(followUps.id, followUpId), eq(followUps.status, 'scheduled')));
-
-    await tx.insert(agentActivityEvents).values({
-      agentId,
-      followUpId,
-      kind: FOLLOW_UP_ACTIVITY_KINDS.cancelled,
-      summary: `Follow-up cancelled: ${row.subject}`,
-      detail: outcome,
-      createdAt: now,
+    const now = await commitmentClock(tx);
+    const reason = 'Cancelled by administrator.';
+    await cancelCommitmentJobs(tx, agentId, [row], reason, now);
+    await recordFollowUpOutcome(tx, row, 'cancelled', reason, now, {
+      cancelledAt: now,
+      cancelledBy: actor,
+      cancelReason: reason,
     });
 
     await tx.insert(audit).values({

@@ -22,6 +22,7 @@ import { authorizeOutboundDispatch } from '@/lib/policy/outbound';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import { channelAction, channelForRun } from '@/lib/runtime/channels/registry';
 import { retryableStore } from '@/lib/runtime/errors';
+import { isCommitmentTool } from '@/lib/runtime/follow-ups/types';
 import {
   HISTORY_SEARCH,
   MEMORY_CAPTURE,
@@ -203,6 +204,22 @@ export function evaluateCandidate(
     return { decision: 'deny', reasons };
   }
 
+  if (isCommitmentTool(action.type)) {
+    if (
+      !ctx.runId ||
+      !ctx.runChannel ||
+      !action.executionToken ||
+      ctx.runOrigin === 'playground' ||
+      ctx.executionContext === 'replay'
+    ) {
+      return { decision: 'deny', reasons: ['Commitments require an owned channel run.'] };
+    }
+    if (!ctx.enabledTools.includes(action.type)) {
+      return { decision: 'deny', reasons: ['This commitment tool is not enabled for the agent.'] };
+    }
+    return { decision: 'allow', reasons: ['The conversation commitment is permitted.'] };
+  }
+
   // Internal memory operations are tied to a persisted, owned run. Capture does
   // not dispatch outbound actions or change any configuration or permissions.
   if (
@@ -245,7 +262,11 @@ export function evaluateCandidate(
   // knowledge.search is opt-in and must not flip empty-list semantics for other native tools.
   const nativeEnablementTools = ctx.enabledTools.filter((tool) => {
     const channelGrant = channelAction(tool)?.action;
-    return tool !== KNOWLEDGE_SEARCH_TOOL && (!channelGrant || channelGrant.usesProviderGrant);
+    return (
+      tool !== KNOWLEDGE_SEARCH_TOOL &&
+      !isCommitmentTool(tool) &&
+      (!channelGrant || channelGrant.usesProviderGrant)
+    );
   });
   const toolDenied = isMcp
     ? !mcpGranted
@@ -381,7 +402,11 @@ export async function authorizeAction(
             sql`${runs.expiresAt} > now()`,
           ),
         );
-      const owned = (await (action.type === MEMORY_CAPTURE ? query.for('update') : query)).at(0);
+      const owned = (
+        await (action.type === MEMORY_CAPTURE || isCommitmentTool(action.type)
+          ? query.for('update')
+          : query)
+      ).at(0);
       if (!owned) throw new BudgetError('cancelled');
       if (action.type === MEMORY_CAPTURE && memoryCaptureOrigin(current.runOrigin)) {
         const sources = await tx
@@ -396,7 +421,7 @@ export async function authorizeAction(
     }
     const recipients = action.recipients ?? [];
     const consentFailure =
-      action.readOnly || action.type === MEMORY_CAPTURE
+      action.readOnly || action.type === MEMORY_CAPTURE || isCommitmentTool(action.type)
         ? null
         : await recipientConsentFailure(
             tx,

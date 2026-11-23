@@ -2,15 +2,40 @@ import { z } from 'zod';
 
 import { parseOffsetBearingDueAt } from '@/lib/runtime/follow-ups/due';
 
-/** Delayed job that executes an admin-scheduled follow-up when due. */
+/** Delayed job that executes a follow-up when due. */
 export const FOLLOW_UP_JOB_TYPE = 'followup.execute';
 
 export type FollowUpStatus =
   'scheduled' | 'running' | 'completed' | 'cancelled' | 'skipped' | 'failed';
 
+export const pendingFollowUpStatuses = ['scheduled', 'running'] as const;
+
 export type FollowUpSource = 'admin' | 'agent';
 
-export type FollowUpOutcomeKind = 'executed' | 'skipped_lifecycle' | 'cancelled' | 'failed';
+export type FollowUpOutcomeKind =
+  'executed' | 'reply_received' | 'draft_ready' | 'skipped_lifecycle' | 'cancelled' | 'failed';
+
+export const commitmentGrants = [
+  { type: 'commitments.schedule_follow_up', label: 'Schedule follow-up' },
+  { type: 'commitments.wait_for_reply', label: 'Wait for reply' },
+] as const;
+
+export type CommitmentTool = (typeof commitmentGrants)[number]['type'];
+
+export function isCommitmentTool(type: string): type is CommitmentTool {
+  return commitmentGrants.some((grant) => grant.type === type);
+}
+
+export interface CommitmentConversation {
+  agentId: string;
+  channel: string;
+  accountId: string | null;
+  conversationId: string;
+}
+
+export interface CommitmentAnchor extends CommitmentConversation {
+  anchorId: string;
+}
 
 export const followUpStatusLabels: Record<FollowUpStatus, string> = {
   scheduled: 'Scheduled',
@@ -22,7 +47,10 @@ export const followUpStatusLabels: Record<FollowUpStatus, string> = {
 };
 
 export const FOLLOW_UP_ACTIVITY_KINDS = {
+  scheduled: 'follow_up.scheduled',
   completed: 'follow_up.completed',
+  replyReceived: 'follow_up.reply_received',
+  draftReady: 'follow_up.draft_ready',
   skipped: 'follow_up.skipped',
   cancelled: 'follow_up.cancelled',
   failed: 'follow_up.failed',

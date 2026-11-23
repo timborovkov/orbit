@@ -19,7 +19,8 @@ import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { authorizeAction, loadPolicyContext, reserveRequestQuota } from '@/lib/policy/gateway';
 import { proposalTypes } from '@/lib/policy/scopes';
-import { completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
+import { activeJobClaim, completeJob, deadLetterJob, enqueueJob } from '@/lib/queue/jobs';
+import type { JobClaimIdentity } from '@/lib/queue/types';
 import { actionIdempotencyKey } from '@/lib/runtime/action-idempotency';
 import {
   lockApprovalAgent,
@@ -38,6 +39,8 @@ import {
   retryableStore,
   UnrecoverablePaidStepFinalizationError,
 } from '@/lib/runtime/errors';
+import { finalizeCommitmentDraft } from '@/lib/runtime/follow-ups/process';
+import { commitmentTools } from '@/lib/runtime/follow-ups/tools';
 import {
   consumeKnowledgeToolStep,
   recordKnowledgeToolCall,
@@ -76,6 +79,7 @@ import {
   type ApprovalOnReject,
   configurations,
   credentials,
+  followUps,
   jobs,
   runs,
   usageCounters,
@@ -474,6 +478,7 @@ export async function executeSimulation(
 export interface SimulationJobClaim {
   jobId: string;
   workerId: string;
+  lease?: JobClaimIdentity;
   /** When set, claim validation uses this job type instead of deriving it from origin. */
   jobType?: string;
 }
@@ -516,10 +521,8 @@ async function processSimulationRun(
           .from(jobs)
           .where(
             and(
-              eq(jobs.id, claim.jobId),
+              activeJobClaim(claim.jobId, claim.workerId, claim.lease),
               eq(jobs.type, expectedType),
-              eq(jobs.claimedBy, claim.workerId),
-              eq(jobs.status, 'claimed'),
             ),
           )
           .for('update')
@@ -764,6 +767,44 @@ async function processSimulationRun(
       maxToolSteps: budgets.maxToolStepsPerRun,
     });
     try {
+      const [draftCommitment, replyCommitments] =
+        profile && origin !== 'replay'
+          ? await retryableStore(() =>
+              Promise.all([
+                db()
+                  .select({ id: followUps.id })
+                  .from(followUps)
+                  .where(and(eq(followUps.agentId, run.agentId), eq(followUps.draftRunId, run.id)))
+                  .limit(1),
+                db()
+                  .select({ subject: followUps.subject, note: followUps.note })
+                  .from(followUps)
+                  .where(
+                    and(
+                      eq(followUps.agentId, run.agentId),
+                      eq(followUps.continuationRunId, run.id),
+                    ),
+                  )
+                  .orderBy(followUps.createdAt, followUps.id)
+                  .limit(10),
+              ]),
+            )
+          : [[], []];
+      const isFollowUpDraft = draftCommitment.length > 0;
+      if (!isFollowUpDraft) {
+        Object.assign(
+          resources.tools,
+          await retryableStore(() =>
+            commitmentTools({
+              policy: basePolicy,
+              executionToken,
+              gate: resources.toolSteps,
+              calls: resources.toolCalls,
+              signal,
+            }),
+          ),
+        );
+      }
       const recallScope = {
         agentId: run.agentId,
         runId: run.id,
@@ -873,6 +914,8 @@ async function processSimulationRun(
           {
             channelMode,
             channelThread,
+            followUpDraft: isFollowUpDraft,
+            replyCommitments,
             actionTypes:
               channelMode === 'evaluate'
                 ? xDiscovery && !xReplyEnabled
@@ -1236,7 +1279,7 @@ async function processSimulationRun(
         const { pendingMemories, ...completedResult } = result;
         const traceResult = { ...completedResult, traceId: telemetry.traceId };
         // Adapter completion is idempotent and occurs before the run becomes terminal.
-        if (origin !== 'replay' && profile?.complete && !result.error) {
+        if (!isFollowUpDraft && origin !== 'replay' && profile?.complete && !result.error) {
           const complete = profile.complete;
           await retryableStore(() =>
             complete({
@@ -1247,8 +1290,31 @@ async function processSimulationRun(
             }),
           );
         }
-        const owned = await retryableStore(() =>
-          result.error
+        const owned = await retryableStore(() => {
+          if (isFollowUpDraft) {
+            return db().transaction(async (tx) => {
+              const active = await finalizeCommitmentDraft(
+                tx,
+                run,
+                executionToken,
+                traceResult,
+                claim,
+              );
+              if (!active) return [];
+              return updateIfOwned(
+                run.id,
+                executionToken,
+                {
+                  status: result.error ? 'failed' : 'completed',
+                  finishedAt: new Date(),
+                  result: traceResult,
+                  deferReason: isTrustedBudgetMessage(result.error ?? '') ? result.error : null,
+                },
+                tx,
+              );
+            });
+          }
+          return result.error
             ? updateIfOwned(run.id, executionToken, {
                 status: 'failed',
                 finishedAt: new Date(),
@@ -1264,8 +1330,8 @@ async function processSimulationRun(
                   config.approvalSettings?.approvalOnReject,
                   pendingMemories,
                   claim,
-                ),
-        );
+                );
+        });
         if (!owned.length) return;
       } catch (error) {
         // Paid-step burn: never complete the job while the run is still running. Persist the burn
@@ -1398,7 +1464,7 @@ async function processSimulationRun(
           if (isRetryableInfrastructureError(error)) throw error;
           if (claim) {
             try {
-              await telemetry.withSpan(
+              const finalized = await telemetry.withSpan(
                 'orbit.runtime',
                 {
                   stage: 'main',
@@ -1409,10 +1475,19 @@ async function processSimulationRun(
                   outcome: 'force-dead-letter',
                 },
                 async () => {
-                  await deadLetterJob(claim.jobId, claim.workerId, PAID_STEP_BURN_MESSAGE);
+                  const dead = await deadLetterJob(
+                    claim.jobId,
+                    claim.workerId,
+                    PAID_STEP_BURN_MESSAGE,
+                    undefined,
+                    claim.lease,
+                  );
+                  if (!dead) return false;
                   await finalizeExhaustedSimulationJob({ runId: run.id }, PAID_STEP_BURN_MESSAGE);
+                  return true;
                 },
               );
+              if (!finalized) return;
               statusMessage = 'force-dead-letter';
               reportFailure('worker.dead_letter', failureCorrelation(), PAID_STEP_BURN_MESSAGE);
               return;
@@ -1520,7 +1595,7 @@ async function finishSimulationWithApprovals(
     if (!owned.length) return owned;
 
     if (run.jobId && claim) {
-      await completeJob(run.jobId, claim.workerId, tx);
+      await completeJob(run.jobId, claim.workerId, tx, claim.lease);
     } else if (run.jobId) {
       const now = new Date();
       await tx
