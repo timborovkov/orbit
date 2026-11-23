@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { parseObservabilityEnv } from '@/lib/observability/env';
+import { parseFirecrawlEnv } from '@/lib/runtime/research/settings';
 
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 const isLoopback = (value: string) =>
@@ -61,6 +62,7 @@ const localAuth = base.extend({
 const configuration = z.discriminatedUnion('AUTH_DISABLED', [passwordAuth, localAuth]);
 
 export function parseEnv(input: Record<string, string | undefined>) {
+  parseFirecrawlEnv(input);
   const config = configuration.parse({ ...input, AUTH_DISABLED: input.AUTH_DISABLED ?? 'false' });
   const observability = parseObservabilityEnv(input);
   return config.AUTH_DISABLED === 'true'

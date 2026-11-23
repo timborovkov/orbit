@@ -1,5 +1,6 @@
 import { parseObservabilityEnv } from '@/lib/observability/env';
 import { optionalResendApiKey, sendingEmailDomain } from '@/lib/runtime/email/settings';
+import { parseFirecrawlEnv } from '@/lib/runtime/research/settings';
 import { optionalXBearerToken } from '@/lib/runtime/x/settings';
 
 /** Worker process env — shared module so web/worker both typecheck without Nest-style packages. */
@@ -21,6 +22,7 @@ function optionalOpenRouterKey(value: string | undefined) {
 }
 
 export function parseWorkerEnv(input: Record<string, string | undefined>) {
+  parseFirecrawlEnv(input);
   const databaseUrl = input.DATABASE_URL;
   if (!databaseUrl) throw new Error('DATABASE_URL is required');
   try {

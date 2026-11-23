@@ -145,6 +145,7 @@ export async function uploadKnowledgeDocument(
   actor: string,
   scope: KnowledgeScope,
   file: { name: string; type: string; size: number; bytes: Uint8Array },
+  source?: { citationId: string; title: string },
 ) {
   await requireAdmin();
   if (!(await scopeExists(scope))) return { error: 'Knowledge library or agent not found.' };
@@ -171,12 +172,13 @@ export async function uploadKnowledgeDocument(
   }
 
   try {
-    await db().transaction(async (tx) => {
-      await tx.insert(knowledgeDocuments).values({
+    const saved = await db().transaction(async (tx) => {
+      const insert = tx.insert(knowledgeDocuments).values({
         id: documentId,
         ...scopeIds(scope),
         filename: file.name,
-        title: titleFromFilename(file.name),
+        title: source?.title || titleFromFilename(file.name),
+        webCitationId: source?.citationId,
         contentKind: validated.kind,
         mimeType: validated.mimeType,
         byteSize: file.bytes.byteLength,
@@ -184,6 +186,16 @@ export async function uploadKnowledgeDocument(
         revision,
         status: 'pending',
       });
+      if (source) {
+        const inserted = await insert
+          .onConflictDoNothing({
+            target: [knowledgeDocuments.libraryId, knowledgeDocuments.webCitationId],
+          })
+          .returning({ id: knowledgeDocuments.id });
+        if (!inserted.length) return false;
+      } else {
+        await insert;
+      }
       await enqueueJob(tx, {
         ...knowledgeJob(scope, documentId, revision),
         idempotencyKey: `knowledge:${documentId}:upload`,
@@ -192,7 +204,12 @@ export async function uploadKnowledgeDocument(
         actor,
         action: `Uploaded knowledge document ${documentId} for ${scope.kind} ${scope.id}`,
       });
+      return true;
     });
+    if (!saved) {
+      await cleanupObject(objectKey, actor);
+      return { message: 'This page is already in the selected library.' };
+    }
   } catch {
     await cleanupObject(objectKey, actor);
     return { error: 'Unable to save the document. Try again.' };

@@ -1,6 +1,7 @@
 import type { Tx } from '@/lib/db';
 import type { JobRecord } from '@/lib/queue/types';
 import type { JobHandler } from '@/lib/queue/worker';
+import { WEB_CRAWL_JOB } from '@/lib/research';
 import {
   finalizeFailedFollowUpJob,
   FOLLOW_UP_JOB_TYPE,
@@ -8,6 +9,11 @@ import {
   reconcileDeadFollowUpJobs,
   skipScheduledFollowUpsForLifecycle,
 } from '@/lib/runtime/follow-ups/process';
+import {
+  processWebCrawl,
+  reconcileDeadWebCrawls,
+  requestCrawlCancellation,
+} from '@/lib/runtime/research/crawls';
 
 export interface PendingWorkDefinition {
   type: string;
@@ -36,5 +42,19 @@ export const pendingWork: readonly PendingWorkDefinition[] = [
     reconcile: reconcileDeadFollowUpJobs,
     finalizeLifecycle: (tx, { agentId, lifecycle }) =>
       skipScheduledFollowUpsForLifecycle(agentId, lifecycle, tx),
+  },
+  {
+    type: WEB_CRAWL_JOB,
+    keepJobForCancellation: true,
+    handle: (job, signal) => processWebCrawl(job, job.claimedBy ?? '', signal),
+    onDeadLetter: reconcileDeadWebCrawls,
+    reconcile: reconcileDeadWebCrawls,
+    async finalizeLifecycle(tx, { agentId, lifecycle }) {
+      await requestCrawlCancellation(
+        tx,
+        agentId,
+        `Crawl cancellation requested because the agent was ${lifecycle}.`,
+      );
+    },
   },
 ];
