@@ -102,6 +102,8 @@ docker build -f docker/worker.Dockerfile -t orbit-worker:ci .
 # PostgreSQL integration
 docker compose exec postgres createdb -U orbit orbit_test
 DATABASE_URL=postgres://orbit:orbit_dev@localhost:5432/orbit_test bun run db:migrate
+docker compose up -d --wait rustfs
+S3_BUCKET=orbit-test bun run storage:setup
 bun run test:queue
 bun run test:simulation
 bun run test:integration
@@ -126,8 +128,8 @@ routing edits.
   queue logic, knowledge chunking/ranking, redaction, observability env validation
   or tracing spans change.
 - Run `bun run test:queue` / `bun run test:integration` when the durable job queue,
-  worker claim/lease path or web→worker enqueue path changes (requires migrated
-  `orbit_test`).
+  worker claim/lease path or web→worker enqueue path changes. Both need a migrated
+  `orbit_test` database. The integration suite also needs RustFS.
 - Run `bun run test:follow-ups` for reminder and reply-aware commitment
   changes. It checks Sarah’s email intake, shared channel matching, draft
   approval, restart recovery and cancellation against a migrated `orbit_test`
