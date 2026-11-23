@@ -14,12 +14,16 @@ and infrastructure specification is [architecture.md](architecture.md).
 
 ## Capabilities and constraints
 
-This milestone provides editable database-backed templates, immutable agent
-configuration versions, an optional OpenRouter environment default with encrypted
-per-agent key overrides, and persisted manual simulations. Inference is real; every
-proposed external action is suppressed.
-Schedules, channel integrations and live actions are outside this milestone.
-No invented metrics, provider activity or successful model responses belong in the UI.
+Administrators manage versioned agent configurations, reusable templates, Skills,
+MCP connections, shared Knowledge, People and agent-private Memory. They can run
+Playground simulations and compare saved evaluations. Background work, read-only
+tools, outbound approvals and lifecycle controls use the shared policy and queue.
+
+Orbit supports X discovery and administrator-approved email replies. Firecrawl
+provides independently granted web search, page reads and bounded crawls.
+Operators inspect progress and citations in Activity and can explicitly import
+saved pages into a shared Knowledge library. Provider activity, availability and
+successful actions displayed in the console come from recorded results.
 
 ## Confirmed commitments
 

@@ -312,6 +312,7 @@ export async function processWebCrawl(
             tool: WEB_CRAWL,
           },
           pages,
+          crawl.pageLimit,
         );
 
         const next =

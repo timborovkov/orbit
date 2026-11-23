@@ -54,7 +54,7 @@ test('routes all operations, pagination, and cancellation to the configured cust
       expect(new Headers(init.headers).has('authorization')).toBe(false);
       expect(init.redirect).toBe('manual');
       visited.push(init.method + ' ' + url.pathname + url.search);
-      const page = { markdown: '# Content', metadata: { sourceURL: 'https://example.com/docs' } };
+      const page = { markdown: '# Content', metadata: { url: 'https://example.com/docs' } };
       if (url.pathname.endsWith('/search')) return Response.json({ data: { web: [] } });
       if (url.pathname.endsWith('/scrape')) return Response.json({ data: page });
       if (init.method === 'POST') {
@@ -66,7 +66,7 @@ test('routes all operations, pagination, and cancellation to the configured cust
         });
         return Response.json({ id: 'provider-job' });
       }
-      if (init.method === 'DELETE') return Response.json({ success: true, status: 'cancelled' });
+      if (init.method === 'DELETE') return new Response(null, { status: 204 });
       return Response.json({
         status: 'completed',
         completed: 2,
@@ -157,4 +157,41 @@ test('validates origin-only configuration and public URL scope boundaries', () =
   expect(pageWithinScope(new URL('https://example.com/docsite'), seed)).toBe(false);
   expect(pageWithinScope(new URL('https://other.example.com/docs'), seed)).toBe(false);
   expect(new RegExp(providerPathPatterns(seed)![0]).test('/docs/guides')).toBe(true);
+});
+
+test('uses the final crawl URL and distinguishes an unsupported read endpoint', async () => {
+  const client = firecrawlClient(
+    { origin: 'http://127.0.0.1:3002' },
+    mockFetch((url) => {
+      if (url.pathname === '/v2/scrape') {
+        return Response.json({ detail: 'Not found' }, { status: 404 });
+      }
+      return Response.json({
+        status: 'completed',
+        completed: 2,
+        total: 2,
+        data: [
+          {
+            markdown: 'Unknown redirect destination',
+            metadata: { sourceURL: 'https://example.com/docs' },
+          },
+          {
+            markdown: 'Confirmed final page',
+            metadata: {
+              sourceURL: 'https://example.com/docs',
+              url: 'https://example.com/docs/page',
+            },
+          },
+        ],
+      });
+    }),
+  );
+
+  await expect(client.read(new URL('https://example.com/docs'), signal)).rejects.toMatchObject({
+    kind: 'unavailable',
+  });
+  const status = await client.poll('provider-job', 0, 2, signal);
+  expect(status.pages.map(({ url, rank }) => ({ url, rank }))).toEqual([
+    { url: 'https://example.com/docs/page', rank: 2 },
+  ]);
 });

@@ -24,7 +24,7 @@ test.afterAll(async () => {
   await sql`DELETE FROM knowledge_documents WHERE library_id = ${libraryId}`;
   await sql`DELETE FROM knowledge_libraries WHERE id = ${libraryId}`;
   await sql`DELETE FROM action_intents WHERE id = ${intentId}`;
-  await sql`DELETE FROM simulation_runs WHERE id = ${runId}`;
+  await sql`DELETE FROM simulation_runs WHERE agent_id = ${agentId}`;
   await sql`DELETE FROM agent_configurations WHERE id = ${configId}`;
   await sql`DELETE FROM agents WHERE id = ${agentId}`;
   await sql.end();
@@ -38,9 +38,12 @@ test('edits independent grants, cancels a pending crawl and imports a cited page
     VALUES (${agentId}, 'Research operator', 'Find public evidence.', ${sql.json(budgetDefaults)})`;
   await sql`INSERT INTO agent_configurations (id, agent_id, version, config, actor)
     SELECT ${configId}, ${agentId}, 1, config, ${actor} FROM templates WHERE id = 'support'`;
-  await sql`INSERT INTO simulation_runs (id, agent_id, configuration_id, status, input, result, actor, expires_at, finished_at)
+  await sql`INSERT INTO simulation_runs (id, agent_id, configuration_id, status, input, result, actor, expires_at, finished_at, created_at)
     VALUES (${runId}, ${agentId}, ${configId}, 'completed', 'Inspect crawl documentation',
-      ${sql.json({ steps: [], actions: [] })}, ${actor}, now(), now())`;
+      ${sql.json({ steps: [], actions: [] })}, ${actor}, now(), now(), now() - interval '1 hour')`;
+  await sql`INSERT INTO simulation_runs (agent_id, configuration_id, status, input, result, actor, expires_at, finished_at)
+    SELECT ${agentId}, ${configId}, 'completed', 'Newer run ' || index, ${sql.json({ steps: [], actions: [] })}, ${actor}, now(), now()
+    FROM generate_series(1, 51) AS index`;
   await sql`INSERT INTO action_intents (id, agent_id, run_id, action_type, idempotency_key, decision)
     VALUES (${intentId}, ${agentId}, ${runId}, 'web.crawl', ${intentId}, 'allow')`;
   await sql`INSERT INTO web_crawls (id, agent_id, run_id, intent_id, seed_url, origin_hash, page_limit, depth_limit, deadline)
@@ -82,10 +85,12 @@ test('edits independent grants, cancels a pending crawl and imports a cited page
   await page.setViewportSize({ width: 390, height: 900 });
   await openAccessSection(page, 'Web research');
   await expect(page.getByLabel('Approved crawl sites or paths')).toHaveValue(target);
-  await page.goto('/agents/' + agentId + '?run=' + runId + '#run-' + runId);
   await openWorkspaceTab(page, 'History');
+  await expect(page.getByText('Inspect crawl documentation', { exact: true })).toBeVisible();
+  await page.getByText('Inspect crawl documentation', { exact: true }).click();
   const crawl = page.getByRole('region', { name: 'Crawl ' + target });
   await expect(crawl).toContainText('Queued');
+  await expect(crawl).toContainText('depth limit 1');
   await expect(crawl.getByRole('link', { name: 'Crawl status reference' })).toHaveAttribute(
     'href',
     target + '/crawl-get',
