@@ -311,6 +311,9 @@ while the crawl is pending. Show a final cancellation or failure reason
 in the same row. Source excerpts render as plain text. An import disclosure
 lets the administrator pick a shared library and then confirm the import.
 
+Chromium verified grant and credential controls at desktop width and the
+390px layout for cancellation, citation inspection, and explicit import.
+
 ### Follow-ups
 
 Administrators create internal reminders from the Follow-ups tab. Agent-created
