@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { type Db, db, sqlClient, type Tx } from '@/lib/db';
 import {
@@ -346,6 +346,27 @@ export async function recoverExpiredLeases(store: Store = db()): Promise<JobReco
   `);
   if (!Array.isArray(result)) return [];
   return result.map((row) => mapRawJob(row));
+}
+
+/** Fence domain-owned timers or worker runs while holding the agent lock. */
+export async function cancelAgentJobs(store: Tx, agentId: string, jobIds: string[], now: Date) {
+  if (!jobIds.length) return;
+  await store
+    .update(jobs)
+    .set({
+      status: 'cancelled',
+      finishedAt: now,
+      claimExpiresAt: null,
+      claimedBy: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        inArray(jobs.id, jobIds),
+        sql`${jobs.payload}->>'agentId' = ${agentId}`,
+        sql`${jobs.status} IN ('pending', 'claimed')`,
+      ),
+    );
 }
 
 /**

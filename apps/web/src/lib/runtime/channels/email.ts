@@ -1,10 +1,11 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 
 import type { ChannelAdapter } from '@/lib/runtime/channels/types';
+import { extractEmailAddress } from '@/lib/runtime/email/headers';
 import { emailKnowledgeQuery, emailMemoryQuery } from '@/lib/runtime/email/input';
 import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import { EMAIL_SEND_ACTION, EMAIL_SEND_JOB } from '@/lib/runtime/outbound/types';
-import { emailMessages } from '@/lib/schema';
+import { emailMailboxes, emailMessages } from '@/lib/schema';
 
 export const emailChannel: ChannelAdapter = {
   id: 'email',
@@ -33,6 +34,33 @@ export const emailChannel: ChannelAdapter = {
     async recover(input) {
       const { recoverEmailReplyProposalIfNeeded } = await import('@/lib/runtime/email/propose');
       return recoverEmailReplyProposalIfNeeded(input);
+    },
+  },
+  followUp: {
+    actionType: EMAIL_SEND_ACTION,
+    async prepare(tx, anchor, commitment) {
+      const [message] = await tx
+        .select({ message: emailMessages })
+        .from(emailMessages)
+        .innerJoin(emailMailboxes, eq(emailMailboxes.agentId, emailMessages.agentId))
+        .where(
+          and(
+            eq(emailMessages.id, anchor.anchorId),
+            eq(emailMessages.agentId, anchor.agentId),
+            eq(emailMessages.threadId, anchor.conversationId),
+            eq(emailMailboxes.enabled, true),
+            isNotNull(emailMessages.body),
+          ),
+        );
+      if (!message) return null;
+      const recipient = extractEmailAddress(message.message.sender);
+      if (!recipient) return null;
+      const { buildEmailDraftInput } = await import('@/lib/runtime/email/receive');
+      return {
+        input: await buildEmailDraftInput(tx, message.message, commitment),
+        recipients: [recipient],
+        payload: { emailMessageId: message.message.id, threadId: message.message.threadId },
+      };
     },
   },
   actions: [

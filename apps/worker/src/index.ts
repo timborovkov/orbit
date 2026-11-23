@@ -29,12 +29,6 @@ import {
   SIMULATION_JOB_TYPE,
 } from '@/lib/runtime/execute';
 import {
-  finalizeFailedFollowUpJob,
-  FOLLOW_UP_JOB_TYPE,
-  processFollowUpJob,
-  reconcileDeadFollowUpJobs,
-} from '@/lib/runtime/follow-ups/process';
-import {
   finalizeFailedKnowledgeJob,
   processKnowledgeDocument,
   reconcileDeadKnowledgeJobs,
@@ -55,6 +49,7 @@ import {
   processOutboundJob,
   reconcileDeadOutboundJobs,
 } from '@/lib/runtime/outbound/process';
+import { pendingWork } from '@/lib/runtime/pending-work';
 import { ensureTelemetryContext, reportFailure, shutdownTelemetry } from '@/lib/runtime/telemetry';
 import { workerEnvConfig } from '@/lib/worker-env';
 
@@ -118,7 +113,7 @@ const providerJobs = channelJobs(workerId, [
   MEMORY_MAINTENANCE_JOB,
   KNOWLEDGE_JOB_TYPE,
   SHARED_KNOWLEDGE_JOB_TYPE,
-  FOLLOW_UP_JOB_TYPE,
+  ...pendingWork.map(({ type }) => type),
 ]);
 
 async function runKnowledgeJob(job: JobRecord, signal: AbortSignal) {
@@ -162,6 +157,7 @@ const worker = startJobWorker({
             await processSimulationJob(job.payload, undefined, signal, {
               jobId: job.id,
               workerId,
+              attempts: job.attempts,
               jobType: job.type,
             });
           } catch (error) {
@@ -191,14 +187,7 @@ const worker = startJobWorker({
     [MEMORY_EMBED_JOB]: (job, signal) => processMemoryEmbedding(job.payload, signal),
     [KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
     [SHARED_KNOWLEDGE_JOB_TYPE]: runKnowledgeJob,
-    [FOLLOW_UP_JOB_TYPE]: async (job) => {
-      try {
-        await processFollowUpJob(job.payload, job.attempts);
-      } catch (error) {
-        reportFailure('worker.runtime', jobCorrelation(job), error);
-        throw error;
-      }
-    },
+    ...Object.fromEntries(pendingWork.map(({ type, handle }) => [type, handle])),
   },
   onDeadLetter: async (job, error) => {
     reportFailure('worker.dead_letter', jobCorrelation(job), error);
@@ -218,16 +207,14 @@ const worker = startJobWorker({
       await finalizeFailedKnowledgeJob(job.payload, error);
       return;
     }
-    if (job.type === FOLLOW_UP_JOB_TYPE) {
-      await finalizeFailedFollowUpJob(job.payload, error);
-    }
+    await pendingWork.find(({ type }) => type === job.type)?.onDeadLetter(job, error);
   },
   reconcileDeadLetters: async () => {
     await Promise.all([
       reconcileOrphanedSimulationRuns(),
       reconcileDeadEvaluationReplayJobs(),
       reconcileDeadKnowledgeJobs(),
-      reconcileDeadFollowUpJobs(),
+      ...pendingWork.map(({ reconcile }) => reconcile()),
       reconcileDeadOutboundJobs(),
       scheduleMemoryMaintenance(),
       expireStaleApprovals(),

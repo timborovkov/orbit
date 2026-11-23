@@ -15,7 +15,7 @@ import {
 } from '@/lib/queue/types';
 import { isUnrecoverablePaidStepFinalizationError } from '@/lib/runtime/errors';
 
-type JobHandler = (
+export type JobHandler = (
   job: JobRecord,
   signal: AbortSignal,
 ) => Promise<void> | Promise<{ deferUntil: Date } | undefined>;

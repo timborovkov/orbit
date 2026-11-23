@@ -113,6 +113,7 @@ export const DEMO_DISCOVERY_RUN_IDS = Object.values(DEMO_DISCOVERY_RUNS);
 export const DEMO_FOLLOW_UPS = {
   johnScheduled: '00000000-0000-4000-a920-000000000001',
   sarahCompleted: '00000000-0000-4000-a920-000000000011',
+  sarahReplyReceived: '00000000-0000-4000-a920-000000000012',
 } as const;
 
 export const DEMO_FOLLOW_UP_JOBS = {
@@ -122,6 +123,7 @@ export const DEMO_FOLLOW_UP_JOBS = {
 
 export const DEMO_ACTIVITY = {
   sarahFollowUpCompleted: '00000000-0000-4000-a940-000000000011',
+  sarahReplyReceived: '00000000-0000-4000-a940-000000000012',
 } as const;
 
 export const DEMO_FOLLOW_UP_IDS = Object.values(DEMO_FOLLOW_UPS);

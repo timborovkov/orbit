@@ -37,6 +37,8 @@ import {
   retryableStore,
   UnrecoverablePaidStepFinalizationError,
 } from '@/lib/runtime/errors';
+import { finalizeCommitmentDraft } from '@/lib/runtime/follow-ups/process';
+import { commitmentTools } from '@/lib/runtime/follow-ups/tools';
 import {
   consumeKnowledgeToolStep,
   recordKnowledgeToolCall,
@@ -72,6 +74,7 @@ import {
   type ApprovalOnReject,
   configurations,
   credentials,
+  followUps,
   jobs,
   runs,
   usageCounters,
@@ -470,6 +473,7 @@ export async function executeSimulation(
 export interface SimulationJobClaim {
   jobId: string;
   workerId: string;
+  attempts?: number;
   /** When set, claim validation uses this job type instead of deriving it from origin. */
   jobType?: string;
 }
@@ -516,6 +520,7 @@ async function processSimulationRun(
               eq(jobs.type, expectedType),
               eq(jobs.claimedBy, claim.workerId),
               eq(jobs.status, 'claimed'),
+              claim.attempts === undefined ? undefined : eq(jobs.attempts, claim.attempts),
             ),
           )
           .for('update')
@@ -758,6 +763,44 @@ async function processSimulationRun(
       maxToolSteps: budgets.maxToolStepsPerRun,
     });
     try {
+      const [draftCommitment, replyCommitments] =
+        profile && origin !== 'replay'
+          ? await retryableStore(() =>
+              Promise.all([
+                db()
+                  .select({ id: followUps.id })
+                  .from(followUps)
+                  .where(and(eq(followUps.agentId, run.agentId), eq(followUps.draftRunId, run.id)))
+                  .limit(1),
+                db()
+                  .select({ subject: followUps.subject, note: followUps.note })
+                  .from(followUps)
+                  .where(
+                    and(
+                      eq(followUps.agentId, run.agentId),
+                      eq(followUps.continuationRunId, run.id),
+                    ),
+                  )
+                  .orderBy(followUps.createdAt, followUps.id)
+                  .limit(10),
+              ]),
+            )
+          : [[], []];
+      const isFollowUpDraft = draftCommitment.length > 0;
+      if (!isFollowUpDraft) {
+        Object.assign(
+          resources.tools,
+          await retryableStore(() =>
+            commitmentTools({
+              policy: basePolicy,
+              executionToken,
+              gate: resources.toolSteps,
+              calls: resources.toolCalls,
+              signal,
+            }),
+          ),
+        );
+      }
       const recallScope = {
         agentId: run.agentId,
         runId: run.id,
@@ -867,6 +910,8 @@ async function processSimulationRun(
           {
             channelMode,
             channelThread,
+            followUpDraft: isFollowUpDraft,
+            replyCommitments,
             actionTypes:
               channelMode === 'evaluate'
                 ? (profile?.proposalTypes ?? adapter?.actions?.map(({ type }) => type) ?? [])
@@ -1196,7 +1241,7 @@ async function processSimulationRun(
         const { pendingMemories, ...completedResult } = result;
         const traceResult = { ...completedResult, traceId: telemetry.traceId };
         // Adapter completion is idempotent and occurs before the run becomes terminal.
-        if (origin !== 'replay' && profile?.complete && !result.error) {
+        if (!isFollowUpDraft && origin !== 'replay' && profile?.complete && !result.error) {
           const complete = profile.complete;
           await retryableStore(() =>
             complete({
@@ -1207,8 +1252,31 @@ async function processSimulationRun(
             }),
           );
         }
-        const owned = await retryableStore(() =>
-          result.error
+        const owned = await retryableStore(() => {
+          if (isFollowUpDraft) {
+            return db().transaction(async (tx) => {
+              const active = await finalizeCommitmentDraft(
+                tx,
+                run,
+                executionToken,
+                traceResult,
+                claim,
+              );
+              if (!active) return [];
+              return updateIfOwned(
+                run.id,
+                executionToken,
+                {
+                  status: result.error ? 'failed' : 'completed',
+                  finishedAt: new Date(),
+                  result: traceResult,
+                  deferReason: isTrustedBudgetMessage(result.error ?? '') ? result.error : null,
+                },
+                tx,
+              );
+            });
+          }
+          return result.error
             ? updateIfOwned(run.id, executionToken, {
                 status: 'failed',
                 finishedAt: new Date(),
@@ -1224,8 +1292,8 @@ async function processSimulationRun(
                   config.approvalSettings?.approvalOnReject,
                   pendingMemories,
                   claim,
-                ),
-        );
+                );
+        });
         if (!owned.length) return;
       } catch (error) {
         // Paid-step burn: never complete the job while the run is still running. Persist the burn

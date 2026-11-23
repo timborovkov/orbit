@@ -1,331 +1,404 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 
 import { db, type Tx } from '@/lib/db';
-import { canAcceptBackgroundWork, type LifecycleState } from '@/lib/lifecycle';
+import { canAcceptBackgroundWork } from '@/lib/lifecycle';
+import { authorizeAction, loadPolicyContext } from '@/lib/policy/gateway';
+import type { JobRecord } from '@/lib/queue/types';
+import { lockApprovalAgent } from '@/lib/runtime/approval-work';
+import { channelAction, channelAdapter } from '@/lib/runtime/channels/registry';
 import {
-  FOLLOW_UP_ACTIVITY_KINDS,
+  cancelCommitmentJobs,
+  commitmentClock,
+  type FollowUp,
+  recordFollowUpOutcome,
+  recordFollowUpOutcomes,
+} from '@/lib/runtime/follow-ups/state';
+import {
   FOLLOW_UP_JOB_TYPE,
   followUpJobPayloadSchema,
-  type FollowUpOutcomeKind,
+  pendingFollowUpStatuses,
 } from '@/lib/runtime/follow-ups/types';
-import { agentActivityEvents, agents, followUps, jobs } from '@/lib/schema';
+import { draftAnswerFromResult, type SimulationResult } from '@/lib/runtime/simulation';
+import { followUps, jobs, runs } from '@/lib/schema';
 
-type Store = Tx;
-
-function executedOutcome(subject: string, note: string): string {
-  const notePart = note.trim() ? ` Note: ${note.trim()}` : '';
-  return `Follow-up completed: ${subject}.${notePart} Internal outcome only; no external actions were taken.`;
+async function prepareDraft(tx: Tx, row: FollowUp) {
+  const adapter = channelAdapter(row.channel);
+  const draft = adapter?.followUp;
+  if (
+    !adapter ||
+    adapter.run.mode !== 'draft' ||
+    !draft ||
+    !row.anchorId ||
+    !row.conversationId ||
+    !row.channel
+  )
+    return;
+  const action = channelAction(draft.actionType);
+  if (action?.channel !== adapter.id || !action.action.alwaysRequiresApproval) return;
+  const prepared = await draft.prepare(
+    tx,
+    {
+      agentId: row.agentId,
+      channel: row.channel,
+      accountId: row.accountId,
+      conversationId: row.conversationId,
+      anchorId: row.anchorId,
+    },
+    row,
+  );
+  if (prepared) return { adapter, actionType: draft.actionType, ...prepared };
 }
 
-function skippedOutcome(lifecycle: LifecycleState, subject: string): string {
-  return `Follow-up skipped: ${subject}. Agent is ${lifecycle}; commitment was not executed.`;
-}
-
-async function recordActivity(
-  store: Store,
-  input: {
-    agentId: string;
-    followUpId: string;
-    kind: string;
-    summary: string;
-    detail: string;
-    now: Date;
-  },
+async function skipCommitments(
+  tx: Tx,
+  agentId: string,
+  rows: FollowUp[],
+  lifecycle: 'paused' | 'stopped',
+  now: Date,
 ) {
-  await store.insert(agentActivityEvents).values({
-    agentId: input.agentId,
-    followUpId: input.followUpId,
-    kind: input.kind,
-    summary: input.summary,
-    detail: input.detail,
-    createdAt: input.now,
-  });
+  const reason = `Agent is ${lifecycle}.`;
+  await cancelCommitmentJobs(tx, agentId, rows, reason, now);
+  await recordFollowUpOutcomes(
+    tx,
+    agentId,
+    rows.map(({ id }) => id),
+    'skipped_lifecycle',
+    reason,
+    now,
+    {
+      cancelledAt: now,
+      cancelledBy: 'system:lifecycle',
+      cancelReason: reason,
+    },
+  );
 }
 
-/**
- * Lock order for follow-up mutations: agent row first, then the follow-up row.
- * Matches cancelFollowUp and pause/stop (lockApprovalAgent → skipScheduledFollowUps).
- */
-async function lockFollowUpAgent(store: Store, agentId: string) {
-  return (
-    await store
-      .select({ id: agents.id, lifecycle: agents.lifecycle, name: agents.name })
-      .from(agents)
-      .where(eq(agents.id, agentId))
-      .for('update')
-  ).at(0);
+interface DeadlineResult {
+  recorded: boolean;
+  status: string;
+  deferUntil?: Date;
 }
 
-/**
- * Finalize a scheduled follow-up exactly once.
- * Returns whether a new terminal outcome was recorded.
- */
+/** Intake, timers, run completion and cancellation all serialize on the agent row. */
 export async function finalizeFollowUpExecution(
   followUpId: string,
-  options: {
-    attempts?: number;
-    agentId?: string;
-    store?: Store;
-  } = {},
-): Promise<{ recorded: boolean; status: string }> {
-  const run = async (store: Store) => {
-    const now = new Date();
-    let agentId = options.agentId;
-    if (!agentId) {
-      const peek = (
-        await store
+  options: { attempts?: number; agentId?: string; store?: Tx; job?: JobRecord } = {},
+): Promise<DeadlineResult> {
+  const run = async (tx: Tx): Promise<DeadlineResult> => {
+    const agentId =
+      options.agentId ??
+      (
+        await tx
           .select({ agentId: followUps.agentId })
           .from(followUps)
           .where(eq(followUps.id, followUpId))
-          .limit(1)
-      ).at(0);
-      if (!peek) return { recorded: false, status: 'missing' };
-      agentId = peek.agentId;
-    }
-
-    // Agent-first lock order (same as cancel / lifecycle).
-    const agent = await lockFollowUpAgent(store, agentId);
-    const row = (
-      await store
-        .select()
-        .from(followUps)
-        .where(and(eq(followUps.id, followUpId), eq(followUps.agentId, agentId)))
-        .for('update')
-    ).at(0);
-    if (!row) return { recorded: false, status: 'missing' };
+      ).at(0)?.agentId;
+    const agent = agentId && (await lockApprovalAgent(tx, agentId));
+    if (!agent) return { recorded: false, status: 'missing' };
+    const [row] = await tx
+      .select()
+      .from(followUps)
+      .where(and(eq(followUps.id, followUpId), eq(followUps.agentId, agent.id)));
+    if (!row || (options.job && row.jobId !== options.job.id))
+      return { recorded: false, status: 'missing' };
     if (row.status !== 'scheduled') return { recorded: false, status: row.status };
 
-    if (!agent) {
-      await store
-        .update(followUps)
-        .set({
-          status: 'failed',
-          attempts: options.attempts ?? row.attempts + 1,
-          startedAt: now,
-          finishedAt: now,
-          outcome: 'Follow-up failed: agent no longer exists.',
-          outcomeKind: 'failed',
-          updatedAt: now,
-        })
-        .where(and(eq(followUps.id, followUpId), eq(followUps.status, 'scheduled')));
-      await recordActivity(store, {
-        agentId: row.agentId,
-        followUpId,
-        kind: FOLLOW_UP_ACTIVITY_KINDS.failed,
-        summary: `Follow-up failed: ${row.subject}`,
-        detail: 'Agent no longer exists.',
+    if (options.job) {
+      const [job] = await tx
+        .select({ id: jobs.id })
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.id, options.job.id),
+            eq(jobs.type, FOLLOW_UP_JOB_TYPE),
+            eq(jobs.status, 'claimed'),
+            eq(jobs.claimedBy, options.job.claimedBy ?? ''),
+            eq(jobs.attempts, options.job.attempts),
+            gt(jobs.claimExpiresAt, sql`clock_timestamp()`),
+          ),
+        )
+        .for('update');
+      if (!job) return { recorded: false, status: 'lost_claim' };
+    }
+
+    const now = await commitmentClock(tx);
+    if (agent.lifecycle === 'paused' || agent.lifecycle === 'stopped') {
+      await skipCommitments(tx, row.agentId, [row], agent.lifecycle, now);
+      return { recorded: true, status: 'skipped' };
+    }
+    if (row.dueAt > now) {
+      return { recorded: false, status: 'scheduled', deferUntil: row.dueAt };
+    }
+    const started = { attempts: options.attempts ?? row.attempts + 1, startedAt: now };
+    if (!row.channel) {
+      const note = row.note ? ` Note: ${row.note}` : '';
+      await recordFollowUpOutcome(
+        tx,
+        row,
+        'executed',
+        `Follow-up completed: ${row.subject}.${note} Internal outcome only; no external actions were taken.`,
         now,
-      });
+        started,
+      );
+      return { recorded: true, status: 'completed' };
+    }
+
+    const draft = await prepareDraft(tx, row);
+    const [origin] = row.originatingRunId
+      ? await tx
+          .select({ configurationId: runs.configurationId })
+          .from(runs)
+          .where(and(eq(runs.agentId, row.agentId), eq(runs.id, row.originatingRunId)))
+      : [];
+    if (!draft || !origin) {
+      await recordFollowUpOutcome(
+        tx,
+        row,
+        'failed',
+        'The saved conversation is unavailable for drafting.',
+        now,
+        started,
+      );
       return { recorded: true, status: 'failed' };
     }
 
-    const lifecycle = agent.lifecycle;
-    const attempts = options.attempts ?? row.attempts + 1;
-
-    if (!canAcceptBackgroundWork(lifecycle)) {
-      const outcome = skippedOutcome(lifecycle, row.subject);
-      await store
-        .update(followUps)
-        .set({
-          status: 'skipped',
-          attempts,
-          startedAt: now,
-          finishedAt: now,
-          outcome,
-          outcomeKind: 'skipped_lifecycle',
-          cancelledAt: now,
-          cancelledBy: 'system:lifecycle',
-          cancelReason: `Agent is ${lifecycle}.`,
-          updatedAt: now,
-        })
-        .where(and(eq(followUps.id, followUpId), eq(followUps.status, 'scheduled')));
-      await recordActivity(store, {
-        agentId: row.agentId,
-        followUpId,
-        kind: FOLLOW_UP_ACTIVITY_KINDS.skipped,
-        summary: `Follow-up skipped (${lifecycle}): ${row.subject}`,
-        detail: outcome,
+    const { admitRun } = await import('@/lib/runtime/execute');
+    const admitted = await admitRun(tx, agent, {
+      actor: 'system:follow-up',
+      channel: draft.adapter.id,
+      origin: draft.adapter.legacyOrigin ?? 'channel',
+      configurationId: origin.configurationId,
+      input: draft.input,
+      recipients: draft.recipients,
+    });
+    if ('error' in admitted) {
+      if (admitted.waitForCapacity) {
+        return {
+          recorded: false,
+          status: 'scheduled',
+          deferUntil: new Date(now.getTime() + 5_000),
+        };
+      }
+      await recordFollowUpOutcome(
+        tx,
+        row,
+        'failed',
+        admitted.error ?? 'The draft run could not be queued.',
         now,
-      });
-      return { recorded: true, status: 'skipped' };
+        started,
+      );
+      return { recorded: true, status: 'failed' };
     }
-
-    const outcome = executedOutcome(row.subject, row.note);
-    await store
+    await tx
       .update(followUps)
       .set({
-        status: 'completed',
-        attempts,
-        startedAt: now,
-        finishedAt: now,
-        outcome,
-        outcomeKind: 'executed' satisfies FollowUpOutcomeKind,
+        ...started,
+        status: 'running',
+        draftRunId: admitted.runId,
         updatedAt: now,
       })
-      .where(and(eq(followUps.id, followUpId), eq(followUps.status, 'scheduled')));
-    await recordActivity(store, {
-      agentId: row.agentId,
-      followUpId,
-      kind: FOLLOW_UP_ACTIVITY_KINDS.completed,
-      summary: `Follow-up completed: ${row.subject}`,
-      detail: outcome,
-      now,
-    });
-    return { recorded: true, status: 'completed' };
+      .where(eq(followUps.id, row.id));
+    return { recorded: false, status: 'running' };
   };
 
-  if (options.store) return run(options.store);
-  return db().transaction((tx) => run(tx));
+  return options.store ? run(options.store) : db().transaction(run);
 }
 
-/** Worker entry: execute a due follow-up with exact-once semantics. */
-export async function processFollowUpJob(
-  payload: Record<string, unknown>,
-  attempts = 1,
-): Promise<void> {
-  const parsed = followUpJobPayloadSchema.safeParse(payload);
-  if (!parsed.success) throw new Error('Follow-up job payload is invalid.');
-  await finalizeFollowUpExecution(parsed.data.followUpId, {
-    attempts,
-    agentId: parsed.data.agentId,
+export async function processFollowUpJob(job: JobRecord, signal: AbortSignal) {
+  signal.throwIfAborted();
+  const { followUpId, agentId } = followUpJobPayloadSchema.parse(job.payload);
+  const { deferUntil } = await finalizeFollowUpExecution(followUpId, {
+    agentId,
+    attempts: job.attempts,
+    job,
   });
+  if (deferUntil) return { deferUntil };
 }
 
-/**
- * When pause/stop cancels pending follow-up jobs, mark matching scheduled
- * commitments as skipped and write activity events (skip-and-record).
- * Caller must already hold the agent row lock (agent-first order).
- */
 export async function skipScheduledFollowUpsForLifecycle(
   agentId: string,
   next: 'paused' | 'stopped',
-  store: Store,
-): Promise<number> {
-  // Re-assert agent lock so this path stays agent-first even if a caller forgets.
-  await lockFollowUpAgent(store, agentId);
-  const now = new Date();
-  const rows = await store
+  tx: Tx,
+) {
+  const [rows, now] = await Promise.all([
+    tx
+      .select()
+      .from(followUps)
+      .where(
+        and(eq(followUps.agentId, agentId), inArray(followUps.status, pendingFollowUpStatuses)),
+      ),
+    commitmentClock(tx),
+  ]);
+  if (rows.length) await skipCommitments(tx, agentId, rows, next, now);
+}
+
+/** Publish the approval and finish the commitment in the owned run's finalization transaction. */
+export async function finalizeCommitmentDraft(
+  tx: Tx,
+  run: typeof runs.$inferSelect,
+  executionToken: string,
+  result: SimulationResult,
+  claim?: { jobId: string; workerId: string; attempts?: number },
+) {
+  const agent = await lockApprovalAgent(tx, run.agentId);
+  if (!agent || !canAcceptBackgroundWork(agent.lifecycle)) return false;
+  const [row] = await tx
     .select()
     .from(followUps)
-    .where(and(eq(followUps.agentId, agentId), eq(followUps.status, 'scheduled')))
+    .where(and(eq(followUps.agentId, agent.id), eq(followUps.draftRunId, run.id)));
+  if (row?.status !== 'running') return false;
+  const now = await commitmentClock(tx);
+  if (claim) {
+    const [ownedJob] = await tx
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, claim.jobId),
+          eq(jobs.status, 'claimed'),
+          eq(jobs.claimedBy, claim.workerId),
+          claim.attempts === undefined ? undefined : eq(jobs.attempts, claim.attempts),
+          gt(jobs.claimExpiresAt, now),
+        ),
+      )
+      .for('update');
+    if (!ownedJob) return false;
+  }
+  const [owned] = await tx
+    .select({ id: runs.id })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.id, run.id),
+        eq(runs.executionToken, executionToken),
+        eq(runs.status, 'running'),
+        gt(runs.expiresAt, now),
+      ),
+    )
     .for('update');
-  if (!rows.length) return 0;
+  if (!owned) return false;
 
-  const ids = rows.map((row) => row.id);
-  await store
-    .update(followUps)
-    .set({
-      status: 'skipped',
-      finishedAt: now,
-      outcome: `Follow-up skipped: agent ${next}. Commitment was not executed.`,
-      outcomeKind: 'skipped_lifecycle',
-      cancelledAt: now,
-      cancelledBy: 'system:lifecycle',
-      cancelReason: `Agent ${next}.`,
-      updatedAt: now,
-    })
-    .where(and(eq(followUps.agentId, agentId), inArray(followUps.id, ids)));
-
-  await store.insert(agentActivityEvents).values(
-    rows.map((row) => ({
-      agentId,
-      followUpId: row.id,
-      kind: FOLLOW_UP_ACTIVITY_KINDS.skipped,
-      summary: `Follow-up skipped (${next}): ${row.subject}`,
-      detail: `Follow-up skipped: ${row.subject}. Agent is ${next}; commitment was not executed.`,
-      createdAt: now,
-    })),
+  const answer = draftAnswerFromResult(result)?.answer.trim();
+  const draft = answer && !result.error ? await prepareDraft(tx, row) : null;
+  const policy = draft && (await loadPolicyContext(run.agentId, run.actor, run.id, tx));
+  if (!draft || !policy || !answer) {
+    await recordFollowUpOutcome(
+      tx,
+      row,
+      'failed',
+      result.error ?? 'The run did not produce a reviewable follow-up draft.',
+      now,
+    );
+    return true;
+  }
+  const decision = await authorizeAction(
+    policy,
+    {
+      type: draft.actionType,
+      recipients: draft.recipients,
+      payload: { ...draft.payload, draft: answer, reason: 'Scheduled conversation follow-up' },
+      idempotencyKey: `followup:${row.id}:draft`,
+      executionToken,
+    },
+    tx,
   );
-  return rows.length;
+  if (decision.decision === 'needs-approval') {
+    await recordFollowUpOutcome(
+      tx,
+      row,
+      'draft_ready',
+      'A follow-up draft is ready for administrator review.',
+      now,
+      {
+        approvalIntentId: decision.intentId,
+      },
+    );
+  } else {
+    await recordFollowUpOutcome(tx, row, 'failed', decision.reasons.join(' '), now);
+  }
+  return true;
 }
 
 export async function finalizeFailedFollowUpJob(
   payload: Record<string, unknown>,
   error: string,
   options: { attempts?: number } = {},
-): Promise<void> {
+) {
   const parsed = followUpJobPayloadSchema.safeParse(payload);
   if (!parsed.success) return;
+  const { agentId, followUpId } = parsed.data;
   await db().transaction(async (tx) => {
-    const now = new Date();
-    await lockFollowUpAgent(tx, parsed.data.agentId);
-    const row = (
-      await tx
-        .select()
-        .from(followUps)
-        .where(
-          and(eq(followUps.id, parsed.data.followUpId), eq(followUps.agentId, parsed.data.agentId)),
-        )
-        .for('update')
-    ).at(0);
+    if (!(await lockApprovalAgent(tx, agentId))) return;
+    const [row] = await tx
+      .select()
+      .from(followUps)
+      .where(and(eq(followUps.id, followUpId), eq(followUps.agentId, agentId)));
     if (row?.status !== 'scheduled') return;
-
-    let attempts = options.attempts;
-    if (attempts === undefined && row.jobId) {
-      const linked = (
-        await tx
-          .select({ attempts: jobs.attempts })
+    const [job] = row.jobId
+      ? await tx
+          .select({ attempts: jobs.attempts, status: jobs.status })
           .from(jobs)
           .where(eq(jobs.id, row.jobId))
-          .limit(1)
-      ).at(0);
-      attempts = linked?.attempts;
-    }
-    attempts ??= Math.max(row.attempts, 1);
-
-    const detail = error.slice(0, 2000);
-    await tx
-      .update(followUps)
-      .set({
-        status: 'failed',
-        attempts,
-        finishedAt: now,
-        outcome: `Follow-up failed: ${detail}`,
-        outcomeKind: 'failed',
-        updatedAt: now,
-      })
-      .where(and(eq(followUps.id, row.id), eq(followUps.status, 'scheduled')));
-    await recordActivity(tx, {
-      agentId: row.agentId,
-      followUpId: row.id,
-      kind: FOLLOW_UP_ACTIVITY_KINDS.failed,
-      summary: `Follow-up failed: ${row.subject}`,
-      detail,
-      now,
-    });
+      : [];
+    if (job?.status !== 'dead') return;
+    await recordFollowUpOutcome(
+      tx,
+      row,
+      'failed',
+      error.slice(0, 2000),
+      await commitmentClock(tx),
+      {
+        attempts: options.attempts ?? job.attempts,
+      },
+    );
   });
 }
 
-/**
- * Recover scheduled follow-ups whose jobs are already dead but whose
- * onDeadLetter finalization did not commit (lease recovery / crash).
- * Each row is finalized with agent-first locking via finalizeFailedFollowUpJob.
- */
-export async function reconcileDeadFollowUpJobs(): Promise<number> {
-  const orphaned = await db().execute(sql`
-    SELECT
-      f.id,
-      f.agent_id,
-      j.attempts,
+export async function reconcileDeadFollowUpJobs() {
+  const abandoned = await db().execute<{
+    id: string;
+    agent_id: string;
+    attempts: number;
+    last_error: string;
+  }>(sql`
+    SELECT f.id, f.agent_id, j.attempts,
       coalesce(j.last_error, 'The worker could not finish the follow-up.') AS last_error
     FROM follow_ups AS f
     INNER JOIN jobs AS j ON j.id = f.job_id
-    WHERE f.status = 'scheduled'
-      AND j.type = ${FOLLOW_UP_JOB_TYPE}
-      AND j.status = 'dead'
+    WHERE f.status = 'scheduled' AND j.type = ${FOLLOW_UP_JOB_TYPE} AND j.status = 'dead'
   `);
-  if (!Array.isArray(orphaned) || orphaned.length === 0) return 0;
+  for (const row of abandoned) {
+    await finalizeFailedFollowUpJob({ followUpId: row.id, agentId: row.agent_id }, row.last_error, {
+      attempts: row.attempts,
+    });
+  }
 
-  await Promise.all(
-    orphaned.map((row) =>
-      finalizeFailedFollowUpJob(
-        { followUpId: String(row.id), agentId: String(row.agent_id) },
-        String(row.last_error),
-        { attempts: Number(row.attempts) },
-      ),
-    ),
-  );
-  return orphaned.length;
+  const abandonedDrafts = await db().execute<{ id: string; agentId: string }>(sql`
+    SELECT f.id, f.agent_id AS "agentId"
+    FROM follow_ups f
+    LEFT JOIN simulation_runs r ON r.id = f.draft_run_id
+    WHERE f.status = 'running' AND f.channel IS NOT NULL
+      AND (r.id IS NULL OR r.status IN ('failed', 'interrupted', 'completed'))
+  `);
+  for (const draft of abandonedDrafts) {
+    await db().transaction(async (tx) => {
+      if (!(await lockApprovalAgent(tx, draft.agentId))) return;
+      const [row] = await tx
+        .select()
+        .from(followUps)
+        .where(and(eq(followUps.id, draft.id), eq(followUps.agentId, draft.agentId)));
+      if (row?.status === 'running') {
+        await recordFollowUpOutcome(
+          tx,
+          row,
+          'failed',
+          'The draft run ended without a reviewable follow-up.',
+          await commitmentClock(tx),
+        );
+      }
+    });
+  }
+  return abandoned.length + abandonedDrafts.length;
 }
 
 export { FOLLOW_UP_JOB_TYPE };

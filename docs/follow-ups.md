@@ -1,36 +1,49 @@
 # Durable follow-ups
 
-First durable commitment (architecture §18.4): administrators schedule a
-time-based follow-up for an agent. Orbit stores the commitment and its
-execution state in PostgreSQL, enqueues a delayed job on the existing queue
-(`followup.execute`) in the same transaction, and records an internal
-outcome on the agent activity timeline when the job runs. There are no
-external side effects in this increment.
+Administrators can record internal reminders from the agent’s Follow-ups tab.
+Agent Access has independent opt-in permissions to schedule a conversation
+follow-up or wait for a reply. An agent can use either granted tool during a run
+with a saved conversation on a supported channel. Email is the first channel
+with a follow-up drafting adapter.
 
-## Data
+## Reply and deadline
 
-| Concern    | Behaviour                                                                                                                                          |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Commitment | `follow_ups` — owner agent, source (`admin` today; `agent` reserved), subject, note, due time, status, attempts, linked job, cancellation, outcome |
-| Activity   | `agent_activity_events` — timeline rows for completed, skipped, cancelled and failed outcomes                                                      |
-| Queue      | Delayed `jobs` row with `available_at = due_at` and idempotency key `followup:<id>`                                                                |
+Orbit saves the commitment and its delayed PostgreSQL job together. A reply
+must be new, persisted inbound evidence for the same agent, channel, account
+and conversation. Resend uses the canonical thread assigned from message
+headers. New replies on the same thread close waiting commitments before the
+database deadline and become evidence in the normal channel run. Retries of
+the same delivery reuse the saved evidence. Explicitly scheduled follow-ups
+remain due at their chosen time.
 
-## Lifecycle policy (skip-and-record)
+At or after the deadline, the timer starts one draft run. It uses the stored
+conversation, the originating configuration and existing agent budgets. A
+successful draft opens one item in Approvals. Review, consent, lifecycle,
+global pause and any channel-specific restrictions still apply to sending.
+Activity shows the commitment deadline, outcome and links to its saved reply,
+continuation run or approval.
 
-Paused and stopped agents do **not** execute follow-ups.
+Administrators can cancel while the timer or draft is pending. Pause and
+stop close unresolved commitments and record a skip. Resume leaves those
+commitments closed. Revoking a tool permission prevents new commitments. Existing commitments
+remain available for explicit cancellation.
 
-- On pause or stop, pending follow-up jobs are cancelled with other agent work, and every still-`scheduled` follow-up is marked `skipped` with `outcome_kind = skipped_lifecycle`. An activity event is written immediately.
-- If a claimed job observes a paused/stopped lifecycle at execution time, the handler also skip-and-records (exact-once via `status = scheduled` row lock).
-- Follow-ups are **not** deferred until resume. Resuming the agent does not revive skipped commitments; schedule a new follow-up if needed.
+## Pending work interface
 
-## Exact-once and recovery
+A domain enqueues its work in the same PostgreSQL transaction as its domain row,
+using a stable idempotency key and `payload.agentId`. Add its job type to
+`pendingWork` with these hooks.
 
-- Transactional enqueue ties the commitment row to its job.
-- The worker finalizes with `SELECT … FOR UPDATE` and only transitions from `scheduled`, so retries and duplicate jobs cannot double-write outcomes.
-- Delayed jobs survive worker restarts: polling reclaim picks up `pending` rows whose `available_at` has passed.
+- `handle(job, signal)` checks the current claim and may return
+  `{ deferUntil }` to release the lease until the next poll.
+- `finalizeLifecycle(tx, change)` runs with the agent row locked after generic
+  queue cancellation. It fences any domain-owned claims and records the local
+  outcome in the same transaction.
+- `onDeadLetter(job, reason)` and `reconcile()` idempotently close stranded
+  domain rows. Reconciliation covers crashes between a queue update and its
+  domain finalizer.
 
-## Next increments (seams only)
-
-- `source = 'agent'` for agent-scheduled follow-ups
-- `wait_for_event` for resuming on inbound events
-- Richer commitment kinds beyond internal outcomes
+A domain keeps its own evidence and provider work identifiers. The follow-up
+worker serializes the terminal transition under the same agent lock as inbound
+resolution and cancellation. The existing worker owns claim recovery and
+backoff. See [the channel framework](channels.md) for the inbound contract.

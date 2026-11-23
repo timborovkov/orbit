@@ -10,6 +10,7 @@ import { channelGrantOptions } from '@/lib/runtime/channels/registry';
 import { persistApprovalTools } from '@/lib/server/lifecycle-mutations';
 import {
   persistChannelGrant,
+  persistCommitmentGrant,
   persistConsentRequirements,
   recordConsent,
   reviewProposedAction,
@@ -101,6 +102,19 @@ export async function saveChannelGrant(form: FormData) {
   if (!parsed.success) return { error: 'Choose a valid channel action.' };
   const { agentId, type, enabled } = parsed.data;
   const result = await persistChannelGrant(actor, agentId, type, enabled === 'true');
+  revalidatePath(`/agents/${agentId}`);
+  return result;
+}
+
+export async function saveCommitmentGrant(form: FormData) {
+  await checkOrigin();
+  const actor = await requireAdmin();
+  const parsed = z
+    .object({ agentId: z.uuid(), type: z.string().max(80), enabled: z.enum(['true', 'false']) })
+    .safeParse(Object.fromEntries(form));
+  if (!parsed.success) return { error: 'Choose a valid commitment tool.' };
+  const { agentId, type, enabled } = parsed.data;
+  const result = await persistCommitmentGrant(actor, agentId, type, enabled === 'true');
   revalidatePath(`/agents/${agentId}`);
   return result;
 }

@@ -6,6 +6,11 @@ import type { JobRecord } from '@/lib/queue/types';
 import type { fetchReceivedEmail } from '@/lib/runtime/email/provider';
 import { EMAIL_ACTOR, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
 import { admitRun } from '@/lib/runtime/execute';
+import {
+  linkReplyCommitments,
+  mergeCommitmentConversations,
+  resolveConversationReply,
+} from '@/lib/runtime/follow-ups/replies';
 import { emailXClaim, reconcilePeople } from '@/lib/runtime/people/identity';
 import {
   agents,
@@ -62,6 +67,7 @@ async function storeMessage(tx: Tx, message: Message, received: Received) {
     : [];
 
   const threadId = parentThread ?? lateChildren.at(0)?.id ?? message.threadId;
+  const conversation = { agentId, channel: 'email', accountId: null, conversationId: threadId };
   if (!parentThread) {
     await tx
       .update(emailThreads)
@@ -78,6 +84,7 @@ async function storeMessage(tx: Tx, message: Message, received: Received) {
     ...new Set([message.threadId, ...lateChildren.map((thread) => thread.id)]),
   ].filter((id) => id !== threadId);
   if (mergedIds.length) {
+    await mergeCommitmentConversations(tx, conversation, mergedIds);
     await tx
       .update(emailMessages)
       .set({ threadId })
@@ -93,10 +100,17 @@ async function storeMessage(tx: Tx, message: Message, received: Received) {
       .delete(emailThreads)
       .where(and(eq(emailThreads.agentId, agentId), inArray(emailThreads.id, mergedIds)));
   }
+  if (parentThread) {
+    await resolveConversationReply(tx, conversation, { kind: 'email', id: message.id });
+  }
 }
 
 /** Structured drafting snapshot used by production email runs and evaluation replay. */
-export async function buildEmailDraftInput(tx: Tx, message: Message) {
+export async function buildEmailDraftInput(
+  tx: Tx,
+  message: Message,
+  followUp?: { subject: string; note: string },
+) {
   const history = await tx
     .select({
       sender: emailMessages.sender,
@@ -127,6 +141,7 @@ export async function buildEmailDraftInput(tx: Tx, message: Message) {
     previousMessages: history
       .reverse()
       .map((prior) => ({ ...prior, body: prior.body?.slice(0, 2_000) })),
+    followUp: followUp && { subject: followUp.subject, note: followUp.note },
   });
 }
 
@@ -247,6 +262,9 @@ export async function processEmailReceiveJob(
         .set({ waitingForCapacity: true })
         .where(eq(emailMessages.id, messageId));
       return { deferUntil: new Date(Date.now() + 5_000) };
+    }
+    if (admitted.runId) {
+      await linkReplyCommitments(tx, agent.id, { kind: 'email', id: message.id }, admitted.runId);
     }
     await tx
       .update(emailMessages)

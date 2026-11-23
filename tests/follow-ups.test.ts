@@ -99,9 +99,7 @@ test('survives a worker restart before the due time', async () => {
   const earlyWorker = startJobWorker({
     workerId: `follow-up-early-${randomUUID()}`,
     handlers: {
-      [FOLLOW_UP_JOB_TYPE]: async (job) => {
-        await processFollowUpJob(job.payload, job.attempts);
-      },
+      [FOLLOW_UP_JOB_TYPE]: processFollowUpJob,
     },
     pollMs: 20,
     recoveryMs: 5_000,
@@ -118,9 +116,7 @@ test('survives a worker restart before the due time', async () => {
   const lateWorker = startJobWorker({
     workerId: `follow-up-late-${randomUUID()}`,
     handlers: {
-      [FOLLOW_UP_JOB_TYPE]: async (job) => {
-        await processFollowUpJob(job.payload, job.attempts);
-      },
+      [FOLLOW_UP_JOB_TYPE]: processFollowUpJob,
     },
     pollMs: 20,
     recoveryMs: 5_000,
@@ -181,7 +177,7 @@ test('executes exactly once when retried or duplicated', async () => {
   expect(first).toEqual({ recorded: true, status: 'completed' });
   expect(second).toEqual({ recorded: false, status: 'completed' });
 
-  await processFollowUpJob({ followUpId, agentId }, 3);
+  await finalizeFollowUpExecution(followUpId, { agentId, attempts: 3 });
 
   const [row] =
     await sql`SELECT status, attempts, outcome_kind FROM follow_ups WHERE id=${followUpId}`;
@@ -279,7 +275,7 @@ test('stopped agents skip-and-record; claimed handler respects lifecycle', async
     VALUES(${followUpId},${agentId},'admin',${admin},'Stop skip','',${dueAt.toISOString()},'scheduled',${job!.id})`;
   await sql`UPDATE agents SET lifecycle='stopped' WHERE id=${agentId}`;
 
-  await processFollowUpJob({ followUpId, agentId }, 1);
+  await finalizeFollowUpExecution(followUpId, { agentId, attempts: 1 });
 
   const [row] = await sql`SELECT status, outcome_kind FROM follow_ups WHERE id=${followUpId}`;
   expect(row!.status).toBe('skipped');
