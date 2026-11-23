@@ -401,3 +401,44 @@ test('the normal simulation entry point exposes only granted web tools and persi
     else process.env.OPENROUTER_API_KEY = previousOpenRouterKey;
   }
 });
+
+test('caps distinct crawl citations across repeated and reordered provider polls', async () => {
+  const scope = await setup([WEB_CRAWL]);
+  const snapshots = [
+    ['first', 'first'],
+    ['second', 'first'],
+    ['third', 'fourth'],
+  ];
+  const provider = ((_: URL, init: RequestInit) => {
+    if (init.method === 'POST') return Promise.resolve(Response.json({ id: 'changing-job' }));
+    const names = snapshots.shift()!;
+    return Promise.resolve(
+      Response.json({
+        status: snapshots.length ? 'scraping' : 'completed',
+        completed: 2,
+        total: 2,
+        data: names.map((name) => ({
+          markdown: 'A public document.',
+          metadata: { url: 'https://1.1.1.1/docs/' + name },
+        })),
+      }),
+    );
+  }) as typeof fetch;
+
+  await toolsFor(scope, provider, [WEB_CRAWL]).web_crawl!.execute!(
+    { url: 'https://1.1.1.1/docs', pageLimit: 2 },
+    call('changing-pages'),
+  );
+  await work('changing-worker', provider);
+  for (let poll = 0; poll < 3; poll += 1) {
+    await sql`update jobs set available_at = now() where payload->>'agentId' = ${scope.agentId}`;
+    await work('changing-worker', provider);
+  }
+  expect(await crawlFor(scope.runId)).toMatchObject({ status: 'completed' });
+  const evidence =
+    await sql`select url from web_citations where run_id = ${scope.runId} order by url`;
+  expect(evidence.map(({ url }) => url)).toEqual([
+    'https://1.1.1.1/docs/first',
+    'https://1.1.1.1/docs/second',
+  ]);
+});

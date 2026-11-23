@@ -145,8 +145,13 @@ export function firecrawlClient(
         'lost-job',
         'The provider crawl job is missing or expired. Start a new crawl to rerun it.',
       );
-    if (status === 404 && path === '/v2/scrape' && parsed.success)
+    if (
+      status === 404 &&
+      path === '/v2/scrape' &&
+      (origin === DEFAULT_FIRECRAWL_ORIGIN || code?.startsWith('SCRAPE_'))
+    ) {
       throw new FirecrawlError('not-found', 'Firecrawl could not find the requested page.');
+    }
     if ([404, 405, 501].includes(status) || code === 'CLOUD_ONLY')
       throw new FirecrawlError('unavailable', operationUnavailable);
     if (status === 401 || status === 403)
@@ -163,6 +168,9 @@ export function firecrawlClient(
       );
     if (!response.ok || parsed.data?.success === false)
       throw new FirecrawlError('rejected', 'Firecrawl could not complete this request.');
+    if (status === 204 && method === 'DELETE') {
+      return { envelope: envelope.parse({}), payload };
+    }
     if (!parsed.success) {
       throw new FirecrawlError(
         path === '/v2/crawl' && method === 'POST' ? 'retryable' : 'rejected',
@@ -172,13 +180,14 @@ export function firecrawlClient(
     return { envelope: parsed.data, payload };
   };
 
-  function page(raw: unknown, rank: number): ResearchPage | undefined {
+  function page(raw: unknown, rank: number, requireFinalUrl = false): ResearchPage | undefined {
     const parsed = scrapedPage.safeParse(raw);
     if (!parsed.success) return undefined;
     const { markdown, metadata, blocked } = parsed.data;
     if (blocked || (metadata.statusCode && metadata.statusCode >= 400) || !markdown?.trim())
       return undefined;
-    const url = source(metadata.url ?? metadata.sourceURL ?? '');
+    // The original requested URL cannot establish crawl scope after a redirect.
+    const url = source(metadata.url ?? (requireFinalUrl ? '' : (metadata.sourceURL ?? '')));
     if (!url) return undefined;
     const content = clean(markdown).slice(0, 32_000);
     return {
@@ -275,7 +284,7 @@ export function firecrawlClient(
         next: getNext(next, path, skip),
         rawCount: data.length,
         pages: data.slice(0, pageLimit).flatMap((raw, index) => {
-          const result = page(raw, skip + index + 1);
+          const result = page(raw, skip + index + 1, true);
           return result ? [result] : [];
         }),
       };

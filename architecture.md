@@ -103,7 +103,7 @@ Keep personality and operating rules in instructions, reference knowledge in RAG
 
 ## 9. Tool registry, MCP and real-world actions
 
-Native tools and MCP operations share a typed capability registry. Examples include web.search, web.read, knowledge.search, x.reply, x.follow, email.send, calendar.schedule, people.search, people.introduce, task.schedule, support.createTicket and phone.call. Each agent explicitly enables the individual tools it may use.
+Native tools and MCP operations share a typed capability registry. Examples include web.search, web.read, web.crawl, knowledge.search, x.reply, x.follow, email.send, calendar.schedule, people.search, people.introduce, task.schedule, support.createTicket and phone.call. Each agent explicitly enables the individual tools it may use.
 
 Tools may complete synchronously or return a pending external identifier. Long-running work is represented as durable tasks with deadlines, wait conditions, status, retries and cancellation. Inbound webhook results are first persisted to PostgreSQL, then resume the task. The agent can make commitments that survive restarts.
 

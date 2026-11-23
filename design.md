@@ -306,8 +306,9 @@ explicitly. Use a flexible primary column and a 280px version column,
 stacked at 900px and narrower. Preserve source citations with saved runs.
 
 Show web citations inside the originating run in Activity. Crawl results show
-the target, status, pages read and page limit. Keep cancellation available
-while the crawl is pending. Show a final cancellation or failure reason
+the target, status, pages read, page limit and depth limit. Keep an active crawl
+run in Activity when newer runs fill History. Keep the most recently finished
+crawl visible for ten minutes. Keep cancellation available while the crawl is pending. Show a final cancellation or failure reason
 in the same row. Source excerpts render as plain text. An import disclosure
 lets the administrator pick a shared library and then confirm the import.
 

@@ -80,7 +80,7 @@ export function ResearchActivity({
             {crawl.discoveredPages > crawl.completedPages
               ? ' of ' + crawl.discoveredPages
               : ''}{' '}
-            pages read · page limit {crawl.pageLimit}
+            pages read · page limit {crawl.pageLimit} · depth limit {crawl.depthLimit}
             {crawl.creditsUsed !== null && ' · ' + crawl.creditsUsed + ' provider credits'}
           </p>
           {crawl.reason && <p>{crawl.reason}</p>}
