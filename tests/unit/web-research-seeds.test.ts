@@ -1,10 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import {
-  listValuesFromForm,
-  parseWebResearchSeeds,
-  webResearchSeedGuidance,
-} from '@/lib/runtime/research/seeds';
+import { listValuesFromForm } from '@/lib/form-values';
+import { parseWebResearchSeeds, webResearchSeedGuidance } from '@/lib/runtime/research/seeds';
 
 test('parseWebResearchSeeds normalizes invalid input', () => {
   expect(parseWebResearchSeeds(null)).toEqual({ queries: [], sources: [] });

@@ -15,6 +15,10 @@ export interface XSearchRequest {
   query: string;
   sinceId?: string | null;
   maxResults?: number;
+  /** Stop walking pages once this many posts are collected. */
+  maxPosts?: number;
+  /** Upper bound on provider requests for this search (live adapter default: 5). */
+  maxPages?: number;
   signal?: AbortSignal;
 }
 

@@ -6,7 +6,7 @@ import { Cpu, Fingerprint, Radar, SlidersHorizontal } from 'lucide-react';
 
 import { DiscoveryFields } from '@/app/discovery-fields';
 import { WorkspaceField } from '@/app/workspace-field';
-import { type AgentConfig, configFields, discoveryQueries } from '@/lib/runtime/config';
+import { type AgentConfig, configFields, discoverySettings } from '@/lib/runtime/config';
 
 const shortFields = new Set(['name', 'role', 'mainModel', 'evaluatorModel']);
 const requiredFields = new Set(['name', 'mainModel', 'evaluatorModel']);
@@ -58,6 +58,7 @@ export function ConfigFields({
   identityContent?: ReactNode;
 }) {
   const [active, setActive] = useState('identity');
+  const discovery = discoverySettings(config);
   return (
     <div
       className="config-editor"
@@ -104,15 +105,15 @@ export function ConfigFields({
             {group.id === 'discovery' ? (
               <DiscoveryFields
                 key={[
-                  discoveryQueries(config).join('\u0001'),
-                  String(config.xDiscoveryPaused),
-                  String(config.xDiscoveryMaxPostsPerPoll),
+                  discovery.queries.join('\u0001'),
+                  String(discovery.paused),
+                  String(discovery.maxPosts),
                 ].join('|')}
                 agentId={agentId}
                 prefix={prefix}
-                initialQueries={discoveryQueries(config)}
-                initialPaused={config.xDiscoveryPaused}
-                initialMaxPosts={config.xDiscoveryMaxPostsPerPoll}
+                initialQueries={discovery.queries}
+                initialPaused={discovery.paused}
+                initialMaxPosts={discovery.maxPosts}
               />
             ) : (
               <div className={`editor-fields editor-fields-${group.id}`}>

@@ -5,8 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
+import { listValuesFromForm } from '@/lib/form-values';
 import { isWebTool } from '@/lib/research';
-import { listValuesFromForm, parseWebResearchSeeds } from '@/lib/runtime/research/seeds';
+import { parseWebResearchSeeds } from '@/lib/runtime/research/seeds';
 import { firecrawlKeySchema } from '@/lib/runtime/research/settings';
 import { parseCrawlScopes } from '@/lib/runtime/research/urls';
 import {

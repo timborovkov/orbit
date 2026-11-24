@@ -84,11 +84,26 @@ export const configSchema = z.preprocess(
 export type AgentConfig = z.infer<typeof configSchema>;
 
 export function discoveryQueries(
-  config: Pick<AgentConfig, 'xSearchQueries' | 'xSearchQuery'>,
+  config: Partial<Pick<AgentConfig, 'xSearchQueries' | 'xSearchQuery'>>,
 ): string[] {
-  if (config.xSearchQueries.length) return config.xSearchQueries;
-  const legacy = config.xSearchQuery.trim();
+  if (config.xSearchQueries?.length) return config.xSearchQueries;
+  const legacy = config.xSearchQuery?.trim();
   return legacy ? [legacy] : [];
+}
+
+/** Discovery settings from stored configuration JSON, including legacy single-query records. */
+export function discoverySettings(raw: unknown): {
+  queries: string[];
+  paused: boolean;
+  maxPosts: number;
+} {
+  const normalized = normalizeDiscoveryConfig(raw) as Partial<AgentConfig> | null | undefined;
+  const config = normalized && typeof normalized === 'object' ? normalized : {};
+  return {
+    queries: discoveryQueries(config),
+    paused: config.xDiscoveryPaused === true,
+    maxPosts: clampDiscoveryMaxPosts(config.xDiscoveryMaxPostsPerPoll),
+  };
 }
 
 export const configFields = [

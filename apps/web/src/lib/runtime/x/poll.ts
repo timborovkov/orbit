@@ -13,7 +13,10 @@ import {
   xEmailClaim,
 } from '@/lib/runtime/people/identity';
 import { createXSearchAdapter } from '@/lib/runtime/x/adapter';
-import { clampDiscoveryMaxPosts } from '@/lib/runtime/x/discovery-cost';
+import {
+  clampDiscoveryMaxPosts,
+  X_DISCOVERY_PAGES_PER_QUERY,
+} from '@/lib/runtime/x/discovery-cost';
 import { compareSnowflake } from '@/lib/runtime/x/fixture';
 import { capDiscoveryPosts, prefilterDiscoveryPosts } from '@/lib/runtime/x/relevance-prefilter';
 import { xPostId } from '@/lib/runtime/x/reply-input';
@@ -429,6 +432,8 @@ export async function processDiscoveryPoll(
           query,
           sinceId: prep.sinceId,
           maxResults: Math.min(Math.max(maxPosts, 10), 100),
+          maxPosts,
+          maxPages: X_DISCOVERY_PAGES_PER_QUERY,
           signal,
         }),
       ),

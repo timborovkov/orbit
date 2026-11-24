@@ -130,6 +130,41 @@ test('live adapter stops at max pages and still reports the highest newest_id', 
   expect(result.newestId).toBe(String(3000 + X_RECENT_SEARCH_MAX_PAGES));
 });
 
+test('live adapter honors maxPages and maxPosts so the request bound matches the cost hint', async () => {
+  const makeFetch = (counter: { pages: number }) =>
+    (async () => {
+      counter.pages += 1;
+      const id = String(4000 + counter.pages);
+      return Response.json({
+        data: [
+          {
+            id,
+            text: `page ${counter.pages}`,
+            author_id: 'u3',
+            created_at: '2026-11-18T12:00:00.000Z',
+          },
+        ],
+        meta: { newest_id: id, next_token: `tok-${counter.pages}`, result_count: 1 },
+      });
+    }) as unknown as typeof fetch;
+
+  const single = { pages: 0 };
+  await createLiveXSearchAdapter('test-bearer', makeFetch(single)).searchRecent({
+    query: 'orbit',
+    maxPosts: 10,
+    maxPages: 1,
+  });
+  expect(single.pages).toBe(1);
+
+  const capped = { pages: 0 };
+  const result = await createLiveXSearchAdapter('test-bearer', makeFetch(capped)).searchRecent({
+    query: 'orbit',
+    maxPosts: 2,
+  });
+  expect(capped.pages).toBe(2);
+  expect(result.posts).toHaveLength(2);
+});
+
 test('fixture adapter returns posts after since_id and supports restart cursors', async () => {
   const adapter = createFixtureXSearchAdapter();
   const first = await adapter.searchRecent({ query: 'work-history' });

@@ -13,10 +13,10 @@ test('clampDiscoveryMaxPosts bounds the per-poll cap', () => {
   expect(clampDiscoveryMaxPosts(999)).toBe(50);
 });
 
-test('estimateDiscoverySearchRequests scales with queries and caps', () => {
-  expect(estimateDiscoverySearchRequests({ queryCount: 0, maxPostsPerPoll: 10 })).toBe(0);
-  expect(estimateDiscoverySearchRequests({ queryCount: 1, maxPostsPerPoll: 10 })).toBe(1);
-  expect(estimateDiscoverySearchRequests({ queryCount: 2, maxPostsPerPoll: 25 })).toBe(6);
+test('estimateDiscoverySearchRequests is one page per query', () => {
+  expect(estimateDiscoverySearchRequests({ queryCount: 0 })).toBe(0);
+  expect(estimateDiscoverySearchRequests({ queryCount: 1 })).toBe(1);
+  expect(estimateDiscoverySearchRequests({ queryCount: 3 })).toBe(3);
 });
 
 test('discoveryCostHint describes pause and live polling', () => {
