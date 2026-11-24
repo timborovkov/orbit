@@ -92,7 +92,7 @@ test('saved Skills and authenticated MCP grants reach the worker and run history
     await page.getByRole('option', { name: 'Customer Support', exact: true }).click();
     await page.getByLabel(/^Name/).fill('Resource fixture agent');
     await page.getByRole('button', { name: 'Create shadow agent' }).click();
-    await page.getByRole('link', { name: 'Resource fixture agent', exact: true }).click();
+    await expect(page).toHaveURL(/\/agents\//);
     await openWorkspaceTab(page, 'Access');
     await openAccessSection(page, 'Skills');
     await page.getByRole('checkbox', { name: 'Release check' }).check();
@@ -267,7 +267,6 @@ test('skills and MCP library UI across empty, create, data and themes', async ({
   await page.getByLabel(/^Name/).fill('Support desk');
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('link', { name: 'Support desk', exact: true }).click();
   await expect(page).toHaveURL(/\/agents\//);
   const agentUrl = page.url();
 

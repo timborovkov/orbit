@@ -17,7 +17,7 @@ export async function createAgentFromTemplate(
   const template = (await db().select().from(templates).where(eq(templates.id, templateId))).at(0);
   if (!template) return { ok: false as const, errors: { name: ['Choose an available template.'] } };
   const config = configSchema.parse({ ...template.config, ...data });
-  await db().transaction(async (tx) => {
+  const agentId = await db().transaction(async (tx) => {
     const agent = (
       await tx
         .insert(agents)
@@ -44,6 +44,7 @@ export async function createAgentFromTemplate(
     if (canAcceptBackgroundWork(agent.lifecycle)) {
       await scheduleChannelWork(tx, agent.id, config);
     }
+    return agent.id;
   });
-  return { ok: true as const };
+  return { ok: true as const, agentId };
 }

@@ -24,7 +24,7 @@ test('Playground recovers a queued simulation and shows its persisted result', a
   await page.getByLabel(/^Name/).fill('Recovery fixture');
   await page.getByLabel(/^Mission/).fill('Answer support questions.');
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
-  await page.getByRole('link', { name: 'Recovery fixture', exact: true }).click();
+  await expect(page).toHaveURL(/\/agents\//);
   await openWorkspaceTab(page, 'Playground');
 
   const [configuration] = await sql<{ id: string; agentId: string }[]>`

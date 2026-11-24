@@ -78,7 +78,7 @@ async function createAgent(page: Page, name: string) {
   await page.getByLabel(/^Name/).fill(name);
   await page.getByLabel(/^Mission/).fill('Follow-up screenshot mission.');
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
-  await page.getByRole('link', { name, exact: true }).click();
+  await expect(page).toHaveURL(/\/agents\//);
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible({ timeout: 15000 });
   const tabs = page.getByRole('tablist', { name: 'Agent workspace' });
   const section = page.getByRole('combobox', { name: 'Agent workspace section', exact: true });

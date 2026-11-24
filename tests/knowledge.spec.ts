@@ -18,7 +18,7 @@ test('an admin can index, inspect and enable an agent’s knowledge library', as
   await page.getByLabel(/^Name/).fill('Knowledge browser test');
   await page.getByLabel(/^Mission/).fill('Answer questions using the library.');
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
-  await page.getByRole('link', { name: 'Knowledge browser test' }).click();
+  await expect(page).toHaveURL(/\/agents\//);
 
   await openWorkspaceTab(page, 'Knowledge');
   const section = page.getByLabel('Knowledge section', { exact: true });

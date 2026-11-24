@@ -2,6 +2,8 @@
 
 import { useRef, useState, useTransition } from 'react';
 
+import { useRouter } from 'next/navigation';
+
 import { Plus, X } from 'lucide-react';
 
 import { createAgent } from '@/actions/agents';
@@ -24,6 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/toast';
 
 const empty = {
   name: '',
@@ -32,11 +35,24 @@ const empty = {
   error: '',
   errors: {} as { name?: string[]; mission?: string[] },
 };
-export function CreateAgent({
-  templates,
-}: {
-  templates: { id: string; title: string; mission: string }[];
-}) {
+type Template = {
+  id: string;
+  title: string;
+  mission: string;
+  role: string;
+  personality: string;
+  instructions: string;
+};
+
+const previewFields = [
+  ['Role', 'role'],
+  ['Personality', 'personality'],
+  ['Instructions', 'instructions'],
+] as const;
+
+export function CreateAgent({ templates }: { templates: Template[] }) {
+  const router = useRouter();
+  const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const missionInput = useRef<HTMLTextAreaElement>(null);
@@ -45,6 +61,8 @@ export function CreateAgent({
   function close() {
     setOpen(false);
   }
+  const selectedTemplate = templates.find((item) => item.id === form.templateId);
+  const preview = previewFields.filter(([, key]) => selectedTemplate?.[key].trim());
   const nameInvalid = Boolean(form.errors.name?.length);
   const missionInvalid = Boolean(form.errors.mission?.length);
   return (
@@ -87,13 +105,24 @@ export function CreateAgent({
             <X size={18} aria-hidden="true" />
           </Button>
           <DialogDescription>
-            Your agent starts in shadow mode, with external writes suppressed. You can set its
-            OpenRouter key under Access.
+            Starts in shadow mode. External writes stay off until you change lifecycle.
           </DialogDescription>
         </DialogHeader>
         <form
           className="form-dialog-form"
+          noValidate
           action={(data) => {
+            const errors: typeof empty.errors = {};
+            const name = form.name.trim();
+            const mission = form.mission.trim();
+            if (!name || name.length > 80) errors.name = ['Invalid name'];
+            if (!mission || mission.length > 2000) errors.mission = ['Invalid mission'];
+            if (errors.name || errors.mission) {
+              setForm((previous) => ({ ...previous, error: '', errors }));
+              if (errors.name) nameInput.current?.focus();
+              else missionInput.current?.focus();
+              return;
+            }
             startTransition(async () => {
               setForm((previous) => ({ ...previous, error: '', errors: {} }));
               try {
@@ -101,6 +130,8 @@ export function CreateAgent({
                 if (result.ok) {
                   close();
                   setForm(empty);
+                  toast('Created');
+                  router.push(`/agents/${result.agentId}`);
                 } else {
                   setForm((previous) => ({ ...previous, errors: result.errors }));
                   if (result.errors.name?.length) nameInput.current?.focus();
@@ -152,6 +183,16 @@ export function CreateAgent({
                 <FieldDescription id="agent-template-hint">
                   Choosing a template fills in the mission.
                 </FieldDescription>
+                {preview.length ? (
+                  <dl className="template-preview" aria-label="Template preview">
+                    {preview.map(([label, key]) => (
+                      <div key={key}>
+                        <dt>{label}</dt>
+                        <dd>{selectedTemplate?.[key]}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
               </Field>
               <Field data-invalid={nameInvalid || undefined}>
                 <FieldLabel htmlFor="agent-name">
@@ -167,7 +208,6 @@ export function CreateAgent({
                   }}
                   readOnly={pending}
                   maxLength={80}
-                  required
                   autoComplete="off"
                   aria-invalid={nameInvalid || undefined}
                   aria-describedby={nameInvalid ? 'name-error' : undefined}
@@ -191,7 +231,6 @@ export function CreateAgent({
                   }}
                   readOnly={pending}
                   maxLength={2000}
-                  required
                   rows={5}
                   aria-invalid={missionInvalid || undefined}
                   aria-describedby={missionInvalid ? 'mission-error' : 'mission-hint'}
