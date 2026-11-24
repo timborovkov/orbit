@@ -39,15 +39,15 @@ const latestPeopleSources = sql`
 
 function personActivity(condition: ReturnType<typeof sql>) {
   return sql`
-    select entry.agent_id, entry.occurred_at, entry.claim, entry.excerpt from (
+    select entry.agent_id, entry.occurred_at, entry.excerpt from (
       select mail_entry.agent_id, mail_entry.received_at as occurred_at, mail_entry.id,
-        mail_entry.person_claim as claim, mail_entry.subject as excerpt
+        mail_entry.subject as excerpt
       from person_identities activity_identity
       join email_messages mail_entry on mail_entry.person_identity_id = activity_identity.id
       where activity_identity.person_id = person.id
       union all
       select post_entry.agent_id, coalesce(post_entry.provider_created_at, post_entry.ingested_at),
-        post_entry.id, post_entry.person_claim, left(post_entry.text, 400)
+        post_entry.id, left(post_entry.text, 400)
       from person_identities activity_identity
       join source_events post_entry on post_entry.person_identity_id = activity_identity.id
         and post_entry.provider = activity_identity.channel
@@ -96,7 +96,7 @@ export async function listPeople(query: string, page: number, linkIdentityId?: s
   }>(sql`
     select person.id, coalesce(primary_identity.label, primary_contact.label) as name,
       primary_identity.handle, source_agent.id as "sourceAgentId", source_agent.name as "sourceAgentName",
-      coalesce(latest_claim.claim, latest_activity.excerpt) as relevance,
+      latest_activity.excerpt as relevance,
       to_char(latest_activity.occurred_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as "lastSeen",
       array(select distinct channel from person_identities where person_id = person.id order by channel) as channels
     from people person
@@ -112,7 +112,6 @@ export async function listPeople(query: string, page: number, linkIdentityId?: s
       order by contact.kind, contact.id limit 1
     ) primary_contact on true
     left join lateral (${personActivity(sql`true`)}) latest_activity on true
-    left join lateral (${personActivity(sql`entry.claim is not null`)}) latest_claim on true
     left join agents source_agent on source_agent.id = latest_activity.agent_id
     where (primary_identity.label is not null or primary_contact.label is not null) ${omitSource} ${match}
     order by person.created_at desc, person.id desc limit ${peoplePerPage + 1} offset ${(page - 1) * peoplePerPage}
