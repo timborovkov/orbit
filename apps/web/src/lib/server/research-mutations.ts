@@ -5,6 +5,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db, type Tx } from '@/lib/db';
 import { ACTIVE_CRAWL_STATES, isWebTool, WEB_CRAWL, type WebTool } from '@/lib/research';
 import { requestCrawlCancellation } from '@/lib/runtime/research/crawls';
+import type { WebResearchSeeds } from '@/lib/runtime/research/seeds';
 import { firecrawlCredentialSubject } from '@/lib/runtime/research/settings';
 import { crawlAllowed, publicPageUrl } from '@/lib/runtime/research/urls';
 import { encryptSecret } from '@/lib/runtime/secrets';
@@ -32,6 +33,7 @@ export async function persistWebResearchAccess(
   agentId: string,
   tools: WebTool[],
   scopes: string[],
+  seeds: WebResearchSeeds,
 ) {
   return db().transaction(async (tx) => {
     const agent = await lockAgent(tx, agentId);
@@ -41,6 +43,7 @@ export async function persistWebResearchAccess(
       .set({
         enabledTools: [...agent.enabledTools.filter((tool) => !isWebTool(tool)), ...tools],
         webCrawlScopes: scopes,
+        webResearchSeeds: seeds,
       })
       .where(eq(agents.id, agentId));
     const [active] = await tx

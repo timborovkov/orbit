@@ -26,6 +26,9 @@ const config: AgentConfig = {
   instructions: 'Ask useful questions',
   engagementCriteria: 'Buying intent',
   xSearchQuery: '',
+  xSearchQueries: [],
+  xDiscoveryPaused: false,
+  xDiscoveryMaxPostsPerPoll: 10,
   mainModel: 'test/main',
   evaluatorModel: 'test/evaluator',
 };

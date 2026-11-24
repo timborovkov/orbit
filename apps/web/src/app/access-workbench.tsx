@@ -184,7 +184,19 @@ export function AccessWorkbench({
         selections={mcpSelections}
       />
     ),
-    research: <ResearchAccess agentId={agentId} {...research} />,
+    research: (
+      <ResearchAccess
+        key={[
+          research.tools.join(','),
+          research.scopes.join('\n'),
+          research.seeds.queries.join('\u0001'),
+          research.seeds.sources.join('\u0001'),
+          research.keySource,
+        ].join('|')}
+        agentId={agentId}
+        {...research}
+      />
+    ),
     openrouter: (
       <AccessPanel
         agentId={agentId}

@@ -255,7 +255,7 @@ test('records a lost provider job and confirms provider cancellation after grant
     call('cancel'),
   );
   await work('cancel-worker', cancelProvider);
-  await persistWebResearchAccess(actor, scope.agentId, [], []);
+  await persistWebResearchAccess(actor, scope.agentId, [], [], { queries: [], sources: [] });
   await work('cancel-worker', cancelProvider);
   await work('cancel-worker', cancelProvider);
   expect(requests).toEqual([
