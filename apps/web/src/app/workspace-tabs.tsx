@@ -12,7 +12,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-const linkableTabs = new Set(['configure', 'approvals', 'access', 'email', 'memory']);
+const linkableTabs = new Set([
+  'configure',
+  'playground',
+  'approvals',
+  'access',
+  'email',
+  'memory',
+  'history',
+]);
 
 export function WorkspaceTabs({
   items,

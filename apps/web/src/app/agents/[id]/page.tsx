@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import { AgentWorkspaceHeader } from '@/app/agent-workspace-header';
 import { AgentWorkspaceTabs } from '@/app/agent-workspace-tabs';
+import { ApprovalPendingNotice } from '@/app/approval-pending-notice';
 import { LoadingStatus } from '@/app/loading-status';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { WorkspaceHeader } from '@/app/workspace-header';
@@ -159,6 +160,10 @@ export default async function AgentWorkspace({
           active={hasActiveWork || followUpRefresh.pollFrequently}
           refreshAt={followUpRefresh.refreshAt}
           intervalMs={hasActiveWork ? undefined : followUpRefresh.intervalMs}
+        />
+        <ApprovalPendingNotice
+          agentId={id}
+          pendingCount={reviews.filter((review) => review.status === 'pending').length}
         />
         <Suspense
           fallback={

@@ -14,12 +14,13 @@ export interface ActivityEventRow {
 }
 
 export function ActivityTimeline({ events }: { events: ActivityEventRow[] }) {
+  if (!events.length) return null;
   return (
     <section className="activity-timeline" aria-labelledby="activity-timeline-heading">
       <div className="editor-section-heading">
-        <h2 id="activity-timeline-heading">Activity</h2>
+        <h2 id="activity-timeline-heading">Follow-ups & replies</h2>
+        <p className="muted">Scheduled follow-ups and outbound X replies for this agent.</p>
       </div>
-      {!events.length && <p className="muted">No activity events yet.</p>}
       <ol className="activity-timeline-list">
         {events.map((event) => (
           <li key={event.id} id={`activity-event-${event.id}`}>

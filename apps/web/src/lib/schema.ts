@@ -88,6 +88,11 @@ export const agents = pgTable('agents', {
     .default(1),
   memoryNextMaintenanceAt: timestamp('memory_next_maintenance_at', { withTimezone: true }),
   webCrawlScopes: jsonb('web_crawl_scopes').$type<string[]>().notNull().default([]),
+  /** Admin seed queries and preferred sources for web research guidance. */
+  webResearchSeeds: jsonb('web_research_seeds')
+    .$type<{ queries: string[]; sources: string[] }>()
+    .notNull()
+    .default({ queries: [], sources: [] }),
   enabledTools: jsonb('enabled_tools').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

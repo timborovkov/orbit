@@ -5,6 +5,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { isWebTool } from '@/lib/research';
+import { parseWebResearchSeeds } from '@/lib/runtime/research/seeds';
 import { firecrawlKeySource } from '@/lib/runtime/research/settings';
 import {
   agents,
@@ -65,6 +66,7 @@ export async function getWebResearchAccess(agentId: string) {
     .select({
       tools: agents.enabledTools,
       scopes: agents.webCrawlScopes,
+      seeds: agents.webResearchSeeds,
       override: firecrawlCredentials.agentId,
     })
     .from(agents)
@@ -73,6 +75,7 @@ export async function getWebResearchAccess(agentId: string) {
   return {
     tools: row?.tools.filter(isWebTool) ?? [],
     scopes: row?.scopes ?? [],
+    seeds: parseWebResearchSeeds(row?.seeds),
     keySource: firecrawlKeySource(Boolean(row?.override)),
   };
 }

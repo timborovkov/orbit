@@ -128,6 +128,7 @@ export function AgentWorkspaceTabs({
                 <ConfigFields
                   config={current.config}
                   prefix="agent"
+                  agentId={id}
                   identityContent={
                     <ProfilePictureEditor
                       id={id}
@@ -221,7 +222,6 @@ export function AgentWorkspaceTabs({
               activityEvents={activityEvents}
               webResearch={webResearch}
               focusRunId={focusRunId}
-              versionFor={versionFor}
             />
           ),
         },

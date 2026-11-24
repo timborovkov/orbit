@@ -1399,3 +1399,51 @@ test('introductions honor independent consent and administrator review settings'
     await authorizeAction(ctx, { ...escalation, idempotencyKey: 'policy-fixture-escalation-off' }),
   ).toMatchObject({ decision: 'suppressed' });
 });
+
+test('in-run tool authorization allows concurrent Playground and discovery runs under maxConcurrentRuns=1', async () => {
+  const id = randomUUID();
+  ids.push(id);
+  const actor = 'lane-policy@example.com';
+  const [preset] = await sql`SELECT config FROM templates WHERE id='support'`;
+  const config = { ...preset.config, name: 'LanePolicyGate' };
+  await sql`
+    INSERT INTO agents(id,name,mission,lifecycle,budgets,enabled_tools)
+    VALUES (${id},'LanePolicyGate',${config.mission},'shadow',${sql.json({ ...uncapped, maxConcurrentRuns: 1 })},${sql.json([])})
+  `;
+  const [version] =
+    await sql`INSERT INTO agent_configurations(agent_id,version,config,actor) VALUES (${id},1,${sql.json(config)},${actor}) RETURNING id`;
+
+  const [discoveryRun] = await sql`
+    INSERT INTO simulation_runs(agent_id,configuration_id,origin,status,input,result,actor,expires_at)
+    VALUES (${id},${version.id},'discovery','running','bg post',${sql.json({ steps: [], actions: [], error: null })},'system:x-discovery',now() + interval '10 minutes')
+    RETURNING id
+  `;
+  const queued = await enqueueSimulation({
+    actor,
+    agentId: id,
+    configurationId: version.id,
+    input: 'Interactive prompt alongside discovery',
+  });
+  expect('runId' in queued && queued.runId).toBeTruthy();
+  const playgroundRunId = queued.runId!;
+
+  const playgroundCtx = (await loadPolicyContext(id, actor, playgroundRunId))!;
+  const discoveryCtx = (await loadPolicyContext(id, 'system:x-discovery', discoveryRun.id))!;
+  expect(playgroundCtx.usage.activeRuns).toBe(0);
+  expect(discoveryCtx.usage.activeRuns).toBe(0);
+
+  expect(
+    await authorizeAction(playgroundCtx, {
+      type: 'load_skill',
+      readOnly: true,
+      idempotencyKey: `lane-pg-skill-${id}`,
+    }),
+  ).toMatchObject({ decision: 'allow' });
+  expect(
+    await authorizeAction(discoveryCtx, {
+      type: 'load_skill',
+      readOnly: true,
+      idempotencyKey: `lane-bg-skill-${id}`,
+    }),
+  ).toMatchObject({ decision: 'allow' });
+});

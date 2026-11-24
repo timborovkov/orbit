@@ -5,7 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
+import { listValuesFromForm } from '@/lib/form-values';
 import { isWebTool } from '@/lib/research';
+import { parseWebResearchSeeds } from '@/lib/runtime/research/seeds';
 import { firecrawlKeySchema } from '@/lib/runtime/research/settings';
 import { parseCrawlScopes } from '@/lib/runtime/research/urls';
 import {
@@ -41,11 +43,16 @@ export async function saveWebResearchAccess(form: FormData): Promise<ResearchAct
   }
   const scopes = parseCrawlScopes(rawScopes);
   if (!scopes) return { error: 'Enter up to 30 public site or path URLs, one per line, or use *.' };
+  const seeds = parseWebResearchSeeds({
+    queries: listValuesFromForm(form, 'seedQuery'),
+    sources: listValuesFromForm(form, 'seedSource'),
+  });
   const result = await persistWebResearchAccess(
     params.actor,
     params.agentId,
     [...new Set(tools)],
     scopes,
+    seeds,
   );
   if (!result.error) revalidatePath('/agents/' + params.agentId);
   return result;

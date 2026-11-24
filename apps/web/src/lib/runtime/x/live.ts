@@ -102,6 +102,11 @@ export function createLiveXSearchAdapter(
       if (!query) return { posts: [], newestId: request.sinceId ?? null };
 
       const maxResults = Math.min(Math.max(request.maxResults ?? 10, 10), 100);
+      const maxPages = Math.min(
+        Math.max(Math.floor(request.maxPages ?? X_RECENT_SEARCH_MAX_PAGES), 1),
+        X_RECENT_SEARCH_MAX_PAGES,
+      );
+      const maxPosts = request.maxPosts && request.maxPosts > 0 ? request.maxPosts : undefined;
 
       const fetchPages = async (
         paginationToken: string | undefined,
@@ -146,7 +151,8 @@ export function createLiveXSearchAdapter(
           }
         }
         const nextToken = body.meta?.next_token;
-        if (nextToken && pages + 1 < X_RECENT_SEARCH_MAX_PAGES) {
+        const limitReached = maxPosts !== undefined && nextCollected.length >= maxPosts;
+        if (nextToken && !limitReached && pages + 1 < maxPages) {
           return fetchPages(nextToken, pages + 1, nextCollected, nextNewest);
         }
         return { posts: nextCollected, newestId: nextNewest };

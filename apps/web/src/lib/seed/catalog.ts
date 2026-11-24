@@ -107,12 +107,33 @@ export interface DemoKnowledgeDocumentSpec {
 
 function baseConfig(
   name: string,
-  template: Omit<AgentConfig, 'name' | 'mission' | 'xSearchQuery'> & {
+  template: Omit<
+    AgentConfig,
+    | 'name'
+    | 'mission'
+    | 'xSearchQuery'
+    | 'xSearchQueries'
+    | 'xDiscoveryPaused'
+    | 'xDiscoveryMaxPostsPerPoll'
+  > & {
     mission: string;
     xSearchQuery?: string;
+    xSearchQueries?: string[];
+    xDiscoveryPaused?: boolean;
+    xDiscoveryMaxPostsPerPoll?: number;
   },
 ): AgentConfig {
-  return { name, xSearchQuery: '', ...template };
+  const queries =
+    template.xSearchQueries ??
+    (template.xSearchQuery?.trim() ? [template.xSearchQuery.trim()] : []);
+  return {
+    ...template,
+    name,
+    xSearchQueries: queries,
+    xSearchQuery: queries[0] ?? '',
+    xDiscoveryPaused: template.xDiscoveryPaused ?? false,
+    xDiscoveryMaxPostsPerPoll: template.xDiscoveryMaxPostsPerPoll ?? 10,
+  };
 }
 
 const johnPersonality =

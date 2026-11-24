@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -8,7 +8,6 @@ import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, isToolUIPart } from 'ai';
 import {
-  ArrowUp,
   ChevronDown,
   Clock3,
   Eraser,
@@ -19,6 +18,7 @@ import {
 
 import { KnowledgeToolResult } from '@/app/knowledge-citations';
 import { MemoryToolResult } from '@/app/memory-citations';
+import { PlaygroundComposer } from '@/app/playground-composer';
 import { WebToolResult } from '@/app/web-citations';
 import {
   Conversation,
@@ -28,13 +28,6 @@ import {
 } from '@/components/ai-elements/conversation';
 import { Loader } from '@/components/ai-elements/loader';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
-import {
-  PromptInput,
-  PromptInputFooter,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-} from '@/components/ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import {
   Tool,
@@ -55,6 +48,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { PlaygroundUIMessage } from '@/lib/runtime/chat-ui';
+import { isPlaygroundAdmissionBlock } from '@/lib/runtime/playground-block';
 import {
   PLAYGROUND_ATTACHMENTS_UNSUPPORTED,
   playgroundAttachmentRejection,
@@ -130,6 +124,8 @@ export function PlaygroundChat({
   const [formError, setFormError] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [stoppedWatching, setStoppedWatching] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [blockedNotice, setBlockedNotice] = useState<string | null>(null);
 
   const transport = useMemo(
     () =>
@@ -156,9 +152,36 @@ export function PlaygroundChat({
     });
 
   const busy = status === 'submitted' || status === 'streaming';
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Admission blocks must not leave an orphaned user bubble — restore the draft instead.
+  useEffect(() => {
+    const message = error?.message;
+    if (!message || !isPlaygroundAdmissionBlock(message)) return;
+    setBlockedNotice(message);
+    const current = messagesRef.current;
+    const lastUser = [...current].reverse().find((entry) => entry.role === 'user');
+    const textPart = lastUser?.parts.find((part) => part.type === 'text');
+    if (textPart && 'text' in textPart && textPart.text.trim()) {
+      setDraft(textPart.text);
+    }
+    if (lastUser) {
+      const index = current.lastIndexOf(lastUser);
+      setMessages(current.slice(0, index));
+    }
+    clearError();
+  }, [error, clearError, setMessages]);
+
+  useEffect(() => {
+    if (runId) setDraft('');
+  }, [runId]);
 
   function onSubmit(input: string) {
     setFormError(null);
+    setBlockedNotice(null);
     const text = input.trim();
     if (!text) {
       setFormError('Paste a post or question with 1–16,000 characters.');
@@ -171,7 +194,14 @@ export function PlaygroundChat({
     const recipients = [recipient, otherRecipient].map((value) => value.trim()).filter(Boolean);
     setRunId(null);
     setStoppedWatching(false);
+    setDraft(text);
     void sendMessage({ text }, { body: { input: text, configurationId, recipients } });
+  }
+
+  function retryBlocked() {
+    const text = draft.trim();
+    if (!text) return;
+    onSubmit(text);
   }
 
   return (
@@ -190,6 +220,8 @@ export function PlaygroundChat({
               setMessages([]);
               clearError();
               setFormError(null);
+              setBlockedNotice(null);
+              setDraft('');
               setRunId(null);
               setStoppedWatching(false);
             }}
@@ -307,9 +339,13 @@ export function PlaygroundChat({
           busy={busy}
           runId={runId}
           stoppedWatching={stoppedWatching}
+          draft={draft}
+          onDraftChange={setDraft}
           streamError={error?.message}
           formError={formError}
+          blockedNotice={blockedNotice}
           onSubmit={onSubmit}
+          onRetry={retryBlocked}
           onAttachment={() => {
             setFormError(
               playgroundAttachmentRejection([{ filename: 'attachment' }]) ??
@@ -323,86 +359,6 @@ export function PlaygroundChat({
           }}
         />
       </div>
-    </div>
-  );
-}
-
-function PlaygroundComposer({
-  canSimulate,
-  busy,
-  runId,
-  stoppedWatching,
-  streamError,
-  formError,
-  onSubmit,
-  onAttachment,
-  onStopWatching,
-}: {
-  canSimulate: boolean;
-  busy: boolean;
-  runId: string | null;
-  stoppedWatching: boolean;
-  streamError?: string;
-  formError: string | null;
-  onSubmit: (input: string) => void;
-  onAttachment: () => void;
-  onStopWatching: () => void;
-}) {
-  const error = formError ?? streamError;
-
-  return (
-    <div className="playground-composer">
-      <PromptInput
-        className={cn('playground-prompt', !canSimulate && 'is-disabled')}
-        onAttachment={onAttachment}
-        onSubmit={onSubmit}
-      >
-        <PromptInputTextarea
-          aria-label="Post or question"
-          placeholder="Paste a post or question…"
-          disabled={!canSimulate || busy}
-          maxLength={16000}
-          className="resize-none border-0 bg-transparent shadow-none focus-visible:border-0 focus-visible:ring-0"
-        />
-        <PromptInputFooter>
-          <PromptInputTools>
-            <p className="simulation-note">
-              <ShieldCheck size={15} aria-hidden="true" />
-              <span>
-                Nothing is posted or sent. Model usage can incur charges. Save your configuration
-                before testing.
-              </span>
-            </p>
-          </PromptInputTools>
-          {busy && runId ? (
-            <Button type="button" size="sm" variant="outline" onClick={onStopWatching}>
-              Stop watching
-            </Button>
-          ) : (
-            <PromptInputSubmit
-              disabled={!canSimulate || busy}
-              size="icon-sm"
-              className="playground-submit"
-            >
-              <ArrowUp className="size-4" aria-hidden="true" />
-            </PromptInputSubmit>
-          )}
-        </PromptInputFooter>
-      </PromptInput>
-
-      {error && (
-        <p role="alert" className="form-error">
-          {error}
-        </p>
-      )}
-      {runId && (stoppedWatching || streamError) && (
-        <div className="playground-watch-notice">
-          {stoppedWatching && <span role="status">Stopped watching. Inference may continue.</span>}
-          <Link href={`?run=${runId}`} scroll={false} prefetch={false}>
-            Open run in History
-          </Link>
-        </div>
-      )}
     </div>
   );
 }

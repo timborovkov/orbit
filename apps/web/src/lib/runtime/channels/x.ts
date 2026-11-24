@@ -31,7 +31,8 @@ export const xChannel: ChannelAdapter = {
     },
   ],
   async schedule(tx, agentId, config) {
-    if (!config.xSearchQuery.trim()) return;
+    const { discoveryQueries } = await import('@/lib/runtime/config');
+    if (!discoveryQueries(config).length || config.xDiscoveryPaused) return;
     const { ensureDiscoveryPollJob } = await import('@/lib/runtime/x/poll');
     await ensureDiscoveryPollJob(agentId, tx);
   },

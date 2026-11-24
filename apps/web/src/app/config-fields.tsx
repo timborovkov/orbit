@@ -4,11 +4,12 @@ import { type ReactNode, useState } from 'react';
 
 import { Cpu, Fingerprint, Radar, SlidersHorizontal } from 'lucide-react';
 
+import { DiscoveryFields } from '@/app/discovery-fields';
 import { WorkspaceField } from '@/app/workspace-field';
 import { TermHint } from '@/components/term-hint';
-import { type AgentConfig, configFields } from '@/lib/runtime/config';
+import { type AgentConfig, configFields, discoverySettings } from '@/lib/runtime/config';
 
-const shortFields = new Set(['name', 'role', 'mainModel', 'evaluatorModel', 'xSearchQuery']);
+const shortFields = new Set(['name', 'role', 'mainModel', 'evaluatorModel']);
 const requiredFields = new Set(['name', 'mainModel', 'evaluatorModel']);
 const definitions = new Map<string, (typeof configFields)[number]>(
   configFields.map((field) => [field[0], field]),
@@ -34,7 +35,7 @@ const groups = [
     title: 'Discovery',
     icon: Radar,
     description: 'Configure proactive X search. Polling stays read-only in shadow mode.',
-    fields: ['xSearchQuery'],
+    fields: [] as string[],
   },
   {
     id: 'models',
@@ -48,14 +49,17 @@ export function ConfigFields({
   config,
   prefix,
   template = false,
+  agentId,
   identityContent,
 }: {
   config: AgentConfig;
   prefix: string;
   template?: boolean;
+  agentId?: string;
   identityContent?: ReactNode;
 }) {
   const [active, setActive] = useState('identity');
+  const discovery = discoverySettings(config);
   return (
     <div
       className="config-editor"
@@ -99,47 +103,54 @@ export function ConfigFields({
               <p className="muted">{group.description}</p>
             </div>
             {group.id === 'identity' && identityContent}
-            <div className={`editor-fields editor-fields-${group.id}`}>
-              {group.fields.map((key) => {
-                const definition = definitions.get(key);
-                if (!definition || (template && key === 'name')) return null;
-                const [name, label] = definition;
-                const short = shortFields.has(name);
-                return (
-                  <WorkspaceField
-                    key={name}
-                    id={`${prefix}-${name}`}
-                    name={name}
-                    label={label}
-                    initialValue={config[name]}
-                    required={requiredFields.has(name)}
-                    markdown={!short}
-                    compactMarkdown={name === 'personality'}
-                    description={
-                      name === 'mission'
-                        ? 'Describe the outcome this agent should work towards.'
-                        : undefined
-                    }
-                    maxLength={
-                      name === 'name'
-                        ? 80
-                        : name === 'mainModel' || name === 'evaluatorModel'
-                          ? 160
-                          : name === 'xSearchQuery'
-                            ? 512
+            {group.id === 'discovery' ? (
+              <DiscoveryFields
+                key={[
+                  discovery.queries.join('\u0001'),
+                  String(discovery.paused),
+                  String(discovery.maxPosts),
+                ].join('|')}
+                agentId={agentId}
+                prefix={prefix}
+                initialQueries={discovery.queries}
+                initialPaused={discovery.paused}
+                initialMaxPosts={discovery.maxPosts}
+              />
+            ) : (
+              <div className={`editor-fields editor-fields-${group.id}`}>
+                {group.fields.map((key) => {
+                  const definition = definitions.get(key);
+                  if (!definition || (template && key === 'name')) return null;
+                  const [name, label] = definition;
+                  const short = shortFields.has(name);
+                  return (
+                    <WorkspaceField
+                      key={name}
+                      id={`${prefix}-${name}`}
+                      name={name}
+                      label={label}
+                      initialValue={config[name as keyof AgentConfig] as string}
+                      required={requiredFields.has(name)}
+                      markdown={!short}
+                      compactMarkdown={name === 'personality'}
+                      description={
+                        name === 'mission'
+                          ? 'Describe the outcome this agent should work towards.'
+                          : undefined
+                      }
+                      maxLength={
+                        name === 'name'
+                          ? 80
+                          : name === 'mainModel' || name === 'evaluatorModel'
+                            ? 160
                             : name === 'mission'
                               ? 2000
                               : 12000
-                    }
-                  />
-                );
-              })}
-            </div>
-            {group.id === 'discovery' && (
-              <p className="field-hint">
-                One X recent-search query per agent. Leave blank to disable polling. New posts are
-                stored and evaluated in shadow mode; proposals are recorded and never sent.
-              </p>
+                      }
+                    />
+                  );
+                })}
+              </div>
             )}
             {group.id === 'models' && (
               <p className="field-hint">

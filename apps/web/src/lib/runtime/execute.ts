@@ -60,8 +60,10 @@ import {
   searchRunHistory,
   storeRelationshipNote,
 } from '@/lib/runtime/people/history';
+import { parseWebResearchSeeds } from '@/lib/runtime/research/seeds';
 import { webResearchTools } from '@/lib/runtime/research/tools';
 import { prepareRunTools } from '@/lib/runtime/resources';
+import { concurrencyBusyMessage, laneForOrigin, laneHasCapacity } from '@/lib/runtime/run-lanes';
 import {
   hasSimulationProgress,
   type ModelCall,
@@ -336,7 +338,11 @@ export async function enqueueSimulation({
     return admitRun(tx, agent, { actor, configurationId, input, recipients, origin: 'playground' });
   });
 
-  if ('error' in result) return { error: result.error };
+  if ('error' in result) {
+    return 'notice' in result && result.notice
+      ? { error: result.error, notice: result.notice }
+      : { error: result.error };
+  }
   return {
     message: 'Simulation queued. The worker will run it shortly.',
     runId: result.runId,
@@ -370,22 +376,39 @@ export async function admitRun(
   await expireStaleRuns(tx, agent);
 
   const budgets = parseBudgets(agent.budgets);
-  const active = (
-    await tx
-      .select({ id: runs.id })
-      .from(runs)
-      .where(
-        and(
-          eq(runs.agentId, agentId),
-          inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
-        ),
-      )
-  ).length;
-  if (active >= budgets.maxConcurrentRuns) {
+  const activeRows = await tx
+    .select({
+      id: runs.id,
+      origin: runs.origin,
+      status: runs.status,
+      createdAt: runs.createdAt,
+    })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.agentId, agentId),
+        inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
+      ),
+    );
+  const lane = laneForOrigin(origin);
+  // Interactive (Playground) admissions ignore background discovery/email occupancy.
+  if (!laneHasCapacity(activeRows, lane, budgets.maxConcurrentRuns)) {
+    const busy =
+      lane === 'interactive'
+        ? activeRows.find((row) => laneForOrigin(row.origin) === 'interactive')
+        : activeRows[0];
     return {
       error: budgetViolationMessage('concurrency'),
+      notice: concurrencyBusyMessage(busy, {
+        retryHint:
+          lane === 'interactive'
+            ? 'Keep your message and retry once that run finishes, or open History to watch it.'
+            : 'Work was deferred and will retry when a slot opens.',
+      }),
       waitForCapacity: true as const,
       budgetViolation: 'concurrency' as const,
+      busyOrigin: busy?.origin ?? null,
+      busyStatus: busy?.status ?? null,
     };
   }
 
@@ -406,7 +429,7 @@ export async function admitRun(
       requests: month?.requests ?? 0,
       outboundActions: month?.outboundActions ?? 0,
     },
-    activeRuns: active,
+    activeRuns: activeRows.length,
   };
   const violation = checkRequestBudgets({ ...snapshot, activeRuns: 0 });
   if (violation && violation !== 'concurrency') {
@@ -985,6 +1008,7 @@ async function processSimulationRun(
                       calls: resources.toolCalls,
                       signal: requestSignal,
                       executionToken,
+                      seeds: parseWebResearchSeeds(agent.webResearchSeeds),
                     }),
                   })
                 : undefined,
