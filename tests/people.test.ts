@@ -15,6 +15,7 @@ import { processEmailDraftJob, processSimulationJob } from '@/lib/runtime/execut
 import {
   getPersonContextForAgent,
   listPersonInteractions,
+  loadRelationshipContext,
   searchRunHistory,
 } from '@/lib/runtime/people/history';
 import type { ModelCall } from '@/lib/runtime/simulation';
@@ -676,4 +677,48 @@ test('history returns text around a late match and keeps normalized channel thre
   expect(matches[0]!.excerpt.length).toBeLessThanOrEqual(400);
   expect(matches[0]!.excerpt).not.toMatch(/[\u0001\u0002]/u);
   expect((await searchRunHistory(owner.id, current, '', 4))[0]!.excerpt).toBe(body.slice(0, 400));
+});
+
+test('a delivered X reply appears in person history and the evaluator prior-reply context', async () => {
+  const author = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  identityKeys.push(author);
+  const owner = await agent('X reply history');
+  await observe(owner.id, '200', author, 'riley_x', 'Can you help with onboarding?', true);
+  const [post] = await sql<{ run_id: string }[]>`
+    select run_id from source_events where agent_id = ${owner.id} and provider_event_id = '200'`;
+  await processSimulationJob(
+    { runId: post.run_id },
+    inference('Asked about onboarding.', 'onboarding'),
+  );
+  const [intent] = await sql<{ id: string }[]>`
+    insert into action_intents (agent_id, run_id, action_type, recipients, payload, idempotency_key, decision, reasons)
+    values (${owner.id}, ${post.run_id}, 'x.reply', ${sql.json([`x:${author}`])}, '{}', ${randomUUID()}, 'allow', '[]')
+    returning id`;
+  await sql`
+    insert into outbound_actions (agent_id, intent_id, action_type, status, idempotency_key, body, provider, provider_message_id, completed_at)
+    values (${owner.id}, ${intent.id}, 'x.reply', 'sent', ${randomUUID()}, 'Happy to help.', 'x', '90001', now())`;
+  await observe(owner.id, '201', author, 'riley_x', 'Following up on onboarding.', true);
+  const [later] = await sql<{ run_id: string }[]>`
+    select run_id from source_events where agent_id = ${owner.id} and provider_event_id = '201'`;
+  await processSimulationJob({ runId: later.run_id }, inference('Follow-up.', 'Following up'));
+
+  const context = await loadRelationshipContext(owner.id, later.run_id);
+  expect(context.filter(({ kind }) => kind === 'reply')).toEqual([
+    expect.objectContaining({ title: 'Can you help with onboarding?' }),
+  ]);
+  const identity = await identityFor('x', author);
+  const history = await listPersonInteractions(identity.person_id, 1);
+  expect(history.interactions.filter(({ sent }) => sent)).toEqual([
+    expect.objectContaining({ kind: 'reply', channel: 'x' }),
+  ]);
+  const scoped = await getPersonContextForAgent(owner.id, identity.person_id);
+  expect(scoped.interactions.filter(({ sent }) => sent)).toHaveLength(1);
+
+  await sql`update action_intents set recipients = ${sql.json(['x:999999'])} where id = ${intent.id}`;
+  expect(
+    (await loadRelationshipContext(owner.id, later.run_id)).filter(({ kind }) => kind === 'reply'),
+  ).toHaveLength(0);
+  expect(
+    (await listPersonInteractions(identity.person_id, 1)).interactions.filter(({ sent }) => sent),
+  ).toHaveLength(0);
 });
