@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 
 import {
   concurrencyBusyMessage,
+  countCompetingActiveRuns,
   countRunsBlockingLane,
   laneForOrigin,
   laneHasCapacity,
@@ -38,4 +39,21 @@ test('busy labels describe discovery occupancy', () => {
   expect(concurrencyBusyMessage({ id: '1', origin: 'discovery', status: 'running' })).toContain(
     'X discovery is running',
   );
+});
+
+test('in-run competing count isolates interactive and background lanes', () => {
+  const active = [
+    { id: 'bg-1', origin: 'discovery', status: 'running' },
+    { id: 'pg-1', origin: 'playground', status: 'running' },
+  ];
+  expect(countCompetingActiveRuns(active, null)).toBe(2);
+  expect(countCompetingActiveRuns(active, { id: 'pg-1', origin: 'playground' })).toBe(0);
+  expect(countCompetingActiveRuns(active, { id: 'bg-1', origin: 'discovery' })).toBe(0);
+
+  const twoPlayground = [...active, { id: 'pg-2', origin: 'playground', status: 'queued' }];
+  expect(countCompetingActiveRuns(twoPlayground, { id: 'pg-1', origin: 'playground' })).toBe(1);
+  expect(countCompetingActiveRuns(twoPlayground, { id: 'bg-1', origin: 'discovery' })).toBe(0);
+
+  const twoBackground = [...active, { id: 'bg-2', origin: 'email', status: 'running' }];
+  expect(countCompetingActiveRuns(twoBackground, { id: 'bg-1', origin: 'discovery' })).toBe(1);
 });

@@ -338,7 +338,11 @@ export async function enqueueSimulation({
     return admitRun(tx, agent, { actor, configurationId, input, recipients, origin: 'playground' });
   });
 
-  if ('error' in result) return { error: result.error };
+  if ('error' in result) {
+    return 'notice' in result && result.notice
+      ? { error: result.error, notice: result.notice }
+      : { error: result.error };
+  }
   return {
     message: 'Simulation queued. The worker will run it shortly.',
     runId: result.runId,
@@ -394,7 +398,8 @@ export async function admitRun(
         ? activeRows.find((row) => laneForOrigin(row.origin) === 'interactive')
         : activeRows[0];
     return {
-      error: concurrencyBusyMessage(busy, {
+      error: budgetViolationMessage('concurrency'),
+      notice: concurrencyBusyMessage(busy, {
         retryHint:
           lane === 'interactive'
             ? 'Keep your message and retry once that run finishes, or open History to watch it.'

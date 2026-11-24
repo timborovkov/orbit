@@ -641,6 +641,45 @@ test('read-only authorization still enforces concurrency from the policy snapsho
   );
   expect(denied.decision).toBe('deny');
   expect(denied.violation).toBe('concurrency');
+
+  // Inside an already-admitted run, load_skill and read-only MCP do not open another run slot.
+  const inRunPolicy = {
+    ...policy,
+    runId: '11111111-1111-4111-8111-111111111111',
+    runOrigin: 'playground' as const,
+    budgets: budgetDefaults,
+    usage: {
+      spendMicros: BigInt(0),
+      requests: 0,
+      outboundActions: 0,
+      month: { spendMicros: BigInt(0), requests: 0, outboundActions: 0 },
+      activeRuns: 1,
+    },
+  };
+  expect(
+    evaluateCandidate(
+      inRunPolicy,
+      {
+        type: LOAD_SKILL_TOOL,
+        readOnly: true,
+        idempotencyKey: 'in-run-skill-allowed',
+      },
+      null,
+      false,
+    ).decision,
+  ).toBe('allow');
+  expect(
+    evaluateCandidate(
+      inRunPolicy,
+      {
+        type: mcpToolId('crm', 'search'),
+        readOnly: true,
+        idempotencyKey: 'in-run-mcp-allowed',
+      },
+      null,
+      true,
+    ).decision,
+  ).toBe('allow');
 });
 
 test('MCP model-facing aliases are OpenAI-compatible while policy keeps canonical ids', () => {

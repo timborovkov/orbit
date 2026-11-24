@@ -35,6 +35,23 @@ export function laneHasCapacity(
   return countRunsBlockingLane(active, lane) < maxConcurrentRuns;
 }
 
+/**
+ * Count active runs that compete with an already-admitted run under `maxConcurrentRuns`.
+ * Standalone policy checks (`currentRun` omitted) count every active run.
+ * Admitted runs exclude themselves and count only runs in the same lane so an interactive
+ * Playground run and a background run do not block each other's in-run tool calls.
+ */
+export function countCompetingActiveRuns(
+  active: readonly ActiveRunSnapshot[],
+  currentRun?: { id: string; origin?: string | null } | null,
+): number {
+  if (!currentRun) return active.length;
+  const others = active.filter((run) => run.id !== currentRun.id);
+  if (!currentRun.origin) return others.length;
+  const lane = laneForOrigin(currentRun.origin);
+  return others.filter((run) => laneForOrigin(run.origin) === lane).length;
+}
+
 const originLabels: Record<string, string> = {
   playground: 'Playground test',
   discovery: 'X discovery',

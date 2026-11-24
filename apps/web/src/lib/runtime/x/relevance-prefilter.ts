@@ -118,6 +118,14 @@ export function scoreDiscoveryRelevance(
   postText: string,
   criteria: RelevanceCriteria,
 ): RelevanceDecision {
+  if (criteria.hints?.some((hint) => hint.trim() === '*')) {
+    return {
+      relevant: true,
+      score: 1,
+      matchedTerms: [],
+      reason: 'Wildcard query bypasses pre-filter.',
+    };
+  }
   const wanted = criteriaTerms(criteria);
   if (wanted.length === 0) {
     return {

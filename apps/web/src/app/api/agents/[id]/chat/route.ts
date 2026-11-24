@@ -52,7 +52,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const queued = await enqueueSimulation({ actor, agentId, ...parsed });
 
       if ('error' in queued && queued.error) {
-        writer.write({ type: 'error', errorText: queued.error });
+        const errorText = 'notice' in queued && queued.notice ? queued.notice : queued.error;
+        writer.write({ type: 'error', errorText });
         writer.write({ type: 'finish', finishReason: 'error' });
         return;
       }

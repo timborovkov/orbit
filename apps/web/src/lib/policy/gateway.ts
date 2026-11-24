@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { notifyApprovalPending } from '@/lib/approvals/notify';
 import { actionNeedsApproval, mergeApprovalTools } from '@/lib/approvals/rules';
@@ -32,6 +32,7 @@ import {
   memoryCaptureOrigin,
 } from '@/lib/runtime/memory/types';
 import { crawlAllowed, publicPageUrl } from '@/lib/runtime/research/urls';
+import { countCompetingActiveRuns } from '@/lib/runtime/run-lanes';
 import {
   actionIntents,
   agentMcpConnections,
@@ -134,23 +135,22 @@ export async function loadPolicyContext(
     .where(eq(usageCounters.agentId, agentId));
   const day = counters.find((row) => row.period === 'day' && row.periodStart === today);
   const month = counters.find((row) => row.period === 'month' && row.periodStart === monthStart);
-  // Exclude the already-admitted run so in-run tool authorization does not trip
-  // maxConcurrentRuns (defaults to 1). Admission still counts other runs.
-  // awaiting_approval holds a concurrency slot until review resumes or rejects.
-  const active = runId
-    ? await store.execute(sql`
-        SELECT count(*)::int AS count FROM simulation_runs
-        WHERE agent_id = ${agentId}
-          AND status IN ('queued','running','awaiting_approval')
-          AND id <> ${runId}
-      `)
-    : await store.execute(sql`
-        SELECT count(*)::int AS count FROM simulation_runs
-        WHERE agent_id = ${agentId} AND status IN ('queued','running','awaiting_approval')
-      `);
-  const activeRows = Array.isArray(active) ? active : [];
-  const first = activeRows[0] as { count?: number } | undefined;
-  const activeRuns = first?.count ?? 0;
+  // Exclude the already-admitted run and cross-lane occupancy so in-run tool
+  // authorization does not trip maxConcurrentRuns (defaults to 1) when an interactive
+  // Playground run coexists with a background run.
+  const activeRows = await store
+    .select({ id: runs.id, origin: runs.origin, status: runs.status })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.agentId, agentId),
+        inArray(runs.status, ['queued', 'running', 'awaiting_approval']),
+      ),
+    );
+  const activeRuns = countCompetingActiveRuns(
+    activeRows,
+    runId ? { id: runId, origin: runRow?.origin } : null,
+  );
 
   return {
     actor,
@@ -303,6 +303,7 @@ export function evaluateCandidate(
     }
   }
   const isMcp = action.type.startsWith('mcp:');
+  const inRunTool = action.type === 'load_skill' || isMcp;
   const registered = channelAction(action.type);
   if (registered && ctx.executionContext !== 'replay' && registered.channel !== ctx.runChannel) {
     return { decision: 'deny', reasons: ['Action is unavailable for this run’s channel.'] };
@@ -347,9 +348,11 @@ export function evaluateCandidate(
       outboundActions: ctx.usage.outboundActions,
     },
     month: ctx.usage.month,
-    // A search inside an already admitted run does not open another concurrency slot.
+    // Tools inside an already admitted run do not open another concurrency slot.
     activeRuns:
-      ctx.runId && (web || action.type === KNOWLEDGE_SEARCH_TOOL) ? 0 : ctx.usage.activeRuns,
+      ctx.runId && (web || action.type === KNOWLEDGE_SEARCH_TOOL || inRunTool)
+        ? 0
+        : ctx.usage.activeRuns,
   };
 
   if (!action.readOnly) {
@@ -413,7 +416,6 @@ export function evaluateCandidate(
 
   // load_skill and authorized MCP tools add neither inference requests nor spend —
   // the stage reservation already covers them (and may exactly fill the spend cap).
-  const inRunTool = action.type === 'load_skill' || isMcp;
   const requestLimit = inRunTool
     ? checkRequestBudgets(snapshot, BigInt(0), 0, { checkSpend: false })
     : checkRequestBudgets(snapshot, BigInt(0), 1, { checkSpend: !web });
