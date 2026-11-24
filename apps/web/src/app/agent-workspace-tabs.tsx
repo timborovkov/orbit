@@ -222,7 +222,6 @@ export function AgentWorkspaceTabs({
               activityEvents={activityEvents}
               webResearch={webResearch}
               focusRunId={focusRunId}
-              versionFor={versionFor}
             />
           ),
         },

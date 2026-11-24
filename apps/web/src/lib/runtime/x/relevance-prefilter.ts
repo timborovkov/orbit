@@ -90,24 +90,35 @@ const STOPWORDS = new Set([
   'rt',
 ]);
 
-/** Extract meaningful tokens (length ≥ 3, not stopwords). */
+/** Extract meaningful tokens (length ≥ 3, not stopwords). Unicode-aware. */
 export function extractRelevanceTerms(text: string): string[] {
   const seen = new Set<string>();
   const terms: string[] = [];
-  for (const raw of text.toLowerCase().match(/[a-z0-9][a-z0-9'+-]{2,}/g) ?? []) {
-    const term = raw.replace(/^'+|'+$/g, '');
-    if (term.length < 3 || STOPWORDS.has(term) || seen.has(term)) continue;
+  for (const raw of text.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'+-]*/gu) ?? []) {
+    const term = raw.replace(/^['+-]+|['+-]+$/g, '');
+    const minLength = /^\p{ASCII}*$/u.test(term) ? 3 : 2;
+    if (term.length < minLength || STOPWORDS.has(term) || seen.has(term)) continue;
     seen.add(term);
     terms.push(term);
   }
   return terms;
 }
 
+/** Drop X search operators (`lang:ja`, `-negated`, `from:user`) so they are not treated as wanted words. */
+function stripQueryOperators(text: string): string {
+  return text.replace(/(^|\s)-\S+/g, ' ').replace(/\S+:\S*/g, ' ');
+}
+
 function criteriaTerms(criteria: RelevanceCriteria): string[] {
-  const blobs = [criteria.mission, criteria.engagementCriteria, ...(criteria.hints ?? [])]
+  const blobs = [criteria.mission, criteria.engagementCriteria]
+    .concat((criteria.hints ?? []).map(stripQueryOperators))
     .filter((value): value is string => Boolean(value?.trim()))
     .join('\n');
   return extractRelevanceTerms(blobs);
+}
+
+function isAsciiTerm(term: string): boolean {
+  return /^\p{ASCII}*$/u.test(term);
 }
 
 /**
@@ -137,7 +148,11 @@ export function scoreDiscoveryRelevance(
   }
 
   const haystack = new Set(extractRelevanceTerms(postText));
-  const matchedTerms = wanted.filter((term) => haystack.has(term));
+  const lowerPost = postText.toLowerCase();
+  // Scripts without word spaces (e.g. Japanese) tokenize into long runs, so also match by substring.
+  const matchedTerms = wanted.filter(
+    (term) => haystack.has(term) || (!isAsciiTerm(term) && lowerPost.includes(term)),
+  );
   const score = matchedTerms.length / Math.min(wanted.length, 12);
 
   if (matchedTerms.length === 0) {

@@ -49,7 +49,6 @@ export function HistoryWorkbench({
   activityEvents,
   webResearch,
   focusRunId,
-  versionFor,
 }: {
   agentId: string;
   history: WorkspaceHistory;
@@ -57,8 +56,9 @@ export function HistoryWorkbench({
   activityEvents: ActivityEventRow[];
   webResearch: WebResearchActivity;
   focusRunId?: string;
-  versionFor: (configurationId: string) => number | string;
 }) {
+  const versionFor = (configurationId: string) =>
+    versions.find((version) => version.id === configurationId)?.version ?? '—';
   const [filters, setFilters] = useState<HistoryFilters>(defaultHistoryFilters);
   const sources = useMemo(() => uniqueHistorySources(history), [history]);
   const filtered = useMemo(() => filterHistoryRuns(history, filters), [history, filters]);

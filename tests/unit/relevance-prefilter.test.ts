@@ -52,3 +52,15 @@ test('prefilterDiscoveryPosts and capDiscoveryPosts enforce keep/drop/cap', () =
   expect(capDiscoveryPosts(kept, 1)).toHaveLength(1);
   expect(capDiscoveryPosts(kept, 50)).toHaveLength(2);
 });
+
+test('keeps non-Latin posts and ignores query operators', () => {
+  const criteria = { hints: ['開発者 lang:ja'] };
+  expect(scoreDiscoveryRelevance('日本の開発者向けイベント', criteria).relevant).toBe(true);
+  expect(scoreDiscoveryRelevance('Completely unrelated english', criteria).relevant).toBe(false);
+});
+
+test('operators alone do not become wanted terms', () => {
+  const decision = scoreDiscoveryRelevance('about lang things', { hints: ['lang:ja -from:bot'] });
+  expect(decision.relevant).toBe(true);
+  expect(decision.reason).toContain('skipped');
+});
