@@ -8,13 +8,11 @@ import { z } from 'zod';
 import { saveConfiguration } from '@/actions/workspace';
 import { AccessWorkbench } from '@/app/access-workbench';
 import { AgentAvatar } from '@/app/agent-avatar';
+import { buildAgentWorkspaceTabs } from '@/app/agent-workspace-panels';
+import { ApprovalPendingNotice } from '@/app/approval-pending-notice';
 import { ConfigFields } from '@/app/config-fields';
-import { EmailInbox } from '@/app/email-inbox';
-import { FollowUpsWorkbench } from '@/app/follow-ups-workbench';
 import { HistoryWorkbench } from '@/app/history-workbench';
-import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
 import { LoadingStatus } from '@/app/loading-status';
-import { MemoryWorkbench } from '@/app/memory-workbench';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { PlaygroundPanel } from '@/app/playground-panel';
 import { ProposalReview } from '@/app/policy-settings';
@@ -24,7 +22,6 @@ import { WorkspaceHeader } from '@/app/workspace-header';
 import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
-import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
 import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
 import { ACTIVE_CRAWL_STATES, type CrawlStatus } from '@/lib/research';
 import { channelGrantOptions } from '@/lib/runtime/channels/registry';
@@ -171,6 +168,7 @@ export default async function AgentWorkspace({
         <ConfigFields
           config={current.config}
           prefix="agent"
+          agentId={id}
           identityContent={
             <ProfilePictureEditor
               id={id}
@@ -236,6 +234,9 @@ export default async function AgentWorkspace({
       versionFor={versionFor}
     />
   );
+  const versionLabels = Object.fromEntries(
+    versions.map((version) => [version.id, version.version]),
+  );
   const historyPanel = (
     <HistoryWorkbench
       agentId={id}
@@ -244,7 +245,7 @@ export default async function AgentWorkspace({
       activityEvents={activityEvents}
       webResearch={webResearch}
       focusRunId={focusRunId}
-      versionFor={versionFor}
+      versionLabels={versionLabels}
     />
   );
   return (
@@ -286,6 +287,10 @@ export default async function AgentWorkspace({
           refreshAt={followUpRefresh.refreshAt}
           intervalMs={hasActiveWork ? undefined : followUpRefresh.intervalMs}
         />
+        <ApprovalPendingNotice
+          agentId={id}
+          pendingCount={reviews.filter((review) => review.status === 'pending').length}
+        />
         <Suspense
           fallback={
             <div className="workspace-tab-panel">
@@ -295,74 +300,31 @@ export default async function AgentWorkspace({
         >
           <WorkspaceTabs
             key={id}
-            items={[
-              { id: 'configure', label: 'Configuration', content: configuration },
-              { id: 'playground', label: 'Playground', content: playground },
-              {
-                id: 'knowledge',
-                label: 'Knowledge',
-                count: knowledgeDocumentCount,
-                content: (
-                  <KnowledgeWorkbench
-                    agentId={id}
-                    documents={knowledgeDocuments}
-                    sharedLibraries={sharedLibraries}
-                    storageReady={storageConfigured()}
-                    searchEnabled={agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)}
-                  />
-                ),
-              },
-              {
-                id: 'memory',
-                label: 'Memory',
-                content: (
-                  <MemoryWorkbench
-                    agentId={id}
-                    rows={memory.rows}
-                    page={memoryPage}
-                    hasMore={memory.hasMore}
-                    today={today}
-                    retention={{
-                      factDays: agent.memoryFactRetentionDays,
-                      noteDays: agent.memoryNoteRetentionDays,
-                      outcomeDays: agent.memoryOutcomeRetentionDays,
-                      intervalDays: agent.memoryMaintenanceIntervalDays,
-                    }}
-                  />
-                ),
-              },
-              {
-                id: 'email',
-                label: 'Email',
-                content: (
-                  <EmailInbox
-                    agentId={id}
-                    inbox={inbox}
-                    page={emailPage}
-                    messagePage={inbox.messagePage}
-                  />
-                ),
-              },
-              {
-                id: 'follow-ups',
-                label: 'Follow-ups',
-                count: followUps.length,
-                content: <FollowUpsWorkbench agentId={id} items={followUps} />,
-              },
-              {
-                id: 'history',
-                label: 'History',
-                count: history.length + activityEvents.length,
-                content: historyPanel,
-              },
-              {
-                id: 'approvals',
-                label: 'Approvals',
-                count: reviews.filter((review) => review.status === 'pending').length,
-                content: approvalQueue,
-              },
-              { id: 'access', label: 'Access', content: access },
-            ]}
+            items={buildAgentWorkspaceTabs({
+              id,
+              enabledTools: agent.enabledTools,
+              memoryFactRetentionDays: agent.memoryFactRetentionDays,
+              memoryNoteRetentionDays: agent.memoryNoteRetentionDays,
+              memoryOutcomeRetentionDays: agent.memoryOutcomeRetentionDays,
+              memoryMaintenanceIntervalDays: agent.memoryMaintenanceIntervalDays,
+              knowledgeDocuments,
+              sharedLibraries,
+              knowledgeDocumentCount,
+              memoryRows: memory.rows,
+              memoryPage,
+              memoryHasMore: memory.hasMore,
+              today,
+              inbox,
+              emailPage,
+              followUps,
+              historyCount: history.length + activityEvents.length,
+              historyPanel,
+              configuration,
+              playground,
+              access,
+              approvalQueue,
+              pendingApprovals: reviews.filter((review) => review.status === 'pending').length,
+            })}
           />
         </Suspense>
       </main>

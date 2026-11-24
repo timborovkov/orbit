@@ -26,7 +26,11 @@ export function WorkspaceTabs({
   const requestedTab = search.get('tab');
   const linkedTab = historyRunId
     ? 'history'
-    : requestedTab === 'email' || requestedTab === 'memory'
+    : requestedTab === 'email' ||
+        requestedTab === 'memory' ||
+        requestedTab === 'approvals' ||
+        requestedTab === 'history' ||
+        requestedTab === 'playground'
       ? requestedTab
       : undefined;
   const selected = linkedTab ?? selectedTab ?? items.at(0)?.id;
