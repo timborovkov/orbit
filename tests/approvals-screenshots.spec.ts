@@ -118,7 +118,7 @@ async function seedApprovals() {
 
 async function openAccessApprovals(page: Page) {
   await openWorkspaceTab(page, 'Access');
-  await openAccessSection(page, 'Approvals');
+  await openAccessSection(page, 'Approval rules');
   await expect(page.getByTestId('approval-settings')).toBeVisible();
 }
 

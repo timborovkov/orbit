@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-import { Inbox } from 'lucide-react';
+import { Inbox, TriangleAlert } from 'lucide-react';
 
 import { savePeopleGrant } from '@/actions/introductions';
 import {
@@ -14,6 +14,7 @@ import { ActionRequirementsForm } from '@/app/action-requirements-form';
 import { ApprovalToolsForm } from '@/app/approval-tools-form';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Empty,
   EmptyDescription,
@@ -75,7 +76,7 @@ export function ReviewSettings({
   return (
     <section className="access-workbench" data-testid="approval-settings">
       <div className="editor-section-heading">
-        <h2>Approval requirements</h2>
+        <h2>Approval rules</h2>
         <p className="muted">
           Off by default. Enable actions that must pause for an administrator before continuing.
           People introductions enter review after both participants agree.
@@ -90,67 +91,105 @@ export function ReviewSettings({
         approvalSpendCents={approvalSpendCents}
         channelActions={channelActions.filter((action) => !action.alwaysRequiresApproval)}
       />
-      {channelActions.length > 0 && (
-        <section className="space-y-4" aria-labelledby="channel-actions">
-          <h2 id="channel-actions">Channel permissions</h2>
-          {channelActions.map((action) => (
-            <WorkspaceForm
-              key={action.type}
-              action={saveChannelGrant}
-              label={`${action.enabled ? 'Disable' : 'Enable'} ${action.label}`}
-            >
-              <input type="hidden" name="agentId" value={agentId} />
-              <input type="hidden" name="type" value={action.type} />
-              <input type="hidden" name="enabled" value={String(!action.enabled)} />
-              <p>
-                {action.label} · {action.enabled ? 'Enabled' : 'Disabled'}
-              </p>
-            </WorkspaceForm>
-          ))}
-        </section>
-      )}
-      <section className="space-y-4" aria-labelledby="x-reply-account">
-        <h2 id="x-reply-account">X account</h2>
-        <p className="muted">
-          {xAccount ? `Connected as @${xAccount}` : 'Connect an X user to deliver replies.'} In
-          Live, the X reply grant sends eligible replies automatically unless an approval rule
-          applies.
-        </p>
-        <WorkspaceForm
-          action={saveXReplyConnection}
-          label={xAccount ? 'Replace X token' : 'Connect X account'}
-        >
-          <input type="hidden" name="agentId" value={agentId} />
-          <FieldGroup className="gap-4">
-            <Field>
-              <FieldLabel htmlFor="x-user-token">X user access token</FieldLabel>
-              <Input
-                id="x-user-token"
-                name="token"
-                type="password"
-                autoComplete="new-password"
-                aria-describedby="x-user-token-help"
-                required
-                maxLength={4096}
-              />
-              <FieldDescription id="x-user-token-help">
-                Use a user token with tweet.read, tweet.write and users.read access.
-              </FieldDescription>
-            </Field>
-            <Field orientation="horizontal">
-              <input type="checkbox" id="x-platform-approval" name="platformApproval" required />
-              <FieldLabel htmlFor="x-platform-approval">
-                X has approved this account for AI replies.
-              </FieldLabel>
-            </Field>
-          </FieldGroup>
-        </WorkspaceForm>
-        {xAccount && (
-          <WorkspaceForm action={saveXReplyConnection} label="Disconnect X account">
-            <input type="hidden" name="agentId" value={agentId} />
-            <input type="hidden" name="disconnect" value="true" />
-          </WorkspaceForm>
-        )}
+      <section
+        className="live-sending"
+        data-testid="live-sending"
+        aria-labelledby="live-sending-title"
+      >
+        <div className="live-sending-header">
+          <TriangleAlert className="live-sending-icon" size={18} aria-hidden="true" />
+          <div>
+            <h3 id="live-sending-title">Live sending</h3>
+            <p>
+              These controls can publish to X when the agent is Live. Review the connected account
+              and permissions before changing them.
+            </p>
+          </div>
+        </div>
+        <div className="access-card-stack">
+          {channelActions.length > 0 && (
+            <Card className="access-card shadow-none">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base" role="heading" aria-level={4}>
+                  Channel permissions
+                </CardTitle>
+                <CardDescription>
+                  Allow specific outbound actions on connected channels.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="access-card-stack">
+                {channelActions.map((action) => (
+                  <WorkspaceForm
+                    key={action.type}
+                    action={saveChannelGrant}
+                    label={`${action.enabled ? 'Disable' : 'Enable'} ${action.label}`}
+                  >
+                    <input type="hidden" name="agentId" value={agentId} />
+                    <input type="hidden" name="type" value={action.type} />
+                    <input type="hidden" name="enabled" value={String(!action.enabled)} />
+                    <p>
+                      {action.label} · {action.enabled ? 'Enabled' : 'Disabled'}
+                    </p>
+                  </WorkspaceForm>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+          <Card className="access-card shadow-none">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base" role="heading" aria-level={4}>
+                X account
+              </CardTitle>
+              <CardDescription>
+                {xAccount
+                  ? `Connected as @${xAccount}. In Live, eligible replies can send unless an approval rule applies.`
+                  : 'Connect an X user to deliver replies. In Live, eligible replies can send unless an approval rule applies.'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="access-card-stack">
+              <WorkspaceForm
+                action={saveXReplyConnection}
+                label={xAccount ? 'Replace X token' : 'Connect X account'}
+              >
+                <input type="hidden" name="agentId" value={agentId} />
+                <FieldGroup className="gap-4">
+                  <Field>
+                    <FieldLabel htmlFor="x-user-token">X user access token</FieldLabel>
+                    <Input
+                      id="x-user-token"
+                      name="token"
+                      type="password"
+                      autoComplete="new-password"
+                      aria-describedby="x-user-token-help"
+                      required
+                      maxLength={4096}
+                    />
+                    <FieldDescription id="x-user-token-help">
+                      Use a user token with tweet.read, tweet.write and users.read access.
+                    </FieldDescription>
+                  </Field>
+                  <Field orientation="horizontal">
+                    <input
+                      type="checkbox"
+                      id="x-platform-approval"
+                      name="platformApproval"
+                      required
+                    />
+                    <FieldLabel htmlFor="x-platform-approval">
+                      X has approved this account for AI replies.
+                    </FieldLabel>
+                  </Field>
+                </FieldGroup>
+              </WorkspaceForm>
+              {xAccount && (
+                <WorkspaceForm action={saveXReplyConnection} label="Disconnect X account">
+                  <input type="hidden" name="agentId" value={agentId} />
+                  <input type="hidden" name="disconnect" value="true" />
+                </WorkspaceForm>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </section>
     </section>
   );
@@ -282,6 +321,13 @@ export function ProposalReview({
       <div className="editor-section-heading">
         <h2 id="proposal-review-title">Proposal review</h2>
         <p className="muted">Review pending proposals and find past decisions.</p>
+        <p className="muted">
+          Change which actions need approval in{' '}
+          <Link href={`/agents/${agentId}?tab=access&access=approvals`}>
+            Access → Approval rules
+          </Link>
+          , or review every agent in <Link href="/approvals">Approvals</Link>.
+        </p>
       </div>
       {reviews.length === 0 ? (
         <Empty className="border border-border py-10 md:py-12">
