@@ -10,7 +10,7 @@ import {
   type EvaluationComparisonRow,
   EvaluationLists,
 } from '@/app/evaluation-lists';
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import {
   Select,
   SelectContent,
@@ -30,6 +30,27 @@ interface VersionRow {
 function firstAgentId(agents: { id: string }[], preferred?: string) {
   if (preferred && agents.some((agent) => agent.id === preferred)) return preferred;
   return agents[0]?.id ?? '';
+}
+
+function versionLabel(version: VersionRow, currentVersion: number) {
+  return version.version === currentVersion
+    ? `v${version.version} (current)`
+    : `v${version.version}`;
+}
+
+function comparisonBlocker(
+  agentCount: number,
+  caseCount: number,
+  versionCount: number,
+): string | null {
+  if (agentCount === 0) return 'Create an agent before starting a comparison.';
+  if (caseCount === 0) {
+    return 'Save a run or inbound message as a case for this agent before comparing.';
+  }
+  if (versionCount < 2) {
+    return 'This agent needs at least two configuration versions. Save a configuration change to create another.';
+  }
+  return null;
 }
 
 function versionsFor(versions: VersionRow[], agentId: string) {
@@ -66,6 +87,8 @@ export function EvaluationsWorkbench({
   const agentCases = cases.filter((row) => row.agentId === selectedAgent);
   const selectedCase = agentCases.find((row) => row.id === caseId) ?? agentCases.at(0);
   const currentVersions = versionsFor(versions, selectedAgent);
+  const currentVersion = Math.max(0, ...currentVersions.map((row) => row.version));
+  const blocker = comparisonBlocker(agents.length, agentCases.length, currentVersions.length);
 
   return (
     <div className="evaluations-workbench">
@@ -128,7 +151,7 @@ export function EvaluationsWorkbench({
                   <SelectContent>
                     {agents.map((agent) => (
                       <SelectItem key={agent.id} value={agent.id}>
-                        {agent.name}
+                        <span>{agent.name}</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -167,8 +190,7 @@ export function EvaluationsWorkbench({
                   <SelectContent>
                     {currentVersions.map((version) => (
                       <SelectItem key={version.id} value={version.id}>
-                        v{version.version}
-                        {version.name ? ` · ${version.name}` : ''}
+                        {versionLabel(version, currentVersion)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -188,8 +210,7 @@ export function EvaluationsWorkbench({
                   <SelectContent>
                     {currentVersions.map((version) => (
                       <SelectItem key={version.id} value={version.id}>
-                        v{version.version}
-                        {version.name ? ` · ${version.name}` : ''}
+                        {versionLabel(version, currentVersion)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -198,12 +219,10 @@ export function EvaluationsWorkbench({
             </FieldGroup>
             {error && <FieldError>{error}</FieldError>}
             <div className="workspace-form-footer">
-              <SubmitButton
-                disabled={pending || !selectedCase || currentVersions.length < 2}
-                pendingLabel="Queuing…"
-              >
+              <SubmitButton disabled={pending || blocker !== null} pendingLabel="Queuing…">
                 {pending ? 'Queuing…' : 'Start comparison'}
               </SubmitButton>
+              {blocker && <FieldDescription>{blocker}</FieldDescription>}
             </div>
           </form>
         )}

@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { FlaskConical, GitCompareArrows } from 'lucide-react';
 
+import { LibraryEmpty } from '@/components/library-table';
 import { formatUtcTimestamp } from '@/lib/format';
 
 export interface EvaluationCaseRow {
@@ -40,11 +41,11 @@ export function EvaluationLists({
           <p className="muted">Reusable inputs from saved runs and inbound messages.</p>
         </div>
         {cases.length === 0 && (
-          <div className="library-empty">
-            <FlaskConical size={24} aria-hidden="true" />
-            <h2>No cases yet</h2>
-            <p>Save a run or inbound message from the agent workspace.</p>
-          </div>
+          <LibraryEmpty
+            icon={<FlaskConical />}
+            title="No cases yet"
+            description="Save a run or inbound message from the agent workspace."
+          />
         )}
         {cases.length > 0 && (
           <>
@@ -103,11 +104,11 @@ export function EvaluationLists({
           <p className="muted">Open a past side-by-side replay to inspect drafts and policy.</p>
         </div>
         {comparisons.length === 0 && (
-          <div className="library-empty">
-            <GitCompareArrows size={24} aria-hidden="true" />
-            <h2>No comparisons yet</h2>
-            <p>Start a comparison once you have a case and at least two configuration versions.</p>
-          </div>
+          <LibraryEmpty
+            icon={<GitCompareArrows />}
+            title="No comparisons yet"
+            description="Start a comparison once you have a case and at least two configuration versions."
+          />
         )}
         {comparisons.length > 0 && (
           <>

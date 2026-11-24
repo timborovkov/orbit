@@ -31,14 +31,21 @@ export function LibraryTable({
 }
 
 export function LibraryEmpty({
+  icon,
   title,
   description,
 }: {
+  icon?: React.ReactNode;
   title: string;
   description: React.ReactNode;
 }) {
   return (
     <div className="library-empty">
+      {icon ? (
+        <div className="library-empty-icon" aria-hidden="true">
+          {icon}
+        </div>
+      ) : null}
       <h2>{title}</h2>
       <p>{description}</p>
     </div>
