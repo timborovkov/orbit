@@ -15,7 +15,8 @@ import {
   formatSpendDollars,
   spendFormFields,
 } from '@/lib/budget-money';
-import { type AgentBudgets, budgetFields, budgetNoCapAriaLabel } from '@/lib/budgets';
+import type { budgetFields } from '@/lib/budgets';
+import { type AgentBudgets, budgetNoCapAriaLabel } from '@/lib/budgets';
 import { cn } from '@/lib/utils';
 
 export interface BudgetUsageView {
@@ -96,6 +97,107 @@ const fieldMeta: Record<
   runDeadlineSeconds: { shortLabel: 'Deadline', suffix: 'sec', min: 30 },
 };
 
+function BudgetUsage({ id, text }: { id?: string; text: string | null }) {
+  if (!text || !id) return null;
+  return (
+    <p id={id} className="budget-usage">
+      {text}
+    </p>
+  );
+}
+
+function SpendCapField({
+  fieldKey,
+  budgets,
+  usage,
+}: {
+  fieldKey: 'dailySpendCents' | 'monthlySpendCents';
+  budgets: AgentBudgets;
+  usage: BudgetUsageView;
+}) {
+  const meta = fieldMeta[fieldKey];
+  const spendFields = spendFormFields[fieldKey];
+  const [unlimited, setUnlimited] = useState(() => budgets[fieldKey] === null);
+  const used = usageLine(fieldKey, budgets, usage);
+  const inputId = `budget-${spendFields.dollars}`;
+  const usageId = used ? `${inputId}-usage` : undefined;
+  return (
+    <Field className="budget-field gap-2">
+      <div className="budget-field-heading">
+        <FieldLabel htmlFor={inputId} className="budget-field-label">
+          {meta.shortLabel}
+        </FieldLabel>
+        <div className="budget-unlimited gap-2">
+          <Label htmlFor={`${inputId}-unlimited`}>No cap</Label>
+          <Switch
+            id={`${inputId}-unlimited`}
+            checked={unlimited}
+            onCheckedChange={setUnlimited}
+            aria-label={budgetNoCapAriaLabel(fieldKey)}
+          />
+          {unlimited ? <input type="hidden" name={spendFields.unlimited} value="on" /> : null}
+        </div>
+      </div>
+      <div className={cn('budget-input-wrap', 'has-suffix')}>
+        <Input
+          id={inputId}
+          name={spendFields.dollars}
+          type="number"
+          inputMode="decimal"
+          min={meta.min}
+          step="0.01"
+          defaultValue={centsToDollarsInput(budgets[fieldKey])}
+          required={!unlimited}
+          disabled={unlimited}
+          aria-describedby={usageId}
+          className="m-0"
+        />
+        <span className="budget-suffix">$</span>
+      </div>
+      <BudgetUsage id={usageId} text={used} />
+    </Field>
+  );
+}
+
+function QuotaField({
+  fieldKey,
+  budgets,
+  usage,
+}: {
+  fieldKey: Exclude<(typeof budgetFields)[number]['key'], 'dailySpendCents' | 'monthlySpendCents'>;
+  budgets: AgentBudgets;
+  usage: BudgetUsageView;
+}) {
+  const meta = fieldMeta[fieldKey];
+  const used = usageLine(fieldKey, budgets, usage);
+  const inputId = `budget-${fieldKey}`;
+  const usageId = used ? `${inputId}-usage` : undefined;
+  return (
+    <Field className="budget-field gap-2">
+      <div className="budget-field-heading">
+        <FieldLabel htmlFor={inputId} className="budget-field-label">
+          {meta.shortLabel}
+        </FieldLabel>
+      </div>
+      <div className={cn('budget-input-wrap', meta.suffix && 'has-suffix')}>
+        <Input
+          id={inputId}
+          name={fieldKey}
+          type="number"
+          inputMode="numeric"
+          min={meta.min}
+          defaultValue={budgets[fieldKey]}
+          required
+          aria-describedby={usageId}
+          className="m-0"
+        />
+        {meta.suffix ? <span className="budget-suffix">{meta.suffix}</span> : null}
+      </div>
+      <BudgetUsage id={usageId} text={used} />
+    </Field>
+  );
+}
+
 function BudgetFieldControl({
   fieldKey,
   budgets,
@@ -105,70 +207,10 @@ function BudgetFieldControl({
   budgets: AgentBudgets;
   usage: BudgetUsageView;
 }) {
-  const field = budgetFields.find((item) => item.key === fieldKey);
-  const meta = fieldMeta[fieldKey];
-  const spendFields =
-    fieldKey === 'dailySpendCents' || fieldKey === 'monthlySpendCents'
-      ? spendFormFields[fieldKey]
-      : null;
-  const canBeUnlimited = spendFields !== null;
-  const [unlimited, setUnlimited] = useState(() => canBeUnlimited && budgets[fieldKey] === null);
-  const used = usageLine(fieldKey, budgets, usage);
-  const inputId = `budget-${spendFields?.dollars ?? fieldKey}`;
-  const usageId = used ? `${inputId}-usage` : undefined;
-
-  if (!field) return null;
-
-  return (
-    <Field className="budget-field gap-2">
-      <div className="budget-field-heading">
-        <FieldLabel htmlFor={inputId} className="budget-field-label">
-          {meta.shortLabel}
-        </FieldLabel>
-        {canBeUnlimited && (
-          <div className="budget-unlimited gap-2">
-            <Label htmlFor={`${inputId}-unlimited`}>No cap</Label>
-            <Switch
-              id={`${inputId}-unlimited`}
-              checked={unlimited}
-              onCheckedChange={setUnlimited}
-              aria-label={budgetNoCapAriaLabel(
-                fieldKey === 'dailySpendCents' ? 'dailySpendCents' : 'monthlySpendCents',
-              )}
-            />
-            {unlimited && spendFields ? (
-              <input type="hidden" name={spendFields.unlimited} value="on" />
-            ) : null}
-          </div>
-        )}
-      </div>
-      <div className={cn('budget-input-wrap', meta.suffix && 'has-suffix')}>
-        <Input
-          id={inputId}
-          name={spendFields?.dollars ?? fieldKey}
-          type="number"
-          inputMode={spendFields ? 'decimal' : 'numeric'}
-          min={meta.min}
-          step={spendFields ? '0.01' : undefined}
-          defaultValue={
-            spendFields
-              ? centsToDollarsInput(budgets[fieldKey as 'dailySpendCents' | 'monthlySpendCents'])
-              : (budgets[fieldKey] ?? undefined)
-          }
-          required={!canBeUnlimited || !unlimited}
-          disabled={unlimited}
-          aria-describedby={usageId}
-          className="m-0"
-        />
-        {meta.suffix ? <span className="budget-suffix">{meta.suffix}</span> : null}
-      </div>
-      {used && (
-        <p id={usageId} className="budget-usage">
-          {used}
-        </p>
-      )}
-    </Field>
-  );
+  if (fieldKey === 'dailySpendCents' || fieldKey === 'monthlySpendCents') {
+    return <SpendCapField fieldKey={fieldKey} budgets={budgets} usage={usage} />;
+  }
+  return <QuotaField fieldKey={fieldKey} budgets={budgets} usage={usage} />;
 }
 
 export function BudgetSettings({

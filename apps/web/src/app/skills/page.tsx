@@ -2,14 +2,15 @@ import { WorkspaceHeader } from '@/app/workspace-header';
 import { SkillsLibrary } from '@/components/skills-library';
 import { env } from '@/lib/env';
 import { listSkills } from '@/lib/server/skills-queries';
-import { getPendingApprovalCount } from '@/lib/server/workspace-queries';
+import { getPendingApprovalCount, listAgentOptions } from '@/lib/server/workspace-queries';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SkillsPage() {
-  const [{ email, items }, pendingApprovalCount] = await Promise.all([
+  const [{ email, items }, pendingApprovalCount, agents] = await Promise.all([
     listSkills(),
     getPendingApprovalCount(),
+    listAgentOptions(),
   ]);
   return (
     <div className="agent-shell">
@@ -21,6 +22,7 @@ export default async function SkillsPage() {
           </p>
         )}
         <SkillsLibrary
+          agents={agents}
           items={items.map((skill) => ({
             id: skill.id,
             name: skill.name,

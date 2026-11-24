@@ -5,8 +5,6 @@ export const spendFormFields = {
   monthlySpendCents: { dollars: 'monthlySpendDollars', unlimited: 'monthlySpendUnlimited' },
 } as const;
 
-export type SpendCapKey = keyof typeof spendFormFields;
-
 const MICROS_PER_CENT = BigInt(10_000);
 
 /** Stored cents → value for a dollar input ("5.00"). Null (no cap) and invalid values give "". */
