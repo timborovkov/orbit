@@ -136,6 +136,15 @@ export const credentials = pgTable('agent_credentials', {
   encryptedKey: text('encrypted_key').notNull(),
 });
 
+export const xReplyCredentials = pgTable('x_reply_credentials', {
+  agentId: uuid('agent_id')
+    .primaryKey()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().unique(),
+  username: text('username').notNull(),
+  encryptedToken: text('encrypted_token').notNull(),
+});
+
 export const firecrawlCredentials = pgTable('agent_firecrawl_credentials', {
   agentId: uuid('agent_id')
     .primaryKey()
@@ -463,6 +472,7 @@ export const outboundActions = pgTable('outbound_actions', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  dispatchAttempt: integer('dispatch_attempt'),
   completedAt: timestamp('completed_at', { withTimezone: true }),
 });
 

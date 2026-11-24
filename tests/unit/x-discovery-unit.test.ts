@@ -32,7 +32,7 @@ test('optional X bearer token rejects whitespace and accepts unset', () => {
 });
 
 test('live adapter is unavailable without a bearer token', () => {
-  const adapter = createLiveXSearchAdapter(undefined);
+  const adapter = createLiveXSearchAdapter('');
   expect(adapter.availability()).toEqual({
     available: false,
     reason: 'X_BEARER_TOKEN is not set. X discovery polling is unavailable.',

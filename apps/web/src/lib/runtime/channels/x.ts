@@ -1,5 +1,5 @@
-import { proposalTypes } from '@/lib/policy/scopes';
 import type { ChannelAdapter } from '@/lib/runtime/channels/types';
+import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
 import { X_DISCOVERY_POLL_JOB, X_PROVIDER } from '@/lib/runtime/x/types';
 
 export const xChannel: ChannelAdapter = {
@@ -10,7 +10,26 @@ export const xChannel: ChannelAdapter = {
     receivedLabel: 'X post',
     externalHref: (id) => (/^\d+$/.test(id) ? `https://x.com/i/web/status/${id}` : null),
   },
-  run: { mode: 'evaluate', allowContentCapture: true, proposalTypes },
+  run: { mode: 'evaluate', allowContentCapture: true, proposalTypes: [X_REPLY_ACTION] },
+  actions: [
+    {
+      type: X_REPLY_ACTION,
+      label: 'X reply',
+      provider: 'x-api',
+      alwaysRequiresApproval: false,
+      reviewInShadow: true,
+      requiresDispatchMarker: true,
+      consentScope: X_REPLY_ACTION,
+      async validateApproval(tx, intent) {
+        const { validateXReplyApproval } = await import('@/lib/runtime/x/reply');
+        return validateXReplyApproval(tx, intent);
+      },
+      async prepareDelivery(tx, outbound, intent) {
+        const { prepareXReplyDelivery } = await import('@/lib/runtime/x/reply');
+        return prepareXReplyDelivery(tx, outbound, intent);
+      },
+    },
+  ],
   async schedule(tx, agentId, config) {
     if (!config.xSearchQuery.trim()) return;
     const { ensureDiscoveryPollJob } = await import('@/lib/runtime/x/poll');

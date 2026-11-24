@@ -32,5 +32,15 @@ acceptance checks.
       that proposal. Prepare one draft after both agree.
 - [x] Verify refusals, revocations after approval, disclosure rechecks, and
       isolation across linked identities.
-- [ ] Land [consent-based People introductions](https://github.com/timborovkov/orbit/pull/56)
+- [x] Land [consent-based People introductions](https://github.com/timborovkov/orbit/pull/56)
       on `main`.
+
+## Replies to discovered X posts
+
+- [x] Persist one editable proposal for an eligible discovered post in Shadow.
+- [x] Support administrator review and automatic Live delivery under a standing
+      channel grant. Recheck policy at dispatch and show the result in Activity.
+- [x] Verify replay, duplicate discovery, delivery retry and pause with the
+      fixture worker. [X reply runbook](docs/x-discovery-replies.md)
+- [ ] Verify delivery on the hosted deployment with a user-context credential
+      for an X-approved account and a controlled post whose author invited a reply.

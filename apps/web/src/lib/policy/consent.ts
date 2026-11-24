@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Tx } from '@/lib/db';
 import { type ConsentScope, consentScope } from '@/lib/policy/scopes';
 import { channelAction } from '@/lib/runtime/channels/registry';
+import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
 import { recipientConsents } from '@/lib/schema';
 
 export async function recipientConsentFailure(
@@ -20,7 +21,9 @@ export async function recipientConsentFailure(
   if (distinct.length !== expected) {
     return expected === 2
       ? 'An introduction requires two distinct recipients.'
-      : 'Escalation requires one recipient.';
+      : scope.data === X_REPLY_ACTION
+        ? 'An X reply requires one author.'
+        : 'Escalation requires one recipient.';
   }
 
   const decisions = await tx
@@ -37,7 +40,10 @@ export async function recipientConsentFailure(
   if (decisions.some(({ granted }) => !granted)) {
     return 'A recipient declined or revoked consent for this action.';
   }
-  if (requiredTools.includes(scope.data) && decisions.length !== expected) {
+  if (
+    (scope.data === X_REPLY_ACTION || requiredTools.includes(scope.data)) &&
+    decisions.length !== expected
+  ) {
     return 'Current consent is required from every recipient for this action.';
   }
   return null;

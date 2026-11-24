@@ -19,8 +19,12 @@ MCP connections, shared Knowledge, People and agent-private Memory. They can run
 Playground simulations and compare saved evaluations. Background work, read-only
 tools, outbound approvals and lifecycle controls use the shared policy and queue.
 
-Orbit supports X discovery and administrator-approved email replies. Firecrawl
-provides independently granted web search, page reads and bounded crawls.
+Orbit supports X discovery and administrator-approved email replies. With an
+eligible X connection and an administrator’s channel grant, Live agents can reply
+to eligible discovered posts. Administrators can require a review for each reply.
+Shadow agents keep editable proposals. The console shows recorded provider
+outcomes. See [replies to discovered X posts](docs/x-discovery-replies.md).
+Firecrawl provides independently granted web search, page reads and bounded crawls.
 Operators inspect progress and citations in Activity and can explicitly import
 saved pages into a shared Knowledge library. Provider activity, availability and
 successful actions displayed in the console come from recorded results.

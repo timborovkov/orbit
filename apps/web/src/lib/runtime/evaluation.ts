@@ -13,6 +13,8 @@ import { channelAdapter, channelForRun } from '@/lib/runtime/channels/registry';
 import { processSimulationRunForOrigin, type SimulationJobClaim } from '@/lib/runtime/execute';
 import { openRouterInference } from '@/lib/runtime/openrouter';
 import type { ModelCall } from '@/lib/runtime/simulation';
+import { loadXReplyTarget } from '@/lib/runtime/x/reply';
+import { X_PROVIDER } from '@/lib/runtime/x/types';
 import {
   agents,
   configurations,
@@ -199,6 +201,12 @@ export async function saveEvaluationCase(input: {
       sourceKind = sourceChannel ? 'channel' : 'playground';
       persistedInput = source.input;
       recipients = source.recipients;
+      // Older X discovery runs left recipients empty; bind the recorded author so
+      // evaluation replay can judge consent without loading a live source target.
+      if (!recipients.length && sourceChannel === X_PROVIDER) {
+        const target = await loadXReplyTarget(tx, input.agentId, source.id);
+        if (target) recipients = [target.recipient];
+      }
     } else if (input.sourceEmailMessageId) {
       const snapshot = await channelAdapter(sourceKind)?.run.evaluationInput?.(
         tx,

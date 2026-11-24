@@ -84,7 +84,7 @@ export async function loadRelationshipContext(agentId: string, runId: string) {
           or (post.thread_id is not distinct from identities.thread_id
             and post.account_id is not distinct from identities.account_id))
         and reply.status = 'sent' and reply.email_message_id is null
-        and intent.recipients ? post.author_id
+        and intent.recipients ?| array[post.author_id, 'x:' || post.author_id]
         and coalesce(reply.completed_at, reply.dispatched_at, reply.created_at) <= identities.observed_at
     ) activity
     order by activity.observed_at desc, activity.kind, activity.id
@@ -131,7 +131,7 @@ export async function listPersonInteractions(personId: string, page: number, age
       join action_intents intent on intent.run_id = post.run_id and intent.agent_id = post.agent_id
       join outbound_actions reply on reply.intent_id = intent.id and reply.agent_id = post.agent_id
       where reply.status = 'sent' and reply.email_message_id is null
-        and intent.recipients ? post.author_id ${eventScope}
+        and intent.recipients ?| array[post.author_id, 'x:' || post.author_id] ${eventScope}
     ), events as (
       select kind, channel, sent, event_key, max(occurred_at) as occurred_at, min(title) as title
       from activity group by kind, channel, sent, event_key

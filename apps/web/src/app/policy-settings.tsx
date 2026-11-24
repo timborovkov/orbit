@@ -9,6 +9,7 @@ import {
   saveConsent,
   saveConsentRequirements,
 } from '@/actions/policy';
+import { saveXReplyConnection } from '@/actions/x-reply';
 import { ActionRequirementsForm } from '@/app/action-requirements-form';
 import { ApprovalToolsForm } from '@/app/approval-tools-form';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
@@ -20,16 +21,19 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import type { ConsentScope } from '@/lib/policy/scopes';
 import { INTRODUCTION_REVIEW, peopleGrants } from '@/lib/runtime/introductions/types';
+import { X_REPLY_ACTION, xReplyDraftLength } from '@/lib/runtime/x/reply-input';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
 type Workspace = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>;
 
 const actionLabels = {
   reply: 'Reply',
+  [X_REPLY_ACTION]: 'X reply',
   like: 'Like',
   repost: 'Repost',
   follow: 'Follow',
@@ -52,6 +56,7 @@ export function ReviewSettings({
   approvalOnReject,
   approvalSpendCents,
   channelActions,
+  xAccount,
 }: {
   agentId: string;
   configurationVersion: number;
@@ -59,6 +64,7 @@ export function ReviewSettings({
   approvalExpiresAfterHours: number | null;
   approvalOnReject: 'continue' | 'end';
   approvalSpendCents: number | null;
+  xAccount: string | null;
   channelActions: {
     type: string;
     label: string;
@@ -103,6 +109,49 @@ export function ReviewSettings({
           ))}
         </section>
       )}
+      <section className="space-y-4" aria-labelledby="x-reply-account">
+        <h2 id="x-reply-account">X account</h2>
+        <p className="muted">
+          {xAccount ? `Connected as @${xAccount}` : 'Connect an X user to deliver replies.'} In
+          Live, the X reply grant sends eligible replies automatically unless an approval rule
+          applies.
+        </p>
+        <WorkspaceForm
+          action={saveXReplyConnection}
+          label={xAccount ? 'Replace X token' : 'Connect X account'}
+        >
+          <input type="hidden" name="agentId" value={agentId} />
+          <FieldGroup className="gap-4">
+            <Field>
+              <FieldLabel htmlFor="x-user-token">X user access token</FieldLabel>
+              <Input
+                id="x-user-token"
+                name="token"
+                type="password"
+                autoComplete="new-password"
+                aria-describedby="x-user-token-help"
+                required
+                maxLength={4096}
+              />
+              <FieldDescription id="x-user-token-help">
+                Use a user token with tweet.read, tweet.write and users.read access.
+              </FieldDescription>
+            </Field>
+            <Field orientation="horizontal">
+              <input type="checkbox" id="x-platform-approval" name="platformApproval" required />
+              <FieldLabel htmlFor="x-platform-approval">
+                X has approved this account for AI replies.
+              </FieldLabel>
+            </Field>
+          </FieldGroup>
+        </WorkspaceForm>
+        {xAccount && (
+          <WorkspaceForm action={saveXReplyConnection} label="Disconnect X account">
+            <input type="hidden" name="agentId" value={agentId} />
+            <input type="hidden" name="disconnect" value="true" />
+          </WorkspaceForm>
+        )}
+      </section>
     </section>
   );
 }
@@ -186,7 +235,7 @@ export function ConsentSettings({
             label="Recipient ID"
             maxLength={120}
             required
-            description="Use the same recipient ID the playground consent checks will receive."
+            description="For X replies, use x: followed by the author’s numeric X user ID."
           />
           <div className="form-grid">
             <WorkspaceSelect
@@ -194,7 +243,7 @@ export function ConsentSettings({
               name="scope"
               label="Consent scope"
               initialValue="introduce"
-              options={consentOptions}
+              options={[...consentOptions, { value: X_REPLY_ACTION, label: 'X replies' }]}
             />
             <WorkspaceSelect
               id="consent-outcome"
@@ -284,7 +333,9 @@ export function ProposalReview({
                           name="draft"
                           rows={3}
                           defaultValue={proposal.draft ?? ''}
-                          maxLength={8000}
+                          maxLength={
+                            proposal.actionType === X_REPLY_ACTION ? xReplyDraftLength : 8000
+                          }
                         />
                       </Field>
                     )}

@@ -43,6 +43,7 @@ export const DEMO_JOBS = {
 } as const;
 
 export const DEMO_INTENTS = {
+  johnXReply: '00000000-0000-4000-a400-000000000021',
   sarahEscalatePending: '00000000-0000-4000-a400-000000000001',
   sarahEscalateSuspended: '00000000-0000-4000-a400-000000000002',
   mayaIntroduceApproved: '00000000-0000-4000-a400-000000000011',

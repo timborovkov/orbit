@@ -64,6 +64,7 @@ export function AccessWorkbench({
   approvalOnReject,
   approvalSpendCents,
   channelActions,
+  xAccount,
   enabledTools,
   enabledCommitmentTools,
   consentRequiredTools,
@@ -86,6 +87,7 @@ export function AccessWorkbench({
   approvalExpiresAfterHours: number | null;
   approvalOnReject: 'continue' | 'end';
   approvalSpendCents: number | null;
+  xAccount: string | null;
   enabledTools: string[];
   enabledCommitmentTools: CommitmentTool[];
   channelActions: Parameters<typeof ReviewSettings>[0]['channelActions'];
@@ -134,6 +136,7 @@ export function AccessWorkbench({
         approvalOnReject={approvalOnReject}
         approvalSpendCents={approvalSpendCents}
         channelActions={channelActions}
+        xAccount={xAccount}
       />
     ),
     commitments: (

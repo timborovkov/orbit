@@ -5,8 +5,15 @@ import { expect, type Page, test } from '@playwright/test';
 import postgres from 'postgres';
 
 import { closeDb } from '@/lib/db';
+import { claimJobs, completeJob } from '@/lib/queue/jobs';
 import { startJobWorker } from '@/lib/queue/worker';
 import { processSimulationJob, SIMULATION_JOB_TYPE } from '@/lib/runtime/execute';
+import { processOutboundJob } from '@/lib/runtime/outbound/process';
+import { CHANNEL_OUTBOUND_JOB } from '@/lib/runtime/outbound/types';
+import { validateXReplyApproval } from '@/lib/runtime/x/reply';
+import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
+import { runDemoSeed } from '@/lib/seed';
+import { DEMO_AGENTS } from '@/lib/seed/ids';
 
 import { openAccessSection, openWorkspaceTab } from './workspace-nav';
 
@@ -44,7 +51,7 @@ async function screenshotToArtifacts(
 }
 
 test.beforeEach(async ({ page }) => {
-  await sql`TRUNCATE web_citations, web_crawls, agent_firecrawl_credentials, agent_memory_evidence_revisions, agent_memories, person_relationship_notes, person_identity_changes, person_link_rejections, person_contacts, person_identities, people, evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, introduction_proposals, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
+  await sql`TRUNCATE web_citations, web_crawls, agent_firecrawl_credentials, agent_memory_evidence_revisions, agent_memories, person_relationship_notes, person_identity_changes, person_link_rejections, person_contacts, person_identities, people, evaluation_comparisons, evaluation_cases, agent_activity_events, follow_ups, outbound_actions, source_events, discovery_cursors, email_messages, email_threads, email_mailboxes, knowledge_chunks, knowledge_documents, knowledge_library_grants, knowledge_libraries, recipient_consents, introduction_proposals, policy_decisions, action_intents, usage_counters, simulation_runs, jobs, agent_credentials, x_reply_credentials, agent_configurations, agent_skills, agent_mcp_connections, skills, mcp_connections, sessions, agents, audit, login_attempts`;
   await sql`UPDATE controls SET paused=true`;
   await page.goto('/login');
   await page.getByLabel(/^Email/).fill('admin@example.com');
@@ -114,6 +121,99 @@ async function openAccessApprovals(page: Page) {
   await openAccessSection(page, 'Approvals');
   await expect(page.getByTestId('approval-settings')).toBeVisible();
 }
+
+test('John reviews a discovered X reply and sees its fixture delivery in Activity', async ({
+  page,
+}) => {
+  test.setTimeout(120000);
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = databaseUrl;
+  const agentUrl = `/agents/${DEMO_AGENTS.john}`;
+  const approvalsUrl = `/approvals?agent=${DEMO_AGENTS.john}`;
+  const draft = 'The Timeline shows what changed and why. I can walk you through an example.';
+  try {
+    await runDemoSeed({ releaseGlobalPause: false });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(approvalsUrl);
+    const proposal = page.locator('li.approvals-card').filter({ hasText: 'X reply' });
+    await expect(proposal).toHaveCount(1);
+    const origin = await proposal
+      .getByRole('link', { name: 'View originating run' })
+      .getAttribute('href');
+    expect(origin).toBeTruthy();
+    await proposal.getByRole('button', { name: 'Edit', exact: true }).click();
+    const editor = proposal.getByRole('textbox', { name: 'Draft' });
+    await editor.fill(draft);
+    await expect(editor).toHaveAttribute('maxlength', '280');
+    await screenshotToArtifacts(page, 'john-x-shadow-approval.png');
+    await proposal.getByRole('button', { name: 'Save & approve' }).click();
+    await expect(
+      page.getByText('Switch the agent to Live before approving this reply.'),
+    ).toBeVisible();
+
+    await page.goto(agentUrl);
+    await openWorkspaceTab(page, 'Access');
+    await page.getByRole('button', { name: 'Set Live', exact: true }).click();
+    await expect(page.locator('#lifecycle .lifecycle-card.is-selected h3')).toHaveText('Live');
+    await openAccessApprovals(page);
+    await expect(page.getByRole('button', { name: 'Disable X reply', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'X account', exact: true })).toBeVisible();
+    await expect(page.getByLabel('X user access token')).toHaveAccessibleDescription(
+      'Use a user token with tweet.read, tweet.write and users.read access.',
+    );
+    await expect(
+      page.getByRole('checkbox', { name: 'X has approved this account for AI replies.' }),
+    ).toHaveAttribute('required', '');
+    await page
+      .getByRole('heading', { name: 'Channel permissions', exact: true })
+      .scrollIntoViewIfNeeded();
+    await screenshotToArtifacts(page, 'john-x-channel-settings.png');
+
+    await sql`UPDATE controls SET paused=false WHERE id=1`;
+    await page.goto(approvalsUrl);
+    await proposal.getByRole('button', { name: 'Edit', exact: true }).click();
+    await editor.fill(draft);
+    await proposal.getByRole('button', { name: 'Save & approve' }).click();
+    await expect(page.getByText('Proposal approved and queued for send.')).toBeVisible();
+    const workerId = 'browser-x-fixture';
+    const [job] = await claimJobs({ workerId, types: [CHANNEL_OUTBOUND_JOB], limit: 1 });
+    expect(job?.payload.agentId).toBe(DEMO_AGENTS.john);
+    await processOutboundJob(job!, new AbortController().signal, {
+      actionType: X_REPLY_ACTION,
+      async prepareDelivery(tx, outbound, intent) {
+        const error = await validateXReplyApproval(tx, intent);
+        if (error) return { error };
+        expect(outbound.body).toBe(draft);
+        return {
+          recipients: intent.recipients,
+          provider: 'x-fixture',
+          send: () => Promise.resolve({ ok: true, id: '90001', raw: { fixture: true } }),
+        };
+      },
+    });
+    await completeJob(job!.id, workerId);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(origin!);
+    const activity = page.getByRole('region', { name: 'Activity' });
+    const outcome = activity.getByRole('listitem').filter({ hasText: 'Fixture X reply sent' });
+    await expect(outcome.getByText('Reply ID 90001')).toBeVisible();
+    await expect(outcome.getByRole('link', { name: 'View originating run' })).toHaveAttribute(
+      'href',
+      origin!,
+    );
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await activity.scrollIntoViewIfNeeded();
+    await screenshotToArtifacts(page, 'john-x-activity-mobile.png');
+  } finally {
+    await sql`UPDATE controls SET paused=true WHERE id=1`;
+    await closeDb();
+    if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = originalDatabaseUrl;
+  }
+});
 
 test('Approvals page and agent approval settings screenshots', async ({ page }) => {
   test.setTimeout(240000);

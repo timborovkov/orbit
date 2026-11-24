@@ -134,6 +134,10 @@ routing edits.
   changes. It checks Sarah’s email intake, shared channel matching, draft
   approval, restart recovery and cancellation against a migrated `orbit_test`
   database. The same suites run in `test:integration`. See [follow-ups](../follow-ups.md).
+- Run `bun test tests/x-discovery.test.ts` against migrated `orbit_test` when X
+  discovery proposals or delivery change. The approvals browser suite checks
+  John’s seeded reply, and the provider unit suite checks the X request format.
+  Record hosted delivery separately. See [X replies](../x-discovery-replies.md).
 - Run the [introduction checks](../introductions.md#verify-the-workflow)
   for changes to proposal consent, disclosure, or approval and dispatch
   checks. The PostgreSQL scenarios also run in `test:integration`.

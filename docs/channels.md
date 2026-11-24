@@ -22,14 +22,16 @@ cursor, post formatting and reciprocal identity-claim checks.
 3. Use the evaluation run mode for model-proposed actions. Register supported
    actions as channel-qualified IDs such as `provider.reply`. An administrator
    grants each supported action from the agent’s Access settings. The adapter
-   can require review for every use and declare the matching consent scope for
-   introductions and escalations. The shared policy gateway checks action
+   can require review for every use or keep proposals editable in Shadow. It
+   can also declare a recipient consent scope. The shared policy gateway checks action
    ownership, the grant, lifecycle, pause, approval and budgets before delivery.
 4. Implement `prepareDelivery` to enforce provider connection, scope and
    recipient restrictions, including provider-specific opt-outs where they
-   apply. Its transport receives an abort signal and must use the outbound row’s
-   stable idempotency key or reconcile the provider result before a retry.
-   The shared dispatcher writes the outcome and usage to PostgreSQL.
+   apply. Its transport receives an abort signal. Use the outbound row’s stable
+   idempotency key when the provider supports it. For providers such as X, mark
+   the send attempt durably before calling the API and retry confirmed
+   rejections only. The shared dispatcher writes the outcome and usage to
+   PostgreSQL. See [X replies](x-discovery-replies.md).
 
 The source event links to History and supports People, evaluation cases, and
 agent-owned memory evidence. Replays use the saved case input and never

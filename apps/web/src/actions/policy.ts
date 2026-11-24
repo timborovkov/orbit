@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { checkOrigin, requireAdmin } from '@/lib/auth';
 import { consentScope, proposalTypes, recipientId } from '@/lib/policy/scopes';
 import { channelGrantOptions } from '@/lib/runtime/channels/registry';
+import { X_REPLY_ACTION, xRecipientId } from '@/lib/runtime/x/reply-input';
 import { persistApprovalTools } from '@/lib/server/lifecycle-mutations';
 import {
   persistChannelGrant,
@@ -88,6 +89,9 @@ export async function saveConsent(form: FormData) {
     .safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: 'Enter a recipient, a scope, and an evidence reference.' };
   const { outcome, ...fields } = parsed.data;
+  if (fields.scope === X_REPLY_ACTION && !xRecipientId.safeParse(fields.recipient).success) {
+    return { error: 'Enter x: followed by the author’s numeric X user ID.' };
+  }
   const result = await recordConsent({ ...fields, actor, granted: outcome === 'grant' });
   revalidatePath(`/agents/${fields.agentId}`);
   return result;

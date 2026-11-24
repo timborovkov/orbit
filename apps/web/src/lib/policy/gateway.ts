@@ -106,6 +106,7 @@ export async function loadPolicyContext(
   actor: string,
   runId?: string | null,
   store: Store = db(),
+  options: { currentApproval?: boolean } = {},
 ): Promise<PolicyContext | null> {
   const agent = (await store.select().from(agents).where(eq(agents.id, agentId))).at(0);
   if (!agent) return null;
@@ -122,7 +123,7 @@ export async function loadPolicyContext(
           .where(and(eq(runs.id, runId), eq(runs.agentId, agentId)))
       ).at(0)
     : undefined;
-  const approval = runRow?.settings ?? agent;
+  const approval = options.currentApproval ? agent : (runRow?.settings ?? agent);
   const executionContext = executionContextForOrigin(runRow?.origin);
   const global = (await store.select().from(controls).where(eq(controls.id, 1))).at(0);
   const today = new Date().toISOString().slice(0, 10);
@@ -373,7 +374,9 @@ export function evaluateCandidate(
       actionNeedsApproval({
         actionType: action.type,
         preliminary: action.preliminary,
-        requiredByAdapter: registered?.action.alwaysRequiresApproval,
+        requiredByAdapter:
+          registered?.action.alwaysRequiresApproval ||
+          (ctx.lifecycle === 'shadow' && registered?.action.reviewInShadow),
         approvalTools: ctx.approvalTools,
         approvalSpendCents: ctx.approvalSpendCents,
         daySpendMicros: ctx.usage.spendMicros,
@@ -925,7 +928,7 @@ export function evaluateActionForTest(
     executionContext?: ExecutionContext;
   },
   action: CandidateAction,
-  options?: { skipApproval?: boolean },
+  options?: { skipApproval?: boolean; consentFailure?: string | null },
 ) {
   return evaluateCandidate(
     {
@@ -945,7 +948,7 @@ export function evaluateActionForTest(
       ...ctx,
     },
     action,
-    null,
+    options?.consentFailure ?? null,
     false,
     options,
   );

@@ -33,6 +33,15 @@ export const FIXTURE_X_POSTS: XSearchPost[] = [
   },
 ];
 
+/** A single post addressed to the demo replying account. */
+export const FIXTURE_X_REPLY_POST: XSearchPost = {
+  id: '1001',
+  text: '@orbit_fixture Looking for a work-history product. Could you tell me about yours?',
+  authorId: '12001',
+  authorUsername: 'ops_lead',
+  raw: { id: '1001', fixture: true },
+};
+
 function newestAmong(posts: XSearchPost[], fallback: string | null): string | null {
   if (posts.length === 0) return fallback;
   return posts.reduce(

@@ -42,6 +42,7 @@ import { listAgentMemories } from '@/lib/server/memory-queries';
 import { getWebResearchAccess, getWebResearchActivity } from '@/lib/server/research-queries';
 import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
+import { getXReplyConnection } from '@/lib/server/x-reply-connection';
 import { storageConfigured } from '@/lib/storage/objects';
 
 interface WorkspaceSearch {
@@ -105,6 +106,7 @@ export default async function AgentWorkspace({
     inbox,
     followUps,
     activityEvents,
+    xReplyConnection,
     memory,
     webResearch,
     webResearchAccess,
@@ -116,6 +118,7 @@ export default async function AgentWorkspace({
     getEmailInbox(id, selectedThread, emailPage, messagePage, focusMessageId),
     listFollowUpsForAgent(id),
     listActivityEventsForAgent(id),
+    getXReplyConnection(id),
     listAgentMemories(id, memoryPage),
     getWebResearchActivity(
       id,
@@ -193,6 +196,7 @@ export default async function AgentWorkspace({
       approvalExpiresAfterHours={approvalSettings.approvalExpiresAfterHours}
       approvalOnReject={approvalSettings.approvalOnReject}
       approvalSpendCents={approvalSettings.approvalSpendCents}
+      xAccount={xReplyConnection?.username ?? null}
       enabledCommitmentTools={agent.enabledTools.filter(isCommitmentTool)}
       channelActions={channelGrantOptions().map((option) => ({
         ...option,

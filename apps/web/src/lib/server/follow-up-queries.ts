@@ -7,7 +7,16 @@ import { db } from '@/lib/db';
 import { channelLabel } from '@/lib/runtime/channels/registry';
 import { mergeFollowUpListViews } from '@/lib/runtime/follow-ups/list';
 import { pendingFollowUpStatuses } from '@/lib/runtime/follow-ups/types';
-import { agentActivityEvents, emailMessages, followUps, jobs, sourceEvents } from '@/lib/schema';
+import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
+import {
+  actionIntents,
+  agentActivityEvents,
+  emailMessages,
+  followUps,
+  jobs,
+  outboundActions,
+  sourceEvents,
+} from '@/lib/schema';
 
 const HISTORY_LIMIT = 100;
 
@@ -78,6 +87,54 @@ export async function selectFollowUpsForAgentView(agentId: string) {
 
 export async function listActivityEventsForAgent(agentId: string, limit = 50) {
   await requireAdmin();
+  const [events, replies] = await Promise.all([
+    selectActivityEvents(agentId, limit),
+    db()
+      .select({
+        id: outboundActions.id,
+        status: outboundActions.status,
+        reason: outboundActions.reason,
+        provider: outboundActions.provider,
+        providerMessageId: outboundActions.providerMessageId,
+        updatedAt: outboundActions.updatedAt,
+        runId: actionIntents.runId,
+      })
+      .from(outboundActions)
+      .innerJoin(
+        actionIntents,
+        and(eq(actionIntents.id, outboundActions.intentId), eq(actionIntents.agentId, agentId)),
+      )
+      .where(
+        and(eq(outboundActions.agentId, agentId), eq(outboundActions.actionType, X_REPLY_ACTION)),
+      )
+      .orderBy(desc(outboundActions.updatedAt), desc(outboundActions.id))
+      .limit(limit),
+  ]);
+  return [
+    ...events,
+    ...replies.map((reply) => ({
+      id: reply.id,
+      summary: `${reply.provider === 'x-fixture' ? 'Fixture X reply' : 'X reply'} ${reply.status}`,
+      detail: reply.providerMessageId ? `Reply ID ${reply.providerMessageId}` : reply.reason,
+      createdAt: reply.updatedAt,
+      dueAt: null,
+      channel: channelLabel('x'),
+      replyExcerpt: null,
+      links: reply.runId
+        ? [
+            {
+              label: 'View originating run',
+              href: `/agents/${agentId}?run=${reply.runId}#run-${reply.runId}`,
+            },
+          ]
+        : [],
+    })),
+  ]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))
+    .slice(0, limit);
+}
+
+async function selectActivityEvents(agentId: string, limit: number) {
   const rows = await db()
     .select({
       id: agentActivityEvents.id,

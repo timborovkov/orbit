@@ -102,6 +102,7 @@ export async function markOutboundStatus(
     providerMessageId?: string | null;
     providerResult?: Record<string, unknown> | null;
     dispatchedAt?: Date | null;
+    dispatchAttempt?: number | null;
     completedAt?: Date | null;
   },
 ) {
@@ -118,6 +119,7 @@ export async function markOutboundStatus(
         : {}),
       ...(update.providerResult !== undefined ? { providerResult: update.providerResult } : {}),
       ...(update.dispatchedAt !== undefined ? { dispatchedAt: update.dispatchedAt } : {}),
+      ...(update.dispatchAttempt !== undefined ? { dispatchAttempt: update.dispatchAttempt } : {}),
       ...(update.completedAt !== undefined ? { completedAt: update.completedAt } : {}),
     })
     .where(eq(outboundActions.id, outboundId));

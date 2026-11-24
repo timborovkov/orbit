@@ -23,6 +23,7 @@ export type OutboundRow = typeof outboundActions.$inferSelect;
 export type ActionIntent = typeof actionIntents.$inferSelect;
 type PreparedDelivery = {
   recipients: string[];
+  provider?: string;
   send: (signal: AbortSignal) => Promise<DeliveryOutcome>;
 };
 
@@ -31,6 +32,10 @@ export interface ChannelAction {
   label?: string;
   provider: string;
   alwaysRequiresApproval: boolean;
+  /** Keep editable proposals in Shadow for actions that can run automatically in Live. */
+  reviewInShadow?: boolean;
+  /** This provider does not support idempotency keys for writes. */
+  requiresDispatchMarker?: boolean;
   consentScope?: ConsentScope;
   /** Existing channels may use an equivalent provider-specific agent grant. */
   usesProviderGrant?: boolean;
