@@ -40,12 +40,14 @@ type MarkdownEditorProps = Omit<
   value: string;
   onValueChange: (value: string) => void;
   large?: boolean;
+  compact?: boolean;
 };
 
 export function MarkdownEditor({
   value,
   onValueChange,
   large = false,
+  compact = false,
   ...props
 }: MarkdownEditorProps) {
   const [mode, setMode] = useState<Mode>('write');
@@ -107,7 +109,11 @@ export function MarkdownEditor({
       onValueChange={(next) => {
         setMode(next as Mode);
       }}
-      className={cn('markdown-editor', large && 'markdown-editor-large')}
+      className={cn(
+        'markdown-editor',
+        large && 'markdown-editor-large',
+        compact && 'markdown-editor-compact',
+      )}
     >
       <div className="markdown-toolbar">
         <div className="markdown-format" role="group" aria-label="Markdown formatting">
@@ -136,7 +142,7 @@ export function MarkdownEditor({
         <TabsList aria-label="Markdown view" className="markdown-tabs">
           <TabsTrigger value="write">Write</TabsTrigger>
           <TabsTrigger value="preview">Preview</TabsTrigger>
-          <TabsTrigger value="split">Split</TabsTrigger>
+          {!compact && <TabsTrigger value="split">Split</TabsTrigger>}
         </TabsList>
       </div>
       <TabsContent value={mode} className="markdown-panes" data-mode={mode}>

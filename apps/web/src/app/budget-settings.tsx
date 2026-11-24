@@ -9,18 +9,20 @@ import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { type AgentBudgets, budgetFields, budgetNoCapAriaLabel } from '@/lib/budgets';
+import {
+  centsToDollarsInput,
+  formatCapDollars,
+  formatSpendDollars,
+  spendFormFields,
+} from '@/lib/budget-money';
+import type { budgetFields } from '@/lib/budgets';
+import { type AgentBudgets, budgetNoCapAriaLabel } from '@/lib/budgets';
 import { cn } from '@/lib/utils';
 
 export interface BudgetUsageView {
   day: { spendMicros: bigint; requests: number; outboundActions: number };
   month: { spendMicros: bigint; requests: number; outboundActions: number };
   activeRuns: number;
-}
-
-function formatSpendCents(micros: bigint): string {
-  const cents = Number(micros) / 10_000;
-  return Number.isInteger(cents) ? String(cents) : cents.toFixed(2);
 }
 
 function usageLine(
@@ -31,12 +33,12 @@ function usageLine(
   switch (field) {
     case 'dailySpendCents':
       return budgets.dailySpendCents === null
-        ? `Used ${formatSpendCents(usage.day.spendMicros)}¢ today · no cap`
-        : `Used ${formatSpendCents(usage.day.spendMicros)}¢ / ${budgets.dailySpendCents}¢ today`;
+        ? `Used ${formatSpendDollars(usage.day.spendMicros)} today · no cap`
+        : `Used ${formatSpendDollars(usage.day.spendMicros)} / ${formatCapDollars(budgets.dailySpendCents)} today`;
     case 'monthlySpendCents':
       return budgets.monthlySpendCents === null
-        ? `Used ${formatSpendCents(usage.month.spendMicros)}¢ this month · no cap`
-        : `Used ${formatSpendCents(usage.month.spendMicros)}¢ / ${budgets.monthlySpendCents}¢ this month`;
+        ? `Used ${formatSpendDollars(usage.month.spendMicros)} this month · no cap`
+        : `Used ${formatSpendDollars(usage.month.spendMicros)} / ${formatCapDollars(budgets.monthlySpendCents)} this month`;
     case 'dailyRequests':
       return `Used ${usage.day.requests} / ${budgets.dailyRequests} today`;
     case 'monthlyRequests':
@@ -56,7 +58,7 @@ const groups = [
   {
     id: 'spend',
     title: 'Spend caps',
-    description: 'OpenRouter spend limits in USD cents. Turn on No cap to leave a period uncapped.',
+    description: 'OpenRouter spend limits in dollars. Turn on No cap to leave a period uncapped.',
     keys: ['dailySpendCents', 'monthlySpendCents'] as const,
   },
   {
@@ -84,8 +86,8 @@ const fieldMeta: Record<
   (typeof budgetFields)[number]['key'],
   { shortLabel: string; suffix?: string; min: number }
 > = {
-  dailySpendCents: { shortLabel: 'Daily spend', suffix: '¢', min: 0 },
-  monthlySpendCents: { shortLabel: 'Monthly spend', suffix: '¢', min: 0 },
+  dailySpendCents: { shortLabel: 'Daily spend', suffix: '$', min: 0 },
+  monthlySpendCents: { shortLabel: 'Monthly spend', suffix: '$', min: 0 },
   dailyRequests: { shortLabel: 'Daily requests', min: 0 },
   monthlyRequests: { shortLabel: 'Monthly requests', min: 0 },
   dailyOutboundActions: { shortLabel: 'Daily outbound', min: 0 },
@@ -94,6 +96,107 @@ const fieldMeta: Record<
   maxToolStepsPerRun: { shortLabel: 'Max tool steps', min: 1 },
   runDeadlineSeconds: { shortLabel: 'Deadline', suffix: 'sec', min: 30 },
 };
+
+function BudgetUsage({ id, text }: { id?: string; text: string | null }) {
+  if (!text || !id) return null;
+  return (
+    <p id={id} className="budget-usage">
+      {text}
+    </p>
+  );
+}
+
+function SpendCapField({
+  fieldKey,
+  budgets,
+  usage,
+}: {
+  fieldKey: 'dailySpendCents' | 'monthlySpendCents';
+  budgets: AgentBudgets;
+  usage: BudgetUsageView;
+}) {
+  const meta = fieldMeta[fieldKey];
+  const spendFields = spendFormFields[fieldKey];
+  const [unlimited, setUnlimited] = useState(() => budgets[fieldKey] === null);
+  const used = usageLine(fieldKey, budgets, usage);
+  const inputId = `budget-${spendFields.dollars}`;
+  const usageId = used ? `${inputId}-usage` : undefined;
+  return (
+    <Field className="budget-field gap-2">
+      <div className="budget-field-heading">
+        <FieldLabel htmlFor={inputId} className="budget-field-label">
+          {meta.shortLabel}
+        </FieldLabel>
+        <div className="budget-unlimited gap-2">
+          <Label htmlFor={`${inputId}-unlimited`}>No cap</Label>
+          <Switch
+            id={`${inputId}-unlimited`}
+            checked={unlimited}
+            onCheckedChange={setUnlimited}
+            aria-label={budgetNoCapAriaLabel(fieldKey)}
+          />
+          {unlimited ? <input type="hidden" name={spendFields.unlimited} value="on" /> : null}
+        </div>
+      </div>
+      <div className={cn('budget-input-wrap', 'has-suffix')}>
+        <Input
+          id={inputId}
+          name={spendFields.dollars}
+          type="number"
+          inputMode="decimal"
+          min={meta.min}
+          step="0.01"
+          defaultValue={centsToDollarsInput(budgets[fieldKey])}
+          required={!unlimited}
+          disabled={unlimited}
+          aria-describedby={usageId}
+          className="m-0"
+        />
+        <span className="budget-suffix">$</span>
+      </div>
+      <BudgetUsage id={usageId} text={used} />
+    </Field>
+  );
+}
+
+function QuotaField({
+  fieldKey,
+  budgets,
+  usage,
+}: {
+  fieldKey: Exclude<(typeof budgetFields)[number]['key'], 'dailySpendCents' | 'monthlySpendCents'>;
+  budgets: AgentBudgets;
+  usage: BudgetUsageView;
+}) {
+  const meta = fieldMeta[fieldKey];
+  const used = usageLine(fieldKey, budgets, usage);
+  const inputId = `budget-${fieldKey}`;
+  const usageId = used ? `${inputId}-usage` : undefined;
+  return (
+    <Field className="budget-field gap-2">
+      <div className="budget-field-heading">
+        <FieldLabel htmlFor={inputId} className="budget-field-label">
+          {meta.shortLabel}
+        </FieldLabel>
+      </div>
+      <div className={cn('budget-input-wrap', meta.suffix && 'has-suffix')}>
+        <Input
+          id={inputId}
+          name={fieldKey}
+          type="number"
+          inputMode="numeric"
+          min={meta.min}
+          defaultValue={budgets[fieldKey]}
+          required
+          aria-describedby={usageId}
+          className="m-0"
+        />
+        {meta.suffix ? <span className="budget-suffix">{meta.suffix}</span> : null}
+      </div>
+      <BudgetUsage id={usageId} text={used} />
+    </Field>
+  );
+}
 
 function BudgetFieldControl({
   fieldKey,
@@ -104,59 +207,10 @@ function BudgetFieldControl({
   budgets: AgentBudgets;
   usage: BudgetUsageView;
 }) {
-  const field = budgetFields.find((item) => item.key === fieldKey);
-  const meta = fieldMeta[fieldKey];
-  const canBeUnlimited = fieldKey === 'dailySpendCents' || fieldKey === 'monthlySpendCents';
-  const [unlimited, setUnlimited] = useState(() => canBeUnlimited && budgets[fieldKey] === null);
-  const used = usageLine(fieldKey, budgets, usage);
-  const inputId = `budget-${fieldKey}`;
-  const usageId = used ? `${inputId}-usage` : undefined;
-
-  if (!field) return null;
-
-  return (
-    <Field className="budget-field gap-2">
-      <div className="budget-field-heading">
-        <FieldLabel htmlFor={inputId} className="budget-field-label">
-          {meta.shortLabel}
-        </FieldLabel>
-        {canBeUnlimited && (
-          <div className="budget-unlimited gap-2">
-            <Label htmlFor={`${inputId}-unlimited`}>No cap</Label>
-            <Switch
-              id={`${inputId}-unlimited`}
-              checked={unlimited}
-              onCheckedChange={setUnlimited}
-              aria-label={budgetNoCapAriaLabel(
-                fieldKey === 'dailySpendCents' ? 'dailySpendCents' : 'monthlySpendCents',
-              )}
-            />
-            {unlimited ? <input type="hidden" name={`${fieldKey}Unlimited`} value="on" /> : null}
-          </div>
-        )}
-      </div>
-      <div className={cn('budget-input-wrap', meta.suffix && 'has-suffix')}>
-        <Input
-          id={inputId}
-          name={fieldKey}
-          type="number"
-          inputMode="numeric"
-          min={meta.min}
-          defaultValue={budgets[fieldKey] ?? undefined}
-          required={!canBeUnlimited || !unlimited}
-          disabled={unlimited}
-          aria-describedby={usageId}
-          className="m-0"
-        />
-        {meta.suffix ? <span className="budget-suffix">{meta.suffix}</span> : null}
-      </div>
-      {used && (
-        <p id={usageId} className="budget-usage">
-          {used}
-        </p>
-      )}
-    </Field>
-  );
+  if (fieldKey === 'dailySpendCents' || fieldKey === 'monthlySpendCents') {
+    return <SpendCapField fieldKey={fieldKey} budgets={budgets} usage={usage} />;
+  }
+  return <QuotaField fieldKey={fieldKey} budgets={budgets} usage={usage} />;
 }
 
 export function BudgetSettings({
@@ -173,8 +227,8 @@ export function BudgetSettings({
       <div className="editor-section-heading">
         <h2>Budgets</h2>
         <p className="muted">
-          Choose daily and monthly spend limits independently. When either cap is enabled, model
-          calls require verified OpenRouter pricing. Request quotas apply with either spend setting.
+          Spend caps are independent and need verified OpenRouter pricing. Request quotas always
+          apply.
         </p>
       </div>
       <WorkspaceForm action={saveAgentBudgets} label="Save budgets" saveState>

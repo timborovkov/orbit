@@ -21,6 +21,8 @@ async function create(page: Page, name: string, mission: string) {
   await page.getByLabel(/^Mission/).fill(mission);
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
+  await page.waitForURL(/\/agents\//);
+  await page.goto('/');
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
 }
 async function accessible(page: Page) {
@@ -241,6 +243,8 @@ test('validation, failed requests and pending feedback preserve entries', async 
   await page.unrouteAll();
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Created' })).toBeVisible();
+  await expect(page).toHaveURL(/\/agents\//);
   expect((await sql`SELECT count(*)::int AS count FROM agents`)[0].count).toBe(1);
 });
 test('worst-case content, full missions, text zoom, RTL and touch controls', async ({ page }) => {

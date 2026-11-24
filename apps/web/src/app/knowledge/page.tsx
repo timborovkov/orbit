@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+import { Library } from 'lucide-react';
+
 import { NewKnowledgeLibrary } from '@/app/knowledge/new-library';
 import { WorkspaceHeader } from '@/app/workspace-header';
 import { LibraryEmpty, LibraryPageHeading, LibraryTable } from '@/components/library-table';
@@ -73,6 +75,7 @@ export default async function KnowledgePage() {
           </>
         ) : (
           <LibraryEmpty
+            icon={<Library />}
             title="No shared libraries yet"
             description="Create a library to upload documents and choose which agents can search them."
           />

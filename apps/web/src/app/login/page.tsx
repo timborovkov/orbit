@@ -1,10 +1,10 @@
-import Image from 'next/image';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { LockKeyhole } from 'lucide-react';
 
 import { login } from '@/actions/auth';
+import { BrandMark } from '@/app/brand-mark';
 import { PasswordField } from '@/app/login/password-field';
 import { ThemeSwitch } from '@/app/theme';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
@@ -28,7 +28,7 @@ export default async function Login({
       </a>
       <header className="login-header">
         <Link className="brand" href="/login" aria-label="Orbit home">
-          <Image src="/icon.svg" alt="" width="34" height="34" />
+          <BrandMark size={34} />
           <span>Orbit</span>
         </Link>
         <ThemeSwitch />
@@ -36,14 +36,7 @@ export default async function Login({
       <main id="login-main" className="login-main">
         <section className="login-card" aria-labelledby="login-title">
           <div className="login-heading">
-            <Image
-              className="login-emblem"
-              src="/icon.svg"
-              alt=""
-              width={64}
-              height={64}
-              priority
-            />
+            <BrandMark className="login-emblem" size={64} />
             <h1 id="login-title">Sign in to Orbit</h1>
             <p className="muted">Access your private workspace.</p>
           </div>

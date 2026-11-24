@@ -22,6 +22,7 @@ export function WorkspaceField({
   required = false,
   maxLength = 12000,
   markdown = false,
+  compactMarkdown = false,
   description,
   error,
 }: {
@@ -32,6 +33,7 @@ export function WorkspaceField({
   required?: boolean;
   maxLength?: number;
   markdown?: boolean;
+  compactMarkdown?: boolean;
   description?: string;
   error?: string;
 }) {
@@ -70,6 +72,7 @@ export function WorkspaceField({
           name={name}
           value={value}
           onValueChange={setValue}
+          compact={compactMarkdown}
           readOnly={!hydrated}
           required={required}
           maxLength={maxLength}

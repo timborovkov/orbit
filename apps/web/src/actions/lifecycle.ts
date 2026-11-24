@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
+import { spendCapCentsFromForm, spendFormFields } from '@/lib/budget-money';
 import { budgetDefaults, budgetsSchema } from '@/lib/budgets';
 import { lifecycleSchema } from '@/lib/lifecycle';
 import { persistBudgets, persistLifecycle } from '@/lib/server/lifecycle-mutations';
@@ -29,9 +30,11 @@ export async function saveAgentBudgets(form: FormData) {
   const agentId = uuid.parse(form.get('agentId'));
   const raw = Object.fromEntries(
     Object.keys(budgetDefaults).map((key) => {
+      if (key in spendFormFields) {
+        const fields = spendFormFields[key as keyof typeof spendFormFields];
+        return [key, spendCapCentsFromForm(form.get(fields.dollars), form.get(fields.unlimited))];
+      }
       const value = form.get(key);
-      const spendCap = key === 'dailySpendCents' || key === 'monthlySpendCents';
-      if (spendCap && form.get(`${key}Unlimited`) === 'on') return [key, null];
       return [key, typeof value === 'string' && value.trim() !== '' ? Number(value) : undefined];
     }),
   );

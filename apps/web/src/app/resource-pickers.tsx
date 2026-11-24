@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { saveAgentMcpConnections } from '@/actions/mcp';
 import { saveAgentSkills } from '@/actions/skills';
 import { WorkspaceForm } from '@/app/workspace-form';
+import { TermHint } from '@/components/term-hint';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -36,8 +37,8 @@ export function SkillPicker({
       <div className="editor-section-heading">
         <h2>Skills</h2>
         <p className="muted">
-          Attach shared skills. The model sees names and when-to-use descriptions; full bodies load
-          through <code>load_skill</code>.
+          Attach shared skills. The model sees names and when-to-use descriptions; the full text
+          loads only when it <TermHint hint="Runtime tool: load_skill">opens a skill</TermHint>.
         </p>
       </div>
       {!skills.length ? (

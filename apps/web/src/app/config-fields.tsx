@@ -6,6 +6,7 @@ import { Cpu, Fingerprint, Radar, SlidersHorizontal } from 'lucide-react';
 
 import { DiscoveryFields } from '@/app/discovery-fields';
 import { WorkspaceField } from '@/app/workspace-field';
+import { TermHint } from '@/components/term-hint';
 import { type AgentConfig, configFields, discoverySettings } from '@/lib/runtime/config';
 
 const shortFields = new Set(['name', 'role', 'mainModel', 'evaluatorModel']);
@@ -131,6 +132,12 @@ export function ConfigFields({
                       initialValue={config[name as keyof AgentConfig] as string}
                       required={requiredFields.has(name)}
                       markdown={!short}
+                      compactMarkdown={name === 'personality'}
+                      description={
+                        name === 'mission'
+                          ? 'Describe the outcome this agent should work towards.'
+                          : undefined
+                      }
                       maxLength={
                         name === 'name'
                           ? 80
@@ -148,8 +155,11 @@ export function ConfigFields({
             {group.id === 'models' && (
               <p className="field-hint">
                 Use an OpenRouter model ID. Both steps can use the same model. Keys are managed
-                under Access; an optional server OPENROUTER_API_KEY covers agents without their own
-                key.
+                under Access; an optional{' '}
+                <TermHint hint="Set as OPENROUTER_API_KEY on the server">
+                  server default key
+                </TermHint>{' '}
+                covers agents without their own key.
               </p>
             )}
           </section>

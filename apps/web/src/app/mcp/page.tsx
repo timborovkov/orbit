@@ -2,14 +2,15 @@ import { WorkspaceHeader } from '@/app/workspace-header';
 import { McpLibrary } from '@/components/mcp-library';
 import { env } from '@/lib/env';
 import { listMcpConnections } from '@/lib/server/mcp-queries';
-import { getPendingApprovalCount } from '@/lib/server/workspace-queries';
+import { getPendingApprovalCount, listAgentOptions } from '@/lib/server/workspace-queries';
 
 export const dynamic = 'force-dynamic';
 
 export default async function McpConnectionsPage() {
-  const [{ email, items }, pendingApprovalCount] = await Promise.all([
+  const [{ email, items }, pendingApprovalCount, agents] = await Promise.all([
     listMcpConnections(),
     getPendingApprovalCount(),
+    listAgentOptions(),
   ]);
   return (
     <div className="agent-shell">
@@ -21,6 +22,7 @@ export default async function McpConnectionsPage() {
           </p>
         )}
         <McpLibrary
+          agents={agents}
           items={items.map((connection) => ({
             id: connection.id,
             name: connection.name,

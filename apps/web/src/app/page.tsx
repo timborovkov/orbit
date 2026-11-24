@@ -82,6 +82,9 @@ async function OverviewContent({ email, data }: { email: string; data: OverviewD
                   id: t.id,
                   title: t.title,
                   mission: t.config.mission,
+                  role: t.config.role,
+                  personality: t.config.personality,
+                  instructions: t.config.instructions,
                 }))}
               />
             </div>
@@ -146,7 +149,7 @@ async function OverviewContent({ email, data }: { email: string; data: OverviewD
               </form>
             </div>
             <p className="control-note">
-              The policy gateway enforces this pause before any external write would dispatch.
+              Orbit enforces this pause before any external write would be sent.
             </p>
           </section>
         </div>

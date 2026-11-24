@@ -5,6 +5,7 @@ import { useId } from 'react';
 import { saveSkill } from '@/actions/skills';
 import { MarkdownEditor } from '@/components/markdown-editor';
 import type { SkillEditorState } from '@/components/skill-editor-state';
+import { TermHint } from '@/components/term-hint';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -103,7 +104,8 @@ export function SkillEditorForm({
                 }}
               />
               <FieldDescription id={`${formId}-name-hint`}>
-                Stable id used by load_skill.
+                Short, unique name agents use to{' '}
+                <TermHint hint="Runtime tool: load_skill">open this skill</TermHint>.
               </FieldDescription>
             </Field>
           </div>

@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
-import { parseConfigForm } from '@/lib/runtime/config-form';
+import { parseConfigForm } from '@/lib/config-form';
 import {
   persistConfiguration,
   persistCredential,

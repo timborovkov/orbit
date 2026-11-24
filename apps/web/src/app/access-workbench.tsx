@@ -2,6 +2,8 @@
 
 import { type ReactNode, useEffect, useState } from 'react';
 
+import { useSearchParams } from 'next/navigation';
+
 import {
   BookOpen,
   CalendarClock,
@@ -43,7 +45,7 @@ type Workspace = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>;
 const sections = [
   { id: 'lifecycle', title: 'Lifecycle', icon: PauseCircle },
   { id: 'budgets', title: 'Budgets', icon: WalletCards },
-  { id: 'approvals', title: 'Approvals', icon: Scale },
+  { id: 'approvals', title: 'Approval rules', icon: Scale },
   { id: 'commitments', title: 'Commitments', icon: CalendarClock },
   { id: 'consent', title: 'Consent', icon: ShieldCheck },
   { id: 'skills', title: 'Skills', icon: BookOpen },
@@ -101,7 +103,16 @@ export function AccessWorkbench({
   mcpSelections: Workspace['mcpSelections'];
   research: Omit<Parameters<typeof ResearchAccess>[0], 'agentId'>;
 }) {
-  const [active, setActive] = useState<(typeof sections)[number]['id']>('lifecycle');
+  const requestedSection = useSearchParams().get('access');
+  const linkedSection = sections.find((section) => section.id === requestedSection)?.id;
+  const [active, setActive] = useState<(typeof sections)[number]['id']>(
+    linkedSection ?? 'lifecycle',
+  );
+  const [seenSection, setSeenSection] = useState(requestedSection);
+  if (requestedSection !== seenSection) {
+    setSeenSection(requestedSection);
+    if (linkedSection) setActive(linkedSection);
+  }
   const [compact, setCompact] = useState(false);
 
   useEffect(() => {

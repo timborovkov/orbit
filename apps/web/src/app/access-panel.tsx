@@ -1,10 +1,17 @@
+import type { ReactNode } from 'react';
+
 import { KeyRound } from 'lucide-react';
 
 import { AccessCredentialForms } from '@/app/access-credential-forms';
+import { TermHint } from '@/components/term-hint';
 import { FieldDescription } from '@/components/ui/field';
 import type { OpenRouterKeySource } from '@/lib/runtime/openrouter-key';
 
-const copy: Record<OpenRouterKeySource, { title: string; status: string; detail: string }> = {
+const serverKeyHint = (
+  <TermHint hint="Set as OPENROUTER_API_KEY on the server">server default key</TermHint>
+);
+
+const copy: Record<OpenRouterKeySource, { title: string; status: string; detail: ReactNode }> = {
   agent: {
     title: "Using this agent's key",
     status: 'Agent key',
@@ -14,14 +21,22 @@ const copy: Record<OpenRouterKeySource, { title: string; status: string; detail:
   environment: {
     title: 'Using environment default',
     status: 'Environment default',
-    detail:
-      'No agent-specific key. Simulations use the server OPENROUTER_API_KEY. Add a key below to override it for this agent only.',
+    detail: (
+      <>
+        No agent-specific key. Simulations use the {serverKeyHint}. Add a key below to override it
+        for this agent only.
+      </>
+    ),
   },
   none: {
     title: 'No key available',
     status: 'Not connected',
-    detail:
-      'No agent-specific key and no environment default. Add a key to run simulations, or set OPENROUTER_API_KEY on the server.',
+    detail: (
+      <>
+        No agent-specific key and no {serverKeyHint}. Add a key to run simulations, or ask an
+        administrator to configure a server default.
+      </>
+    ),
   },
 };
 

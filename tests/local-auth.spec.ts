@@ -26,6 +26,8 @@ test('local bypass skips login and sessions while preserving admin actions and a
   await page.getByLabel(/^Mission/).fill('Exercise local development against PostgreSQL.');
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page).toHaveURL(/\/agents\//);
+  await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Local agent', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Release global pause' }).click();
   await expect(page.getByRole('button', { name: 'Pause all outbound actions' })).toBeVisible();

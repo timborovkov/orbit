@@ -25,7 +25,7 @@ test('Access tab shows environment default and agent override without revealing 
   await page.getByLabel(/^Mission/).fill('Use the server OpenRouter key by default.');
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('link', { name: 'Env Default Agent', exact: true }).click();
+  await expect(page).toHaveURL(/\/agents\//);
   await openWorkspaceTab(page, 'Access');
   await openAccessSection(page, 'OpenRouter');
 

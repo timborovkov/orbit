@@ -1,9 +1,9 @@
-import Image from 'next/image';
 import Link from 'next/link';
 
 import { LogOut, Menu } from 'lucide-react';
 
 import { logout } from '@/actions/auth';
+import { BrandMark } from '@/app/brand-mark';
 import { ThemeSwitch } from '@/app/theme';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,7 +55,7 @@ export function WorkspaceHeader({
       <header className="workspace-header">
         <div className="workspace-header-inner">
           <Link href="/" className="brand" aria-label="Orbit home">
-            <Image src="/icon.svg" alt="" width={28} height={28} />
+            <BrandMark size={28} />
             <span>Orbit</span>
           </Link>
           <span className="workspace-name">Private workspace</span>

@@ -49,7 +49,7 @@ export function HistoryWorkbench({
   activityEvents,
   webResearch,
   focusRunId,
-  versionLabels,
+  versionFor,
 }: {
   agentId: string;
   history: WorkspaceHistory;
@@ -57,13 +57,12 @@ export function HistoryWorkbench({
   activityEvents: ActivityEventRow[];
   webResearch: WebResearchActivity;
   focusRunId?: string;
-  versionLabels: Record<string, number | string>;
+  versionFor: (configurationId: string) => number | string;
 }) {
   const [filters, setFilters] = useState<HistoryFilters>(defaultHistoryFilters);
   const sources = useMemo(() => uniqueHistorySources(history), [history]);
   const filtered = useMemo(() => filterHistoryRuns(history, filters), [history, filters]);
   const groups = useMemo(() => groupHistoryByDay(filtered), [filtered]);
-  const versionFor = (configurationId: string) => versionLabels[configurationId] ?? '—';
 
   return (
     <div className="history-workbench">

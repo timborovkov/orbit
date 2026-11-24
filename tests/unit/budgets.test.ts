@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test';
 
 import {
+  centsToDollarsInput,
+  dollarsInputToCents,
+  formatCapDollars,
+  formatSpendDollars,
+  spendCapCentsFromForm,
+} from '@/lib/budget-money';
+import {
   budgetDefaults,
   BudgetError,
   budgetNoCapAriaLabel,
@@ -117,4 +124,71 @@ test('spend-cap No cap switches keep distinct accessible names', () => {
   expect(budgetNoCapAriaLabel('dailySpendCents')).not.toBe(
     budgetNoCapAriaLabel('monthlySpendCents'),
   );
+});
+
+test('cents convert to dollar input values', () => {
+  expect(centsToDollarsInput(500)).toBe('5.00');
+  expect(centsToDollarsInput(450)).toBe('4.50');
+  expect(centsToDollarsInput(5)).toBe('0.05');
+  expect(centsToDollarsInput(0)).toBe('0.00');
+  expect(centsToDollarsInput(null)).toBe('');
+  expect(centsToDollarsInput(-1)).toBe('');
+  expect(centsToDollarsInput(1.5)).toBe('');
+  expect(formatCapDollars(5000)).toBe('$50.00');
+  expect(formatCapDollars(null)).toBe('No cap');
+});
+
+test('dollar input converts to whole cents with half-up rounding', () => {
+  expect(dollarsInputToCents('5')).toBe(500);
+  expect(dollarsInputToCents('4.5')).toBe(450);
+  expect(dollarsInputToCents('0.07')).toBe(7);
+  expect(dollarsInputToCents('.5')).toBe(50);
+  expect(dollarsInputToCents('5.')).toBe(500);
+  expect(dollarsInputToCents(' $1,234.56 ')).toBe(123_456);
+  expect(dollarsInputToCents('1.005')).toBe(101);
+  expect(dollarsInputToCents('1.004')).toBe(100);
+  expect(dollarsInputToCents('0.999')).toBe(100);
+  expect(dollarsInputToCents('19.995')).toBe(2000);
+  expect(dollarsInputToCents('0')).toBe(0);
+  expect(dollarsInputToCents('10000')).toBe(1_000_000);
+});
+
+test('invalid dollar input is undefined, never silently unlimited', () => {
+  for (const value of ['', '  ', '.', '$', '-1', 'abc', '1e3', '1.2.3', '1,23', null, undefined]) {
+    expect(dollarsInputToCents(value)).toBeUndefined();
+  }
+  expect(dollarsInputToCents('9'.repeat(40))).toBeUndefined();
+});
+
+test('spend form values map to schema input and round-trip through cents', () => {
+  expect(spendCapCentsFromForm(null, 'on')).toBeNull();
+  expect(spendCapCentsFromForm('12', 'on')).toBeNull();
+  expect(spendCapCentsFromForm('12.34', null)).toBe(1234);
+  expect(spendCapCentsFromForm('', null)).toBeUndefined();
+  expect(spendCapCentsFromForm(null, null)).toBeUndefined();
+  for (const cents of [0, 1, 99, 100, 450, 5000, 1_000_000]) {
+    expect(dollarsInputToCents(centsToDollarsInput(cents))).toBe(cents);
+  }
+  const over = spendCapCentsFromForm('10001', null);
+  expect(budgetsSchema.safeParse({ ...budgetDefaults, dailySpendCents: over }).success).toBe(false);
+  expect(
+    budgetsSchema.parse({ ...budgetDefaults, dailySpendCents: spendCapCentsFromForm('5', null) })
+      .dailySpendCents,
+  ).toBe(500);
+});
+
+test('spend micros format as dollars', () => {
+  expect(formatSpendDollars(0n)).toBe('$0.00');
+  expect(formatSpendDollars(-5n)).toBe('$0.00');
+  expect(formatSpendDollars(10_000n)).toBe('$0.01');
+  expect(formatSpendDollars(5_000_000n)).toBe('$5.00');
+  expect(formatSpendDollars(123_450_000n)).toBe('$123.45');
+  expect(formatSpendDollars(12_345n)).toBe('$0.0123');
+  expect(formatSpendDollars(12_350n)).toBe('$0.0124');
+  expect(formatSpendDollars(10_500n)).toBe('$0.0105');
+  expect(formatSpendDollars(1_500n)).toBe('$0.0015');
+  expect(formatSpendDollars(50n)).toBe('$0.0001');
+  expect(formatSpendDollars(49n)).toBe('<$0.0001');
+  expect(formatSpendDollars(999_960n)).toBe('$1.00');
+  expect(formatSpendDollars(1_010_000n)).toBe('$1.01');
 });

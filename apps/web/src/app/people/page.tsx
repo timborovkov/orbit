@@ -1,11 +1,14 @@
 import Link from 'next/link';
 
+import { UsersRoundIcon } from 'lucide-react';
 import { z } from 'zod';
 
 import { WorkspaceHeader } from '@/app/workspace-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { env } from '@/lib/env';
+import { formatRelativeTime, formatUtcTimestamp } from '@/lib/format';
+import { personInitials } from '@/lib/people-display';
 import { listPeople, personHref } from '@/lib/server/people-queries';
 import { getPendingApprovalCount } from '@/lib/server/workspace-queries';
 
@@ -21,17 +24,58 @@ function PeopleResults({
   query: string;
 }) {
   return entries.length ? (
-    <ul className="people-list">
+    <ul className="people-list people-directory">
       {entries.map((person) => (
         <li key={person.id}>
-          <Link
-            href={
-              linkSourceId ? `${personHref(person.id)}?link=${linkSourceId}` : personHref(person.id)
-            }
-          >
-            <strong>{person.name}</strong>
-            <span className="muted">{person.channels.join(' · ')}</span>
-          </Link>
+          <span className="people-avatar" aria-hidden="true">
+            {personInitials(person.name)}
+          </span>
+          <div className="people-row-body">
+            <div className="people-row-title">
+              <Link
+                className="people-row-link"
+                href={
+                  linkSourceId
+                    ? `${personHref(person.id)}?link=${linkSourceId}`
+                    : personHref(person.id)
+                }
+              >
+                {person.name}
+              </Link>
+              {person.handle && <span className="muted">{person.handle}</span>}
+            </div>
+            {person.relevance && <p className="people-relevance">{person.relevance}</p>}
+            <dl className="people-meta">
+              <div>
+                <dt>Channels</dt>
+                <dd>{person.channels.join(' · ') || '—'}</dd>
+              </div>
+              <div>
+                <dt>Source agent</dt>
+                <dd>
+                  {person.sourceAgent ? (
+                    <Link className="people-agent-link" href={`/agents/${person.sourceAgent.id}`}>
+                      {person.sourceAgent.name}
+                    </Link>
+                  ) : (
+                    '—'
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Last seen</dt>
+                <dd>
+                  {person.lastSeen ? (
+                    <time dateTime={person.lastSeen} title={formatUtcTimestamp(person.lastSeen)}>
+                      {formatRelativeTime(person.lastSeen)}
+                    </time>
+                  ) : (
+                    '—'
+                  )}
+                </dd>
+              </div>
+            </dl>
+          </div>
         </li>
       ))}
     </ul>
@@ -82,9 +126,19 @@ export default async function PeoplePage({
           {linkSource ? (
             <Link href={personHref(linkSource.personId)}>Cancel linking</Link>
           ) : (
-            <Button variant="outline" asChild>
-              <Link href="/people/introductions">Introductions</Link>
-            </Button>
+            <nav aria-label="People sections" className="people-tabs">
+              <Button size="sm" asChild>
+                <Link href="/people" aria-current="page">
+                  People
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/people/introductions">
+                  <UsersRoundIcon aria-hidden="true" />
+                  Introductions
+                </Link>
+              </Button>
+            </nav>
           )}
         </div>
         <form action="/people" method="get" className="people-control-row" role="search">
@@ -108,13 +162,14 @@ export default async function PeoplePage({
           )}
         </form>
         <PeopleResults entries={directory.people} linkSourceId={linkSource?.id} query={query} />
-        {(page > 1 || directory.hasOlder) && (
-          <nav aria-label="People pages" className="people-control-row">
+        {directory.people.length > 0 && (
+          <nav aria-label="People pages" className="people-control-row people-pagination">
             {page > 1 && (
               <Button variant="outline" asChild>
                 <Link href={pageHref(page - 1)}>Previous page</Link>
               </Button>
             )}
+            <span className="muted">Page {page}</span>
             {directory.hasOlder && (
               <Button variant="outline" asChild>
                 <Link href={pageHref(page + 1)}>Next page</Link>
