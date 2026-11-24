@@ -9,6 +9,12 @@ import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import {
+  centsToDollarsInput,
+  formatCapDollars,
+  formatSpendDollars,
+  spendFormFields,
+} from '@/lib/budget-money';
 import { type AgentBudgets, budgetFields, budgetNoCapAriaLabel } from '@/lib/budgets';
 import { cn } from '@/lib/utils';
 
@@ -16,11 +22,6 @@ export interface BudgetUsageView {
   day: { spendMicros: bigint; requests: number; outboundActions: number };
   month: { spendMicros: bigint; requests: number; outboundActions: number };
   activeRuns: number;
-}
-
-function formatSpendCents(micros: bigint): string {
-  const cents = Number(micros) / 10_000;
-  return Number.isInteger(cents) ? String(cents) : cents.toFixed(2);
 }
 
 function usageLine(
@@ -31,12 +32,12 @@ function usageLine(
   switch (field) {
     case 'dailySpendCents':
       return budgets.dailySpendCents === null
-        ? `Used ${formatSpendCents(usage.day.spendMicros)}¢ today · no cap`
-        : `Used ${formatSpendCents(usage.day.spendMicros)}¢ / ${budgets.dailySpendCents}¢ today`;
+        ? `Used ${formatSpendDollars(usage.day.spendMicros)} today · no cap`
+        : `Used ${formatSpendDollars(usage.day.spendMicros)} / ${formatCapDollars(budgets.dailySpendCents)} today`;
     case 'monthlySpendCents':
       return budgets.monthlySpendCents === null
-        ? `Used ${formatSpendCents(usage.month.spendMicros)}¢ this month · no cap`
-        : `Used ${formatSpendCents(usage.month.spendMicros)}¢ / ${budgets.monthlySpendCents}¢ this month`;
+        ? `Used ${formatSpendDollars(usage.month.spendMicros)} this month · no cap`
+        : `Used ${formatSpendDollars(usage.month.spendMicros)} / ${formatCapDollars(budgets.monthlySpendCents)} this month`;
     case 'dailyRequests':
       return `Used ${usage.day.requests} / ${budgets.dailyRequests} today`;
     case 'monthlyRequests':
@@ -56,7 +57,7 @@ const groups = [
   {
     id: 'spend',
     title: 'Spend caps',
-    description: 'OpenRouter spend limits in USD cents. Turn on No cap to leave a period uncapped.',
+    description: 'OpenRouter spend limits in dollars. Turn on No cap to leave a period uncapped.',
     keys: ['dailySpendCents', 'monthlySpendCents'] as const,
   },
   {
@@ -84,8 +85,8 @@ const fieldMeta: Record<
   (typeof budgetFields)[number]['key'],
   { shortLabel: string; suffix?: string; min: number }
 > = {
-  dailySpendCents: { shortLabel: 'Daily spend', suffix: '¢', min: 0 },
-  monthlySpendCents: { shortLabel: 'Monthly spend', suffix: '¢', min: 0 },
+  dailySpendCents: { shortLabel: 'Daily spend', suffix: '$', min: 0 },
+  monthlySpendCents: { shortLabel: 'Monthly spend', suffix: '$', min: 0 },
   dailyRequests: { shortLabel: 'Daily requests', min: 0 },
   monthlyRequests: { shortLabel: 'Monthly requests', min: 0 },
   dailyOutboundActions: { shortLabel: 'Daily outbound', min: 0 },
@@ -106,10 +107,14 @@ function BudgetFieldControl({
 }) {
   const field = budgetFields.find((item) => item.key === fieldKey);
   const meta = fieldMeta[fieldKey];
-  const canBeUnlimited = fieldKey === 'dailySpendCents' || fieldKey === 'monthlySpendCents';
+  const spendFields =
+    fieldKey === 'dailySpendCents' || fieldKey === 'monthlySpendCents'
+      ? spendFormFields[fieldKey]
+      : null;
+  const canBeUnlimited = spendFields !== null;
   const [unlimited, setUnlimited] = useState(() => canBeUnlimited && budgets[fieldKey] === null);
   const used = usageLine(fieldKey, budgets, usage);
-  const inputId = `budget-${fieldKey}`;
+  const inputId = `budget-${spendFields?.dollars ?? fieldKey}`;
   const usageId = used ? `${inputId}-usage` : undefined;
 
   if (!field) return null;
@@ -131,18 +136,25 @@ function BudgetFieldControl({
                 fieldKey === 'dailySpendCents' ? 'dailySpendCents' : 'monthlySpendCents',
               )}
             />
-            {unlimited ? <input type="hidden" name={`${fieldKey}Unlimited`} value="on" /> : null}
+            {unlimited && spendFields ? (
+              <input type="hidden" name={spendFields.unlimited} value="on" />
+            ) : null}
           </div>
         )}
       </div>
       <div className={cn('budget-input-wrap', meta.suffix && 'has-suffix')}>
         <Input
           id={inputId}
-          name={fieldKey}
+          name={spendFields?.dollars ?? fieldKey}
           type="number"
-          inputMode="numeric"
+          inputMode={spendFields ? 'decimal' : 'numeric'}
           min={meta.min}
-          defaultValue={budgets[fieldKey] ?? undefined}
+          step={spendFields ? '0.01' : undefined}
+          defaultValue={
+            spendFields
+              ? centsToDollarsInput(budgets[fieldKey as 'dailySpendCents' | 'monthlySpendCents'])
+              : (budgets[fieldKey] ?? undefined)
+          }
           required={!canBeUnlimited || !unlimited}
           disabled={unlimited}
           aria-describedby={usageId}
@@ -173,8 +185,8 @@ export function BudgetSettings({
       <div className="editor-section-heading">
         <h2>Budgets</h2>
         <p className="muted">
-          Choose daily and monthly spend limits independently. When either cap is enabled, model
-          calls require verified OpenRouter pricing. Request quotas apply with either spend setting.
+          Spend caps are independent and need verified OpenRouter pricing. Request quotas always
+          apply.
         </p>
       </div>
       <WorkspaceForm action={saveAgentBudgets} label="Save budgets" saveState>

@@ -98,7 +98,7 @@ test('administrators control independent spend caps, consent and proposal review
   const dailyCap = page.getByRole('switch', { name: /No cap for daily/ });
   await dailyCap.click();
   await expect(dailyCap).toHaveAttribute('aria-checked', 'true');
-  await page.getByLabel('Monthly spend', { exact: true }).fill('450');
+  await page.getByLabel('Monthly spend', { exact: true }).fill('4.50');
   await page.getByRole('button', { name: 'Save budgets', exact: true }).click();
   await expect(page.getByText('Budgets saved.')).toBeVisible();
   const [agent] = await sql`SELECT id, budgets FROM agents WHERE name='Review Agent'`;

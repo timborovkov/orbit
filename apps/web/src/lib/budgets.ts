@@ -35,12 +35,12 @@ export function budgetNoCapAriaLabel(fieldKey: 'dailySpendCents' | 'monthlySpend
 export const budgetFields = [
   {
     key: 'dailySpendCents',
-    label: 'Daily OpenRouter spend cap (USD cents)',
+    label: 'Daily OpenRouter spend cap (USD)',
     hint: 'Combine actual costs and reserved calls per UTC day.',
   },
   {
     key: 'monthlySpendCents',
-    label: 'Monthly OpenRouter spend cap (USD cents)',
+    label: 'Monthly OpenRouter spend cap (USD)',
     hint: 'Combine actual costs and reserved calls per UTC month.',
   },
   {
