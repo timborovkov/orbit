@@ -2657,6 +2657,25 @@ fieldset[aria-disabled='true'] textarea {
   gap: 8px;
   padding-bottom: 2px;
 }
+@media (max-width: 600px) {
+  .discovery-query-row,
+  .seed-list-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .discovery-query-actions {
+    padding-bottom: 0;
+  }
+  .research-seeds .editor-section-heading {
+    margin-top: 8px;
+  }
+  .research-tool-list {
+    gap: 20px;
+  }
+}
+.research-tool-list {
+  gap: 18px;
+}
 .discovery-cost-hint {
   margin-top: 4px;
 }
