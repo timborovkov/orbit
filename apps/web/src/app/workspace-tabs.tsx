@@ -12,6 +12,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+const linkableTabs = new Set(['configure', 'approvals', 'access', 'email', 'memory']);
+
 export function WorkspaceTabs({
   items,
 }: {
@@ -26,7 +28,9 @@ export function WorkspaceTabs({
   const requestedTab = search.get('tab');
   const linkedTab = historyRunId
     ? 'history'
-    : requestedTab === 'email' || requestedTab === 'memory'
+    : requestedTab &&
+        linkableTabs.has(requestedTab) &&
+        items.some((item) => item.id === requestedTab)
       ? requestedTab
       : undefined;
   const selected = linkedTab ?? selectedTab ?? items.at(0)?.id;
@@ -37,6 +41,7 @@ export function WorkspaceTabs({
       for (const key of [
         'run',
         'tab',
+        'access',
         'emailThread',
         'emailMessage',
         'emailPage',

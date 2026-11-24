@@ -2,12 +2,14 @@
 
 import { useRef, useState, useTransition } from 'react';
 
-import { MoreHorizontal, Pencil, Plus } from 'lucide-react';
+import { MoreHorizontal, Pencil, Plug, Plus } from 'lucide-react';
 
 import { removeMcpConnection } from '@/actions/mcp';
 import { LibraryEmpty, LibraryPageHeading, LibraryTable } from '@/components/library-table';
 import { McpConnectionForm } from '@/components/mcp-connection-form';
 import { emptyMcpEditor, type McpEditorState } from '@/components/mcp-editor-state';
+import { type AgentOption, OpenAgentMenu } from '@/components/open-agent-menu';
+import { TermHint } from '@/components/term-hint';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -45,7 +47,7 @@ export interface McpListItem {
   updatedAt: string;
 }
 
-export function McpLibrary({ items }: { items: McpListItem[] }) {
+export function McpLibrary({ items, agents }: { items: McpListItem[]; agents: AgentOption[] }) {
   const [open, setOpen] = useState(false);
   const [editor, setEditor] = useState<McpEditorState>(emptyMcpEditor);
   const [pending, startTransition] = useTransition();
@@ -83,7 +85,12 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
         description={
           <>
             Remote HTTP or SSE MCP servers. Auth headers are encrypted at rest and never shown back.
-            Agents opt in from Access; every tool call still passes the policy gateway.
+            Open an agent&apos;s Access → MCP to attach a connection; every tool call is still
+            checked by{' '}
+            <TermHint hint="The policy gateway checks each tool call against the agent's permissions and approval rules.">
+              Orbit&apos;s safety rules
+            </TermHint>
+            .
           </>
         }
         action={
@@ -100,10 +107,13 @@ export function McpLibrary({ items }: { items: McpListItem[] }) {
         }
       />
 
+      <OpenAgentMenu agents={agents} section="mcp" label="Attach from an agent's Access → MCP:" />
+
       {!items.length ? (
         <LibraryEmpty
+          icon={<Plug />}
           title="No MCP connections yet"
-          description="Register a shared HTTP or SSE server, choose which tools agents may see, then attach the connection from Access."
+          description="Register a shared HTTP or SSE server, choose which tools agents may see, then open an agent's Access → MCP to attach the connection."
         />
       ) : (
         <>

@@ -25,5 +25,5 @@ export async function createAgent(form: FormData) {
   const result = await createAgentFromTemplate(actor, templateId, parsed.data);
   if (!result.ok) return result;
   revalidatePath('/');
-  return { ok: true as const };
+  return { ok: true as const, agentId: result.agentId };
 }

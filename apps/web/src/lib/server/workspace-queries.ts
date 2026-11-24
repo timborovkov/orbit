@@ -43,6 +43,11 @@ export async function getPendingApprovalCount() {
   return countPendingApprovals();
 }
 
+export async function listAgentOptions() {
+  await requireAdmin();
+  return db().select({ id: agents.id, name: agents.name }).from(agents).orderBy(asc(agents.name));
+}
+
 export async function getOverview() {
   const email = await requireAdmin();
   return { email, pendingApprovalCount: countPendingApprovals(), data: loadOverviewData() };

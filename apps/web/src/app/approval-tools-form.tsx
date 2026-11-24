@@ -78,7 +78,7 @@ export function ApprovalToolsForm({
   const onRejectRef = useRef<HTMLInputElement>(null);
 
   return (
-    <WorkspaceForm action={saveApprovalTools} label="Save approval requirements">
+    <WorkspaceForm action={saveApprovalTools} label="Save approval requirements" saveState>
       <input type="hidden" name="agentId" value={agentId} />
       <input type="hidden" name="configurationVersion" value={configurationVersion} />
       <input

@@ -1,35 +1,19 @@
 import { Suspense } from 'react';
 
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { z } from 'zod';
 
-import { saveConfiguration } from '@/actions/workspace';
-import { AccessWorkbench } from '@/app/access-workbench';
-import { AgentAvatar } from '@/app/agent-avatar';
-import { ConfigFields } from '@/app/config-fields';
-import { EmailInbox } from '@/app/email-inbox';
-import { FollowUpsWorkbench } from '@/app/follow-ups-workbench';
-import { HistoryWorkbench } from '@/app/history-workbench';
-import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
+import { AgentWorkspaceHeader } from '@/app/agent-workspace-header';
+import { AgentWorkspaceTabs } from '@/app/agent-workspace-tabs';
 import { LoadingStatus } from '@/app/loading-status';
-import { MemoryWorkbench } from '@/app/memory-workbench';
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
-import { PlaygroundPanel } from '@/app/playground-panel';
-import { ProposalReview } from '@/app/policy-settings';
-import { ProfilePictureEditor } from '@/app/profile-picture-editor';
-import { WorkspaceForm } from '@/app/workspace-form';
 import { WorkspaceHeader } from '@/app/workspace-header';
-import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
-import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
-import { canEnqueueSimulation, lifecycleLabels } from '@/lib/lifecycle';
+import { canEnqueueSimulation } from '@/lib/lifecycle';
 import { ACTIVE_CRAWL_STATES, type CrawlStatus } from '@/lib/research';
-import { channelGrantOptions } from '@/lib/runtime/channels/registry';
 import { followUpWorkspaceRefresh } from '@/lib/runtime/follow-ups/refresh';
-import { isCommitmentTool } from '@/lib/runtime/follow-ups/types';
 import { openRouterConnectionLabel } from '@/lib/runtime/openrouter-key';
 import { getEmailInbox } from '@/lib/server/email-queries';
 import { listActivityEventsForAgent, listFollowUpsForAgent } from '@/lib/server/follow-up-queries';
@@ -43,7 +27,6 @@ import { getWebResearchAccess, getWebResearchActivity } from '@/lib/server/resea
 import { listSkillSummaries } from '@/lib/server/skills-queries';
 import { getAgentWorkspace } from '@/lib/server/workspace-queries';
 import { getXReplyConnection } from '@/lib/server/x-reply-connection';
-import { storageConfigured } from '@/lib/storage/objects';
 
 interface WorkspaceSearch {
   run?: string;
@@ -127,7 +110,6 @@ export default async function AgentWorkspace({
     getWebResearchAccess(id),
   ]);
   const lifecycle = agent.lifecycle;
-  const approvalSettings = current.approvalSettings ?? agent;
   const canSimulate = canEnqueueSimulation(lifecycle);
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -156,97 +138,7 @@ export default async function AgentWorkspace({
   const knowledgeDocumentCount =
     knowledgeDocuments.length +
     sharedLibraries.reduce((sum, library) => sum + library.documentCount, 0);
-  const versionFor = (configurationId: string) =>
-    versions.find((version) => version.id === configurationId)?.version ?? '—';
-  const configuration = (
-    <section id="configuration" className="configuration-workbench">
-      <WorkspaceForm
-        key={current.id}
-        action={saveConfiguration}
-        label="Save configuration"
-        saveState
-      >
-        <input type="hidden" name="agentId" value={id} />
-        <input type="hidden" name="version" value={current.version} />
-        <ConfigFields
-          config={current.config}
-          prefix="agent"
-          identityContent={
-            <ProfilePictureEditor
-              id={id}
-              name={agent.name}
-              pictureKey={agent.pictureKey}
-              configured={storageConfigured()}
-            />
-          }
-        />
-      </WorkspaceForm>
-    </section>
-  );
-  const enabledTools = new Set(agent.enabledTools);
-  const access = (
-    <AccessWorkbench
-      agentId={id}
-      agentName={agent.name}
-      lifecycle={lifecycle}
-      budgets={agent.budgets}
-      usage={usage}
-      configurationVersion={current.version}
-      approvalTools={approvalSettings.approvalTools}
-      approvalExpiresAfterHours={approvalSettings.approvalExpiresAfterHours}
-      approvalOnReject={approvalSettings.approvalOnReject}
-      approvalSpendCents={approvalSettings.approvalSpendCents}
-      xAccount={xReplyConnection?.username ?? null}
-      enabledCommitmentTools={agent.enabledTools.filter(isCommitmentTool)}
-      channelActions={channelGrantOptions().map((option) => ({
-        ...option,
-        enabled: enabledTools.has(option.type),
-      }))}
-      consentRequiredTools={agent.consentRequiredTools}
-      enabledTools={agent.enabledTools}
-      consents={consents}
-      hasAgentCredential={hasAgentCredential}
-      keySource={keySource}
-      skills={librarySkills}
-      skillIds={skillIds}
-      mcpConnections={libraryMcp.map(({ id, name, url, transport, toolAllowlist, updatedAt }) => ({
-        id,
-        name,
-        url,
-        transport,
-        revision: updatedAt.toISOString(),
-        readOnlyTools:
-          toolAllowlist?.filter((tool) => tool.readOnly).map((tool) => tool.name) ?? [],
-      }))}
-      mcpSelections={mcpSelections}
-      research={webResearchAccess}
-    />
-  );
-  const approvalQueue = <ProposalReview agentId={id} reviews={reviews} />;
-  const playground = (
-    <PlaygroundPanel
-      agentId={id}
-      agentName={agent.name}
-      canSimulate={canSimulate}
-      lifecycle={lifecycle}
-      versions={versions}
-      currentConfigurationId={current.id}
-      history={history}
-      latestRun={latestPlaygroundRun}
-      versionFor={versionFor}
-    />
-  );
-  const historyPanel = (
-    <HistoryWorkbench
-      agentId={id}
-      history={history}
-      versions={versions}
-      activityEvents={activityEvents}
-      webResearch={webResearch}
-      focusRunId={focusRunId}
-      versionFor={versionFor}
-    />
-  );
+
   return (
     <div className="agent-shell">
       <WorkspaceHeader pendingApprovalCount={pendingApprovalCount} />
@@ -254,33 +146,15 @@ export default async function AgentWorkspace({
         {env().AUTH_DISABLED && (
           <p className="local-auth-notice">Authentication disabled · Local development · {email}</p>
         )}
-        <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-          <Link href="/#agents">Agents</Link>
-        </nav>
-        <div className="agent-title-row">
-          <div className="agent-title-identity">
-            <AgentAvatar
-              id={id}
-              name={agent.name}
-              pictureKey={agent.pictureKey}
-              className="agent-monogram"
-            />
-            <div>
-              <div className="agent-name-line">
-                <h1>{agent.name}</h1>
-                <span className="state-label">
-                  <span className="status-dot" />
-                  {lifecycleLabels[lifecycle]}
-                </span>
-              </div>
-              <p className="muted">{current.config.role || 'Custom agent'}</p>
-            </div>
-          </div>
-          <div className="agent-version">
-            <span>Configuration v{current.version}</span>
-            <span className="muted">{openRouterConnectionLabel(keySource)}</span>
-          </div>
-        </div>
+        <AgentWorkspaceHeader
+          id={id}
+          name={agent.name}
+          pictureKey={agent.pictureKey}
+          role={current.config.role}
+          lifecycle={lifecycle}
+          version={current.version}
+          keyLabel={openRouterConnectionLabel(keySource)}
+        />
         <PendingRunRefresh
           active={hasActiveWork || followUpRefresh.pollFrequently}
           refreshAt={followUpRefresh.refreshAt}
@@ -293,76 +167,38 @@ export default async function AgentWorkspace({
             </div>
           }
         >
-          <WorkspaceTabs
-            key={id}
-            items={[
-              { id: 'configure', label: 'Configuration', content: configuration },
-              { id: 'playground', label: 'Playground', content: playground },
-              {
-                id: 'knowledge',
-                label: 'Knowledge',
-                count: knowledgeDocumentCount,
-                content: (
-                  <KnowledgeWorkbench
-                    agentId={id}
-                    documents={knowledgeDocuments}
-                    sharedLibraries={sharedLibraries}
-                    storageReady={storageConfigured()}
-                    searchEnabled={agent.enabledTools.includes(KNOWLEDGE_SEARCH_TOOL)}
-                  />
-                ),
-              },
-              {
-                id: 'memory',
-                label: 'Memory',
-                content: (
-                  <MemoryWorkbench
-                    agentId={id}
-                    rows={memory.rows}
-                    page={memoryPage}
-                    hasMore={memory.hasMore}
-                    today={today}
-                    retention={{
-                      factDays: agent.memoryFactRetentionDays,
-                      noteDays: agent.memoryNoteRetentionDays,
-                      outcomeDays: agent.memoryOutcomeRetentionDays,
-                      intervalDays: agent.memoryMaintenanceIntervalDays,
-                    }}
-                  />
-                ),
-              },
-              {
-                id: 'email',
-                label: 'Email',
-                content: (
-                  <EmailInbox
-                    agentId={id}
-                    inbox={inbox}
-                    page={emailPage}
-                    messagePage={inbox.messagePage}
-                  />
-                ),
-              },
-              {
-                id: 'follow-ups',
-                label: 'Follow-ups',
-                count: followUps.length,
-                content: <FollowUpsWorkbench agentId={id} items={followUps} />,
-              },
-              {
-                id: 'history',
-                label: 'History',
-                count: history.length + activityEvents.length,
-                content: historyPanel,
-              },
-              {
-                id: 'approvals',
-                label: 'Approvals',
-                count: reviews.filter((review) => review.status === 'pending').length,
-                content: approvalQueue,
-              },
-              { id: 'access', label: 'Access', content: access },
-            ]}
+          <AgentWorkspaceTabs
+            id={id}
+            agent={agent}
+            current={current}
+            versions={versions}
+            history={history}
+            latestPlaygroundRun={latestPlaygroundRun}
+            reviews={reviews}
+            usage={usage}
+            skillIds={skillIds}
+            mcpSelections={mcpSelections}
+            consents={consents}
+            hasAgentCredential={hasAgentCredential}
+            keySource={keySource}
+            canSimulate={canSimulate}
+            lifecycle={lifecycle}
+            knowledgeDocuments={knowledgeDocuments}
+            sharedLibraries={sharedLibraries}
+            librarySkills={librarySkills}
+            libraryMcp={libraryMcp}
+            inbox={inbox}
+            followUps={followUps}
+            activityEvents={activityEvents}
+            xAccount={xReplyConnection?.username ?? null}
+            memory={memory}
+            memoryPage={memoryPage}
+            emailPage={emailPage}
+            today={today}
+            focusRunId={focusRunId}
+            webResearch={webResearch}
+            webResearchAccess={webResearchAccess}
+            knowledgeDocumentCount={knowledgeDocumentCount}
           />
         </Suspense>
       </main>

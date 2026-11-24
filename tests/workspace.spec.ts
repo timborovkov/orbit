@@ -29,6 +29,8 @@ test('template copies, independent versions, encrypted keys and durable manual r
     await expect(page.getByLabel(/^Mission/)).not.toHaveValue('');
     await page.getByRole('button', { name: 'Create shadow agent' }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
+    await page.waitForURL(/\/agents\//);
+    await page.goto('/');
   }
   await page.getByRole('link', { name: 'John', exact: true }).click();
   await expect(page).toHaveURL(/\/agents\//);
@@ -45,7 +47,7 @@ test('template copies, independent versions, encrypted keys and durable manual r
     'Direct, energetic, and always concise.',
   );
   await page.getByRole('button', { name: 'Save configuration', exact: true }).click();
-  await expect(page.getByText('Configuration v2', { exact: false })).toBeVisible();
+  await expect(page.getByText('Version 2', { exact: true })).toBeVisible();
   await staleTab.getByLabel('Personality', { exact: true }).fill('Unsaved stale edit');
   await staleTab.getByRole('button', { name: 'Save configuration', exact: true }).click();
   await expect(staleTab.locator('#configuration').getByRole('alert')).toContainText(

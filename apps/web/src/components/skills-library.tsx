@@ -2,12 +2,14 @@
 
 import { useRef, useState, useTransition } from 'react';
 
-import { MoreHorizontal, Pencil, Plus } from 'lucide-react';
+import { BookOpen, MoreHorizontal, Pencil, Plus } from 'lucide-react';
 
 import { removeSkill } from '@/actions/skills';
 import { LibraryEmpty, LibraryPageHeading, LibraryTable } from '@/components/library-table';
+import { type AgentOption, OpenAgentMenu } from '@/components/open-agent-menu';
 import { SkillEditorForm } from '@/components/skill-editor-form';
 import { emptySkillEditor, type SkillEditorState } from '@/components/skill-editor-state';
+import { TermHint } from '@/components/term-hint';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -44,7 +46,13 @@ export interface SkillListItem {
   updatedAt: string;
 }
 
-export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
+export function SkillsLibrary({
+  items,
+  agents,
+}: {
+  items: SkillListItem[];
+  agents: AgentOption[];
+}) {
   const [open, setOpen] = useState(false);
   const [editor, setEditor] = useState<SkillEditorState>(emptySkillEditor);
   const [pending, startTransition] = useTransition();
@@ -77,8 +85,9 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
         title="Skills"
         description={
           <>
-            Shared Markdown skills. Agents opt in from Access; prompts only receive names and
-            descriptions until <code>load_skill</code> fetches a body.
+            Shared Markdown skills. Open an agent&apos;s Access → Skills to attach them; agents only
+            see each skill&apos;s name and description until they{' '}
+            <TermHint hint="Runtime tool: load_skill">open the full skill</TermHint>.
           </>
         }
         action={
@@ -95,13 +104,21 @@ export function SkillsLibrary({ items }: { items: SkillListItem[] }) {
         }
       />
 
+      <OpenAgentMenu
+        agents={agents}
+        section="skills"
+        label="Attach from an agent's Access → Skills:"
+      />
+
       {!items.length ? (
         <LibraryEmpty
+          icon={<BookOpen />}
           title="No skills yet"
           description={
             <>
-              Create a reusable skill once, then attach it to any agent from Access. Bodies stay
-              progressive until <code>load_skill</code> runs.
+              Create a reusable skill once, then open an agent&apos;s Access → Skills to attach it.
+              The full text loads only when an agent{' '}
+              <TermHint hint="Runtime tool: load_skill">opens the skill</TermHint>.
             </>
           }
         />

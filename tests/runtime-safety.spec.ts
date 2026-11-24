@@ -22,6 +22,8 @@ async function createAgent(page: Page, name: string) {
   await page.getByLabel(/^Mission/).fill('Operate within budgets and lifecycle controls.');
   await page.getByRole('button', { name: 'Create shadow agent' }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
+  await page.waitForURL(/\/agents\//);
+  await page.goto('/');
 }
 
 test.beforeEach(async () => {
@@ -98,7 +100,7 @@ test('administrators control independent spend caps, consent and proposal review
   const dailyCap = page.getByRole('switch', { name: /No cap for daily/ });
   await dailyCap.click();
   await expect(dailyCap).toHaveAttribute('aria-checked', 'true');
-  await page.getByLabel('Monthly spend', { exact: true }).fill('450');
+  await page.getByLabel('Monthly spend', { exact: true }).fill('4.50');
   await page.getByRole('button', { name: 'Save budgets', exact: true }).click();
   await expect(page.getByText('Budgets saved.')).toBeVisible();
   const [agent] = await sql`SELECT id, budgets FROM agents WHERE name='Review Agent'`;
@@ -127,7 +129,7 @@ test('administrators control independent spend caps, consent and proposal review
   await page.getByRole('button', { name: 'Save consent', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Recent consent records' })).toContainText('Revoked');
 
-  await openAccessSection(page, 'Approvals');
+  await openAccessSection(page, 'Approval rules');
   const replyApproval = page.getByRole('switch', { name: 'Reply', exact: true });
   await replyApproval.click();
   await expect(replyApproval).toHaveAttribute('aria-checked', 'true');

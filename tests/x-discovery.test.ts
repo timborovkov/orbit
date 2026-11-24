@@ -416,6 +416,7 @@ test('createAgentFromTemplate enqueues discovery poll when template has xSearchQ
       mission: 'Find discovery leads',
     });
     expect(created.ok).toBe(true);
+    expect(created.ok && created.agentId).toBeTruthy();
 
     const [agent] = await sql`SELECT id FROM agents WHERE name=${name}`;
     expect(agent?.id).toBeTruthy();

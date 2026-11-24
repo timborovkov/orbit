@@ -38,6 +38,8 @@ test('private agent pictures survive RustFS restart, preserve edits and support 
     await page.getByLabel(/^Name/).fill(name);
     await page.getByRole('button', { name: 'Create shadow agent' }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
+    await page.waitForURL(/\/agents\//);
+    await page.goto('/');
   }
   await page.getByRole('link', { name: 'John', exact: true }).click();
   await expect(page).toHaveURL(/\/agents\//);

@@ -4,6 +4,7 @@ import { asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { relevanceSnippet } from '@/lib/people-display';
 import { channelLabel } from '@/lib/runtime/channels/registry';
 import { getPersonContextForAgent, listPersonInteractions } from '@/lib/runtime/people/history';
 import {
@@ -36,6 +37,26 @@ const latestPeopleSources = sql`
   ) post on true
 `;
 
+function personActivity(condition: ReturnType<typeof sql>) {
+  return sql`
+    select entry.agent_id, entry.occurred_at, entry.excerpt from (
+      select mail_entry.agent_id, mail_entry.received_at as occurred_at, mail_entry.id,
+        mail_entry.subject as excerpt
+      from person_identities activity_identity
+      join email_messages mail_entry on mail_entry.person_identity_id = activity_identity.id
+      where activity_identity.person_id = person.id
+      union all
+      select post_entry.agent_id, coalesce(post_entry.provider_created_at, post_entry.ingested_at),
+        post_entry.id, left(post_entry.text, 400)
+      from person_identities activity_identity
+      join source_events post_entry on post_entry.person_identity_id = activity_identity.id
+        and post_entry.provider = activity_identity.channel
+      where activity_identity.person_id = person.id
+    ) entry
+    where ${condition} order by entry.occurred_at desc, entry.id desc limit 1
+  `;
+}
+
 export function personHref(personId: string) {
   return `/people/${personId}`;
 }
@@ -63,12 +84,26 @@ export async function listPeople(query: string, page: number, linkIdentityId?: s
     ))
   `
     : sql``;
-  const rows = await store.execute<{ id: string; name: string; channels: string[] }>(sql`
+  const rows = await store.execute<{
+    id: string;
+    name: string;
+    handle: string | null;
+    sourceAgentId: string | null;
+    sourceAgentName: string | null;
+    relevance: string | null;
+    lastSeen: string | null;
+    channels: string[];
+  }>(sql`
     select person.id, coalesce(primary_identity.label, primary_contact.label) as name,
+      primary_identity.handle, source_agent.id as "sourceAgentId", source_agent.name as "sourceAgentName",
+      latest_activity.excerpt as relevance,
+      to_char(latest_activity.occurred_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as "lastSeen",
       array(select distinct channel from person_identities where person_id = person.id order by channel) as channels
     from people person
     left join lateral (
-      select ${displayNameSql} as label
+      select ${displayNameSql} as label,
+        case when post.author_username is not null then '@' || post.author_username
+          when identity.channel = 'email' then identity.identity_key end as handle
       from person_identities identity ${latestPeopleSources}
       where identity.person_id = person.id order by (identity.home_person_id = identity.person_id) desc, identity.channel, identity.id limit 1
     ) primary_identity on true
@@ -76,12 +111,21 @@ export async function listPeople(query: string, page: number, linkIdentityId?: s
       select contact.label from person_contacts contact where contact.person_id = person.id
       order by contact.kind, contact.id limit 1
     ) primary_contact on true
+    left join lateral (${personActivity(sql`true`)}) latest_activity on true
+    left join agents source_agent on source_agent.id = latest_activity.agent_id
     where (primary_identity.label is not null or primary_contact.label is not null) ${omitSource} ${match}
     order by person.created_at desc, person.id desc limit ${peoplePerPage + 1} offset ${(page - 1) * peoplePerPage}
   `);
   return {
     people: rows.slice(0, peoplePerPage).map((row) => ({
-      ...row,
+      id: row.id,
+      name: row.name,
+      handle: row.handle && row.handle !== row.name ? row.handle : null,
+      sourceAgent: row.sourceAgentId
+        ? { id: row.sourceAgentId, name: row.sourceAgentName ?? 'Agent' }
+        : null,
+      relevance: relevanceSnippet(row.relevance),
+      lastSeen: row.lastSeen,
       channels: row.channels.map(channelLabel),
     })),
     hasOlder: rows.length > peoplePerPage,

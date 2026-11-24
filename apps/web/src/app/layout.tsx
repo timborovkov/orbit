@@ -6,6 +6,7 @@ import Script from 'next/script';
 
 import '@/app/globals.css';
 
+import { ToastProvider } from '@/components/ui/toast';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 export const viewport: Viewport = {
@@ -29,7 +30,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Script src="/theme.js" strategy="beforeInteractive" />
       </head>
       <body>
-        <TooltipProvider>{children}</TooltipProvider>
+        <TooltipProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </TooltipProvider>
       </body>
     </html>
   );
