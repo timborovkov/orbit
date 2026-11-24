@@ -10,7 +10,7 @@ import { createLiveXSearchAdapter, X_RECENT_SEARCH_MAX_PAGES } from '@/lib/runti
 import { formatDiscoveryInput } from '@/lib/runtime/x/poll';
 import { optionalXBearerToken } from '@/lib/runtime/x/settings';
 
-test('config schema defaults empty X search query', () => {
+test('config schema defaults empty X search queries and discovery controls', () => {
   const parsed = configSchema.parse({
     name: 'John',
     role: 'Sales',
@@ -22,6 +22,25 @@ test('config schema defaults empty X search query', () => {
     evaluatorModel: 'test/eval',
   });
   expect(parsed.xSearchQuery).toBe('');
+  expect(parsed.xSearchQueries).toEqual([]);
+  expect(parsed.xDiscoveryPaused).toBe(false);
+  expect(parsed.xDiscoveryMaxPostsPerPoll).toBe(10);
+});
+
+test('config schema maps legacy xSearchQuery into xSearchQueries', () => {
+  const parsed = configSchema.parse({
+    name: 'John',
+    role: 'Sales',
+    personality: 'Warm',
+    mission: 'Find customers',
+    instructions: 'Be helpful',
+    engagementCriteria: 'Buying intent',
+    xSearchQuery: 'founder SaaS',
+    mainModel: 'test/main',
+    evaluatorModel: 'test/eval',
+  });
+  expect(parsed.xSearchQueries).toEqual(['founder SaaS']);
+  expect(parsed.xSearchQuery).toBe('founder SaaS');
 });
 
 test('optional X bearer token rejects whitespace and accepts unset', () => {

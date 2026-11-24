@@ -5,7 +5,7 @@ import { canAcceptBackgroundWork } from '@/lib/lifecycle';
 import { enqueueJob } from '@/lib/queue/jobs';
 import type { JobRecord } from '@/lib/queue/types';
 import { admitChannelEvent, persistChannelEvent } from '@/lib/runtime/channels/ingest';
-import { type AgentConfig, configSchema } from '@/lib/runtime/config';
+import { type AgentConfig, configSchema, discoveryQueries } from '@/lib/runtime/config';
 import {
   lockPeople,
   observedClaimedHandle,
@@ -13,7 +13,9 @@ import {
   xEmailClaim,
 } from '@/lib/runtime/people/identity';
 import { createXSearchAdapter } from '@/lib/runtime/x/adapter';
+import { clampDiscoveryMaxPosts } from '@/lib/runtime/x/discovery-cost';
 import { compareSnowflake } from '@/lib/runtime/x/fixture';
+import { capDiscoveryPosts, prefilterDiscoveryPosts } from '@/lib/runtime/x/relevance-prefilter';
 import { xPostId } from '@/lib/runtime/x/reply-input';
 import {
   X_DISCOVERY_ACTOR,
@@ -233,8 +235,10 @@ async function resolvePollContinuation(
       .orderBy(desc(configurations.version))
       .limit(1)
   ).at(0);
-  const query = version ? readConfig(version.config).xSearchQuery.trim() : '';
-  if (!query) return { ...result, deferUntil: undefined };
+  const config = version ? readConfig(version.config) : null;
+  if (!config || config.xDiscoveryPaused || !discoveryQueries(config).length) {
+    return { ...result, deferUntil: undefined };
+  }
 
   const key = discoveryPollIdempotencyKey(agentId);
   await ensureDiscoveryPollJob(agentId, tx, nextPoll, jobId);
@@ -335,8 +339,8 @@ export async function processDiscoveryPoll(
     }
 
     const config = readConfig(version.config);
-    const query = config.xSearchQuery.trim();
-    if (!query) {
+    const queries = discoveryQueries(config);
+    if (!queries.length) {
       const cursor = await readCursor(tx, agentId);
       await upsertCursor(tx, agentId, {
         sinceId: cursor?.sinceId ?? null,
@@ -350,6 +354,26 @@ export async function processDiscoveryPoll(
           tx,
           agentId,
           emptyResult('no_query', cursor?.sinceId),
+          nextPoll,
+          jobId,
+        ),
+      };
+    }
+
+    if (config.xDiscoveryPaused) {
+      const cursor = await readCursor(tx, agentId);
+      await upsertCursor(tx, agentId, {
+        sinceId: cursor?.sinceId ?? null,
+        lastStatus: 'paused',
+        lastError: null,
+        lastPolledAt: now,
+      });
+      return {
+        kind: 'done' as const,
+        result: await resolvePollContinuation(
+          tx,
+          agentId,
+          emptyResult('paused', cursor?.sinceId),
           nextPoll,
           jobId,
         ),
@@ -386,20 +410,35 @@ export async function processDiscoveryPoll(
       kind: 'search' as const,
       agent,
       version,
-      query,
+      config,
+      queries,
       sinceId: cursor?.sinceId ?? null,
     };
   });
 
   if (prep.kind === 'done') return prep.result;
 
-  let search;
+  const maxPosts = clampDiscoveryMaxPosts(prep.config.xDiscoveryMaxPostsPerPoll);
+  const merged = new Map<string, XSearchPost>();
+  let newestId = prep.sinceId;
   try {
-    search = await adapter.searchRecent({
-      query: prep.query,
-      sinceId: prep.sinceId,
-      signal,
-    });
+    // Queries are independent; search in parallel then merge/cap.
+    const searches = await Promise.all(
+      prep.queries.map((query) =>
+        adapter.searchRecent({
+          query,
+          sinceId: prep.sinceId,
+          maxResults: Math.min(Math.max(maxPosts, 10), 100),
+          signal,
+        }),
+      ),
+    );
+    for (const search of searches) {
+      for (const post of search.posts) merged.set(post.id, post);
+      if (search.newestId && (!newestId || compareSnowflake(search.newestId, newestId) > 0)) {
+        newestId = search.newestId;
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'X search failed.';
     return await db().transaction(async (tx) => {
@@ -423,6 +462,14 @@ export async function processDiscoveryPoll(
     });
   }
 
+  const ordered = [...merged.values()].sort((a, b) => compareSnowflake(a.id, b.id));
+  const { kept } = prefilterDiscoveryPosts(ordered, {
+    mission: prep.config.mission,
+    engagementCriteria: prep.config.engagementCriteria,
+    hints: prep.queries,
+  });
+  const posts = capDiscoveryPosts(kept, maxPosts);
+
   return await db().transaction(async (tx) => {
     // Re-lock agent so pause/stop between prep and persist still stops evaluation.
     const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
@@ -432,10 +479,10 @@ export async function processDiscoveryPoll(
       const status = !agent ? 'agent_missing' : `skipped_${agent.lifecycle}`;
       // Persist fetched posts even when lifecycle flipped — they stay unevaluated
       // until a later poll admits them; advance since_id so we do not re-fetch.
-      const inserted = await persistPosts(tx, agentId, search.posts);
+      const inserted = await persistPosts(tx, agentId, posts);
       let sinceId = prep.sinceId;
-      if (search.newestId && (!sinceId || compareSnowflake(search.newestId, sinceId) > 0)) {
-        sinceId = search.newestId;
+      if (newestId && (!sinceId || compareSnowflake(newestId, sinceId) > 0)) {
+        sinceId = newestId;
       }
       await upsertCursor(tx, agentId, {
         sinceId,
@@ -453,12 +500,12 @@ export async function processDiscoveryPoll(
       );
     }
 
-    const inserted = await persistPosts(tx, agentId, search.posts);
+    const inserted = await persistPosts(tx, agentId, posts);
 
     let sinceId = prep.sinceId;
-    if (search.newestId) {
-      if (!sinceId || compareSnowflake(search.newestId, sinceId) > 0) {
-        sinceId = search.newestId;
+    if (newestId) {
+      if (!sinceId || compareSnowflake(newestId, sinceId) > 0) {
+        sinceId = newestId;
       }
     }
 

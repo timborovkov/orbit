@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { checkOrigin, requireAdmin } from '@/lib/auth';
-import { configSchema } from '@/lib/runtime/config';
+import { parseConfigForm } from '@/lib/runtime/config-form';
 import {
   persistConfiguration,
   persistCredential,
@@ -16,7 +16,7 @@ const uuid = z.uuid();
 export async function saveConfiguration(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
-  const parsed = configSchema.safeParse(Object.fromEntries(form));
+  const parsed = parseConfigForm(form);
   if (!parsed.success)
     return {
       error: 'Check the name, text lengths and model IDs. Models must use provider/model format.',
@@ -33,7 +33,7 @@ export async function saveTemplate(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
   // Template name is supplied when creating an agent, not inherited.
-  const parsed = configSchema.safeParse({ ...Object.fromEntries(form), name: 'New agent' });
+  const parsed = parseConfigForm(form, { name: 'New agent' });
   if (!parsed.success) return { error: 'Check text lengths and model IDs.' };
   const id = z.string().max(80).parse(form.get('templateId'));
   const revision = z.coerce.number().int().positive().parse(form.get('revision'));
