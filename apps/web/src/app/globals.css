@@ -1656,6 +1656,46 @@ fieldset[aria-disabled='true'] textarea {
   font-size: 0.75rem;
   margin-inline-end: auto;
 }
+.toast-viewport {
+  position: fixed;
+  inset-block-end: max(16px, env(safe-area-inset-bottom));
+  inset-inline-end: max(16px, env(safe-area-inset-right));
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+.toast {
+  min-width: 200px;
+  max-width: 360px;
+  padding: 10px 14px;
+  border: 1px solid var(--strong-border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px #0002;
+  pointer-events: auto;
+  animation: toast-in 150ms ease-out;
+}
+.toast-success {
+  border-inline-start: 3px solid var(--ink);
+}
+.toast-error {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
 .configuration-workbench > .workspace-form > .workspace-form-footer,
 .template-row > .workspace-form > .workspace-form-footer {
   padding: 16px 32px;
@@ -2103,8 +2143,14 @@ fieldset[aria-disabled='true'] textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px 20px;
 }
+.budget-card-grid > .budget-field {
+  min-width: 0;
+  width: 100%;
+  align-content: start;
+}
 .budget-field-heading {
   display: flex;
+  min-height: 32px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -2130,7 +2176,7 @@ fieldset[aria-disabled='true'] textarea {
 }
 .budget-input-wrap {
   position: relative;
-  max-width: 280px;
+  width: 100%;
 }
 .budget-input-wrap.has-suffix [data-slot='input'] {
   padding-inline-end: 44px;

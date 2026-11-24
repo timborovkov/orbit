@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 
 import { SubmitButton } from '@/components/ui/submit-button';
+import { useToast } from '@/components/ui/toast';
 
 export function WorkspaceForm({
   action,
@@ -18,38 +19,50 @@ export function WorkspaceForm({
   disabled?: boolean;
 }) {
   const [dirty, setDirty] = useState(false);
-  const [state, setState] = useState<{ error?: string; message?: string }>({});
+  const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
+  const { toast, dismiss } = useToast();
+  const toastId = useRef<number>(null);
+
+  function markDirty() {
+    setDirty(true);
+    if (toastId.current !== null) {
+      dismiss(toastId.current);
+      toastId.current = null;
+    }
+  }
+
   return (
     <form
       action={(data) => {
         if (disabled) return;
         startTransition(async () => {
-          setState({});
+          setError(undefined);
           try {
             const result = await action(data);
-            setState(result);
-            if (!result.error) setDirty(false);
+            if (result.error) {
+              setError(result.error);
+              return;
+            }
+            setDirty(false);
+            toastId.current = toast(result.message ?? 'Saved');
           } catch {
-            setState({
-              error:
-                'Unable to save. Check your connection and try again. Re-enter the API key if saving credentials.',
-            });
+            setError(
+              'Unable to save. Check your connection and try again. Re-enter the API key if saving credentials.',
+            );
           }
         });
       }}
-      onChange={() => {
-        setDirty(true);
-      }}
+      onInput={markDirty}
+      onChange={markDirty}
       className="workspace-form"
     >
       <fieldset disabled={pending || disabled}>{children}</fieldset>
-      {state.error && (
+      {error && (
         <p role="alert" className="form-error">
-          {state.error}
+          {error}
         </p>
       )}
-      {state.message && <p role="status">{state.message}</p>}
       <div className="workspace-form-footer">
         {saveState && (
           <span className="save-status">{dirty ? 'Unsaved changes' : 'All changes saved'}</span>
