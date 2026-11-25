@@ -22,8 +22,7 @@ export function LifecycleControls({
       <div className="editor-section-heading">
         <h2>Lifecycle</h2>
         <p className="muted">
-          Only administrators can change lifecycle. Every change is audited. Live sends still depend
-          on the channel connection, permissions, recipient policy and budgets.
+          Administrator-only. Live sends still need channel access and policy.
         </p>
       </div>
       <ul className="lifecycle-cards" role="list" aria-label="Agent lifecycle">

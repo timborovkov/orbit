@@ -18,6 +18,7 @@ export type HistoryRunLike = {
   createdAt: Date | string;
   sourceTitle: string;
   channelName?: string;
+  authorHandle?: string | null;
 };
 
 export type HistoryFilters = {
@@ -100,4 +101,22 @@ export function groupHistoryByDay<T extends HistoryRunLike>(
 
 export function uniqueHistorySources(runs: readonly HistoryRunLike[]): string[] {
   return [...new Set(runs.map(historySourceKey))].sort();
+}
+
+export function paginateHistoryRuns<T>(
+  runs: readonly T[],
+  page: number,
+  pageSize: number,
+): { items: T[]; page: number; totalPages: number; total: number } {
+  const size = Math.max(1, pageSize);
+  const total = runs.length;
+  const totalPages = Math.max(1, Math.ceil(total / size));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * size;
+  return {
+    items: runs.slice(start, start + size),
+    page: safePage,
+    totalPages,
+    total,
+  };
 }

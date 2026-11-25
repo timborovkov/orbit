@@ -18,7 +18,8 @@ test('policy gateway denies global pause', () => {
     { type: 'reply', idempotencyKey: 'k1' },
   );
   expect(result.decision).toBe('deny');
-  expect(result.reasons.join(' ')).toContain('Global outbound pause');
+  expect(result.reasons.join(' ')).toContain('Global outbound pause is enabled');
+  expect(result.reasons.join(' ')).toContain('Release it before approving');
 });
 
 test('policy gateway denies stopped and paused agents', () => {

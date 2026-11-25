@@ -6,6 +6,7 @@ import {
   groupHistoryByDay,
   historyDayKey,
   matchesHistoryFilters,
+  paginateHistoryRuns,
 } from '@/lib/runtime/history-filters';
 
 const runs = [
@@ -63,4 +64,13 @@ test('filterHistoryRuns and groupHistoryByDay keep newest-first day buckets', ()
   expect(groups.map((group) => group.dayKey)).toEqual(['2026-11-24', '2026-11-23']);
   expect(historyDayKey(runs[0]!.createdAt)).toBe('2026-11-24');
   expect(formatHistoryDayHeading('2026-11-24')).toContain('Nov');
+});
+
+test('paginateHistoryRuns clamps page and slices stably', () => {
+  const page1 = paginateHistoryRuns(runs, 1, 2);
+  expect(page1.items.map((run) => run.id)).toEqual(['a', 'b']);
+  expect(page1.totalPages).toBe(2);
+  const page2 = paginateHistoryRuns(runs, 99, 2);
+  expect(page2.page).toBe(2);
+  expect(page2.items.map((run) => run.id)).toEqual(['c']);
 });

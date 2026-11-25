@@ -74,13 +74,17 @@ export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: st
   const runFilter = filterRunId
     ? or(eq(actionIntents.runId, filterRunId), eq(introductionProposals.runId, filterRunId))
     : undefined;
-  const [team, items, pending, pendingTotal] = await Promise.all([
-    db().select({ id: agents.id, name: agents.name }).from(agents).orderBy(asc(agents.name)),
+  const [team, items, pending, pendingTotal, controlRows] = await Promise.all([
+    db()
+      .select({ id: agents.id, name: agents.name, lifecycle: agents.lifecycle })
+      .from(agents)
+      .orderBy(asc(agents.name)),
     db()
       .select({
         id: actionIntents.id,
         agentId: actionIntents.agentId,
         agentName: agents.name,
+        agentLifecycle: agents.lifecycle,
         runId: sql<string | null>`coalesce(${actionIntents.runId}, ${introductionProposals.runId})`,
         introductionId: introductionProposals.id,
         actionType: actionIntents.actionType,
@@ -106,12 +110,16 @@ export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: st
       .leftJoin(introductionProposals, eq(introductionProposals.reviewIntentId, actionIntents.id))
       .where(and(eq(actionIntents.reviewStatus, 'pending'), agentFilter, runFilter)),
     countPendingApprovals(),
+    db().select({ paused: controls.paused }).from(controls).where(eq(controls.id, 1)).limit(1),
   ]);
+  const agentStates = Object.fromEntries(team.map((agent) => [agent.id, agent.lifecycle]));
   return {
-    team,
+    team: team.map(({ id, name }) => ({ id, name })),
     items,
     pendingCount: pending[0]?.count ?? 0,
     totalPendingCount: pendingTotal,
+    globalPaused: controlRows[0]?.paused ?? true,
+    agentStates,
   };
 }
 
@@ -155,6 +163,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     activeRuns,
     skillRows,
     mcpRows,
+    controlRows,
   ] = await Promise.all([
     db()
       .select()
@@ -172,6 +181,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
         sourceTitle: runMemoryEvidence.title,
         sourceHref: runMemoryEvidence.href,
         sourceLinkLabel: runMemoryEvidence.linkLabel,
+        authorHandle: runMemoryEvidence.author,
       })
       .from(runs)
       .leftJoin(
@@ -233,6 +243,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
       })
       .from(agentMcpConnections)
       .where(eq(agentMcpConnections.agentId, id)),
+    db().select({ paused: controls.paused }).from(controls).where(eq(controls.id, 1)).limit(1),
   ]);
   const current = versions.at(0);
   if (!current) return null;
@@ -247,6 +258,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     sourceTitle,
     sourceHref,
     sourceLinkLabel,
+    authorHandle,
   }: (typeof history)[number]) => {
     // awaiting_approval waits on reviewExpiresAt, not the execution deadline.
     const expired = isExpiredSimulationRun(run);
@@ -255,6 +267,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
       ...run,
       personId,
       sourceTitle: sourceTitle || run.input,
+      authorHandle,
       sourceHref: sourceHref?.endsWith(`#run-${run.id}`) ? null : sourceHref,
       sourceLinkLabel,
       channelName: channelForRun(run)?.label ?? run.channel ?? 'Playground',
@@ -307,10 +320,12 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
             sourceTitle: null,
             sourceHref: null,
             sourceLinkLabel: null,
+            authorHandle: null,
           })
         : undefined),
     reviews,
     pendingApprovalCount: pendingApprovals,
+    globalPaused: controlRows[0]?.paused ?? true,
     consents,
     current,
     skillIds: skillRows.map((row) => row.skillId),

@@ -176,12 +176,13 @@ The global pause action submits the desired state so repeating a request has
 the same effect. Show its current state in text and give the action a pending
 label while it saves.
 
-After authentication, Overview keeps its heading and navigation visible while
-the agent summary, table and activity load. Placeholders use the same responsive
-grid and table columns as the loaded view. Keep them static and out of the
-accessibility tree. A visible loading status announces the wait. Routes with
-variable content use a compact Orbit loading indicator. Spinner motion follows
-the reduced-motion preference.
+Console routes share a persistent header layout. Segment `loading.tsx` files
+keep that chrome mounted and show content-area skeletons shaped like lists or
+forms instead of a full-page Orbit splash. Overview still streams its table and
+activity behind placeholders. Keep skeletons static and out of the accessibility
+tree; a visible loading status announces the wait. Spinner motion follows the
+reduced-motion preference. Do not add skeletons to static public pages such as
+sign-in.
 
 ### Sign-in and appearance
 
@@ -207,8 +208,10 @@ Use the shared primary, outline, ghost and destructive buttons. The standard
 height is 36px, workspace save controls are at least 40px and key touch actions
 are at least 44px. Gate pointer hover effects by input capability. Pointer press
 feedback uses a short scale transition with a strong ease-out. Keyboard actions
-and reduced-motion interaction remain immediate. Use a visible two-pixel
-focus outline with clearance from the control.
+and reduced-motion interaction remain immediate. Use a subtle two-pixel
+`:focus-visible` outline on interactive controls only. Skip-link targets and
+other `tabIndex={-1}` landmarks must not draw a focus ring around large content
+regions.
 
 Use the shared shadcn Field, Label, Description, Error, Input and Textarea
 primitives with the dedicated control-border token. Align related inputs at
@@ -288,10 +291,11 @@ text composer is easy to reach. Explain that model usage can incur charges
 and that the simulation does not post or send anything. Use the same
 recipient IDs as the consent records.
 
-The History tab is the agent activity timeline: playground simulations and
-X discovery evaluations. Label each entry by origin. Discovery rows show
-evaluator reasoning and proposed actions; shadow mode keeps proposals
-recorded and never sent.
+The History tab is a compact, scannable run list: one line per run with source,
+author/handle when known, a short plain-text title (HTML entities decoded and
+tags stripped), status badge, relative time and configuration version. Expand a
+row for full details. Filters stay client-side; paginate when the filtered set
+is long. Keep the configuration-versions sidebar compact.
 
 Show queued, running, awaiting approval, completed, failed and interrupted
 states from persisted records. Stop watching explains that inference can
@@ -488,7 +492,11 @@ The workspace Approvals inbox shows pending proposals newest first and groups
 resolved entries under History. Show agent, action, recipients, originating
 run link when available, draft and age. Use one initial timestamp for relative
 ages on the server and browser and show the full UTC timestamp on demand.
-Support filtering by agent or run, and cap bulk selection at 50.
+Support filtering by agent or run, and cap bulk selection at 50. Approve and
+Reject always show pending state plus toast and inline feedback. When the agent
+is paused or the global outbound pause is on, disable Approve with a clear
+reason; Reject still works. Agent Approvals uses the same horizontal action row
+pattern as the inbox and email draft review.
 
 Use the registered **X reply** label for reply proposals and channel
 permissions. Keep the author and source post fixed. Shadow proposals stay

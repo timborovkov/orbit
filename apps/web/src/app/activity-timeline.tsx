@@ -19,7 +19,7 @@ export function ActivityTimeline({ events }: { events: ActivityEventRow[] }) {
     <section className="activity-timeline" aria-labelledby="activity-timeline-heading">
       <div className="editor-section-heading">
         <h2 id="activity-timeline-heading">Follow-ups & replies</h2>
-        <p className="muted">Scheduled follow-ups and outbound X replies for this agent.</p>
+        <p className="muted">Follow-up outcomes and outbound replies.</p>
       </div>
       <ol className="activity-timeline-list">
         {events.map((event) => (

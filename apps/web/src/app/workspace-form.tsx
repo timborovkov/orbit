@@ -42,14 +42,16 @@ export function WorkspaceForm({
             const result = await action(data);
             if (result.error) {
               setError(result.error);
+              toastId.current = toast(result.error, { variant: 'error' });
               return;
             }
             setDirty(false);
             toastId.current = toast(result.message ?? 'Saved');
           } catch {
-            setError(
-              'Unable to save. Check your connection and try again. Re-enter the API key if saving credentials.',
-            );
+            const message =
+              'Unable to save. Check your connection and try again. Re-enter the API key if saving credentials.';
+            setError(message);
+            toastId.current = toast(message, { variant: 'error' });
           }
         });
       }}
