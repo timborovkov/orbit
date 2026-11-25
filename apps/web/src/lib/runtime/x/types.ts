@@ -7,6 +7,25 @@ export interface XSearchPost {
   authorUsername?: string;
   authorName?: string;
   createdAt?: string;
+  lang?: string;
+  postType?: 'original' | 'reply' | 'quote' | 'retweet';
+  hasLinks?: boolean;
+  hasMedia?: boolean;
+  metrics?: {
+    likeCount?: number | null;
+    repostCount?: number | null;
+    replyCount?: number | null;
+    quoteCount?: number | null;
+    impressionCount?: number | null;
+  };
+  author?: {
+    description?: string | null;
+    location?: string | null;
+    verified?: boolean | null;
+    followersCount?: number | null;
+    followingCount?: number | null;
+    createdAt?: string | null;
+  };
   /** Raw provider payload retained for audit / replay. */
   raw: Record<string, unknown>;
 }

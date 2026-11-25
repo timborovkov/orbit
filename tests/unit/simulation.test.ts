@@ -29,6 +29,13 @@ const config: AgentConfig = {
   xSearchQueries: [],
   xDiscoveryPaused: false,
   xDiscoveryMaxPostsPerPoll: 10,
+  xDiscoveryFilters: {
+    version: 1,
+    maxPostAgeHours: 2,
+    skipRecentlyEngagedAuthors: false,
+    recentlyEngagedWithinHours: 24,
+    rules: [{ field: 'post.lang', op: 'eq', value: 'en' }],
+  },
   mainModel: 'test/main',
   evaluatorModel: 'test/evaluator',
 };

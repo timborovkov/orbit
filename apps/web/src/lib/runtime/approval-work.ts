@@ -257,14 +257,59 @@ export async function expireApproval(
   intent: ApprovalIntent,
   now: Date,
   actor = 'system:approval-expiry',
+  reason = expiredApprovalReason,
 ) {
   await recordApprovalReviews(tx, [intent], {
     actor,
     agentName: agent.name,
     status: 'rejected',
-    reason: expiredApprovalReason,
+    reason,
     now,
     note: 'expired',
   });
   if (intent.runId) await settleApprovalRun(tx, agent, intent.runId, actor);
+}
+
+const discoveryExpiredReason =
+  'Pending reply expired because the original post exceeded the agent’s max post age.';
+
+/**
+ * Auto-expire pending X reply proposals whose source posts are past maxPostAge.
+ * Uses the same durable reconcile loop as lease recovery / approval expiry.
+ */
+export async function expireStaleDiscoveryApprovals(actor = 'system:discovery-expiry') {
+  const { listStaleDiscoveryApprovals } = await import('@/lib/runtime/x/discovery-filters');
+  const candidates = await db().transaction(async (tx) => listStaleDiscoveryApprovals(tx, 100));
+  let expired = 0;
+  for (const { id, agentId } of candidates) {
+    const intent = await db().transaction(async (tx) => {
+      const agent = await lockApprovalAgent(tx, agentId);
+      if (!agent) return;
+      const now = new Date();
+      const intent = (
+        await tx
+          .select()
+          .from(actionIntents)
+          .where(and(eq(actionIntents.id, id), eq(actionIntents.reviewStatus, 'pending')))
+          .for('update')
+      ).at(0);
+      if (!intent) return;
+      // Re-check under the lock in case the post is still within age.
+      const { discoveryApprovalBlockReason } = await import('@/lib/runtime/x/discovery-filters');
+      const block = await discoveryApprovalBlockReason(tx, intent, now);
+      if (!block) return;
+      await expireApproval(tx, agent, intent, now, actor, discoveryExpiredReason);
+      return intent;
+    });
+    if (intent) {
+      expired++;
+      recordApprovalDecision({
+        intentId: intent.id,
+        agentId,
+        runId: intent.runId,
+        decision: 'rejected',
+      });
+    }
+  }
+  return { expired };
 }

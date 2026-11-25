@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, ne, or } from 'drizzle-orm';
 
 import { db, type Tx } from '@/lib/db';
 import { canAcceptBackgroundWork } from '@/lib/lifecycle';
@@ -17,6 +17,12 @@ import {
   clampDiscoveryMaxPosts,
   X_DISCOVERY_PAGES_PER_QUERY,
 } from '@/lib/runtime/x/discovery-cost';
+import {
+  applyDiscoveryFilters,
+  type DiscoveryFilterOutcome,
+  loadRecentlyEngagedAuthorIds,
+  normalizeDiscoveryFilters,
+} from '@/lib/runtime/x/discovery-filters';
 import { compareSnowflake } from '@/lib/runtime/x/fixture';
 import { capDiscoveryPosts, prefilterDiscoveryPosts } from '@/lib/runtime/x/relevance-prefilter';
 import { xPostId } from '@/lib/runtime/x/reply-input';
@@ -28,7 +34,14 @@ import {
   type XSearchAdapter,
   type XSearchPost,
 } from '@/lib/runtime/x/types';
-import { agents, configurations, discoveryCursors, jobs, sourceEvents } from '@/lib/schema';
+import {
+  agentActivityEvents,
+  agents,
+  configurations,
+  discoveryCursors,
+  jobs,
+  sourceEvents,
+} from '@/lib/schema';
 
 export interface DiscoveryPollOptions {
   adapter?: XSearchAdapter;
@@ -162,6 +175,10 @@ async function persistPosts(
   tx: Tx,
   agentId: string,
   posts: XSearchPost[],
+  options: {
+    admissionStatus?: 'pending' | 'rejected';
+    admissionReason?: string | null;
+  } = {},
 ): Promise<(typeof sourceEvents.$inferSelect)[]> {
   if (!posts.length) return [];
   const rows = await Promise.all(
@@ -178,6 +195,12 @@ async function persistPosts(
         authorName: post.authorName ?? null,
         personClaim: post.authorId && post.authorUsername ? xEmailClaim(post.text) : null,
         providerCreatedAt: post.createdAt ? new Date(post.createdAt) : null,
+        ...(options.admissionStatus
+          ? {
+              admissionStatus: options.admissionStatus,
+              admissionReason: options.admissionReason ?? null,
+            }
+          : {}),
       }),
     ),
   );
@@ -199,6 +222,37 @@ async function persistPosts(
   return inserted;
 }
 
+async function persistFilteredOutPosts(
+  tx: Tx,
+  agentId: string,
+  rejected: DiscoveryFilterOutcome[],
+) {
+  await Promise.all(
+    rejected.map((outcome) =>
+      persistPosts(tx, agentId, [outcome.post], {
+        admissionStatus: 'rejected',
+        admissionReason: outcome.skipReason,
+      }),
+    ),
+  );
+  if (!rejected.length) return;
+  const sample = rejected
+    .slice(0, 5)
+    .map((outcome) => {
+      const handle = outcome.post.authorUsername
+        ? `@${outcome.post.authorUsername}`
+        : outcome.post.id;
+      return `${handle}: ${outcome.skipReason}`;
+    })
+    .join(' · ');
+  await tx.insert(agentActivityEvents).values({
+    agentId,
+    kind: 'discovery.filter_skip',
+    summary: `Skipped ${rejected.length} X post${rejected.length === 1 ? '' : 's'} by discovery filters.`,
+    detail: sample,
+  });
+}
+
 async function listUnevaluatedEvents(tx: Tx, agentId: string) {
   return tx
     .select()
@@ -208,6 +262,7 @@ async function listUnevaluatedEvents(tx: Tx, agentId: string) {
         eq(sourceEvents.agentId, agentId),
         eq(sourceEvents.provider, X_PROVIDER),
         isNull(sourceEvents.runId),
+        or(isNull(sourceEvents.admissionStatus), ne(sourceEvents.admissionStatus, 'rejected')),
       ),
     )
     .orderBy(asc(sourceEvents.ingestedAt), asc(sourceEvents.providerEventId));
@@ -468,18 +523,39 @@ export async function processDiscoveryPoll(
   }
 
   const ordered = [...merged.values()].sort((a, b) => compareSnowflake(a.id, b.id));
-  const { kept } = prefilterDiscoveryPosts(ordered, {
-    mission: prep.config.mission,
-    engagementCriteria: prep.config.engagementCriteria,
-    hints: prep.queries,
-  });
-  const posts = capDiscoveryPosts(kept, maxPosts);
+  const filters = normalizeDiscoveryFilters(prep.config.xDiscoveryFilters);
 
   return await db().transaction(async (tx) => {
     // Re-lock agent so pause/stop between prep and persist still stops evaluation.
     const agent = (await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')).at(
       0,
     );
+    const authorIds = ordered
+      .map((post) => post.authorId)
+      .filter((id): id is string => Boolean(id));
+    const recentlyEngagedAuthorIds = filters.skipRecentlyEngagedAuthors
+      ? await loadRecentlyEngagedAuthorIds(
+          tx,
+          agentId,
+          authorIds,
+          filters.recentlyEngagedWithinHours,
+          now,
+        )
+      : new Set<string>();
+    const filtered = applyDiscoveryFilters(ordered, {
+      filters,
+      now,
+      recentlyEngagedAuthorIds,
+    });
+    await persistFilteredOutPosts(tx, agentId, filtered.rejected);
+
+    const { kept } = prefilterDiscoveryPosts(filtered.kept, {
+      mission: prep.config.mission,
+      engagementCriteria: prep.config.engagementCriteria,
+      hints: prep.queries,
+    });
+    const posts = capDiscoveryPosts(kept, maxPosts);
+
     if (!agent || !canAcceptBackgroundWork(agent.lifecycle)) {
       const status = !agent ? 'agent_missing' : `skipped_${agent.lifecycle}`;
       // Persist fetched posts even when lifecycle flipped — they stay unevaluated

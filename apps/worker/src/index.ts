@@ -9,7 +9,11 @@ import { registerErrorCapture } from '@/lib/observability/errors';
 import { sentryInitOptions } from '@/lib/observability/sentry-runtime';
 import type { JobRecord } from '@/lib/queue/types';
 import { startJobWorker } from '@/lib/queue/worker';
-import { expireStaleApprovals, reconcileSuspendedApprovals } from '@/lib/runtime/approval-work';
+import {
+  expireStaleApprovals,
+  expireStaleDiscoveryApprovals,
+  reconcileSuspendedApprovals,
+} from '@/lib/runtime/approval-work';
 import { CHANNEL_EVENT_JOB, processChannelEventJob } from '@/lib/runtime/channels/ingest';
 import {
   channelJobs,
@@ -218,6 +222,7 @@ const worker = startJobWorker({
       reconcileDeadOutboundJobs(),
       scheduleMemoryMaintenance(),
       expireStaleApprovals(),
+      expireStaleDiscoveryApprovals(),
       reconcileSuspendedApprovals(),
     ]);
   },
