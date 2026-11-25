@@ -2738,39 +2738,53 @@ fieldset[aria-disabled='true'] textarea {
   gap: 32px;
 }
 .history-run-summary {
-  display: flex;
+  display: grid;
   flex: 1;
-  flex-wrap: wrap;
+  grid-template-columns: minmax(0, 1fr) minmax(9.75rem, max-content) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 8px 16px;
   min-width: 0;
 }
 .history-run-line {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: baseline;
   gap: 8px 12px;
   min-width: 0;
+  overflow: hidden;
 }
 .history-run-source,
 .history-run-author,
 .history-run-version {
+  flex-shrink: 0;
   color: var(--muted);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.75rem;
 }
+.history-run-status {
+  display: flex;
+  justify-content: flex-start;
+  min-width: 0;
+}
+.history-run-status [data-slot='badge'] {
+  max-width: 100%;
+}
 .history-run-meta {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px 12px;
+  white-space: nowrap;
 }
 .history-run-row > summary {
   padding: 12px 0;
 }
 .history-run-row .run-title {
-  display: inline;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.8125rem;
 }
 .history-pagination {
@@ -3248,6 +3262,14 @@ fieldset[aria-disabled='true'] textarea {
   }
   .history-workbench {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .history-run-summary {
+    grid-template-columns: minmax(0, 1fr) minmax(7.5rem, max-content);
+    gap: 6px 12px;
+  }
+  .history-run-meta {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
   .version-history {
     padding-inline-start: 0;

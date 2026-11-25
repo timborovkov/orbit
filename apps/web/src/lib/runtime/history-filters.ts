@@ -53,6 +53,21 @@ export function filterHistoryRuns<T extends HistoryRunLike>(
   return runs.filter((run) => matchesHistoryFilters(run, filters));
 }
 
+function historyCreatedAtMs(value: Date | string): number {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  const ms = date.getTime();
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+/** Newest createdAt first; stable on id when timestamps match. */
+export function sortHistoryRunsNewestFirst<T extends HistoryRunLike>(runs: readonly T[]): T[] {
+  return [...runs].sort((left, right) => {
+    const delta = historyCreatedAtMs(right.createdAt) - historyCreatedAtMs(left.createdAt);
+    if (delta !== 0) return delta;
+    return right.id.localeCompare(left.id);
+  });
+}
+
 /** UTC calendar day key YYYY-MM-DD. */
 export function historyDayKey(value: Date | string): string {
   const date = typeof value === 'string' ? new Date(value) : value;
@@ -81,22 +96,28 @@ export type HistoryDayGroup<T extends HistoryRunLike> = {
   runs: T[];
 };
 
-/** Group newest-first runs into day buckets (also newest-first). */
+/**
+ * Sort runs newest-first by time, then group into day buckets (newest day first).
+ * Does not rely on input order — SQL boosts (focus run, recent crawl) must not scramble days.
+ */
 export function groupHistoryByDay<T extends HistoryRunLike>(
   runs: readonly T[],
 ): HistoryDayGroup<T>[] {
+  const sorted = sortHistoryRunsNewestFirst(runs);
   const groups = new Map<string, T[]>();
-  for (const run of runs) {
+  for (const run of sorted) {
     const key = historyDayKey(run.createdAt);
     const list = groups.get(key);
     if (list) list.push(run);
     else groups.set(key, [run]);
   }
-  return [...groups.entries()].map(([dayKey, dayRuns]) => ({
-    dayKey,
-    label: formatHistoryDayHeading(dayKey),
-    runs: dayRuns,
-  }));
+  return [...groups.entries()]
+    .sort(([left], [right]) => right.localeCompare(left))
+    .map(([dayKey, dayRuns]) => ({
+      dayKey,
+      label: formatHistoryDayHeading(dayKey),
+      runs: dayRuns,
+    }));
 }
 
 export function uniqueHistorySources(runs: readonly HistoryRunLike[]): string[] {

@@ -7,6 +7,7 @@ import {
   historyDayKey,
   matchesHistoryFilters,
   paginateHistoryRuns,
+  sortHistoryRunsNewestFirst,
 } from '@/lib/runtime/history-filters';
 
 const runs = [
@@ -33,6 +34,42 @@ const runs = [
     configurationId: 'cfg-1',
     createdAt: '2026-11-23T09:00:00.000Z',
     sourceTitle: 'Older',
+  },
+];
+
+/** Intentionally scrambled like SQL focus/crawl boosts can produce. */
+const scrambledDays = [
+  {
+    id: 'old',
+    origin: 'discovery',
+    displayStatus: 'completed',
+    configurationId: 'cfg-1',
+    createdAt: '2026-11-23T18:00:00.000Z',
+    sourceTitle: 'Monday boost',
+  },
+  {
+    id: 'newest',
+    origin: 'discovery',
+    displayStatus: 'awaiting_approval',
+    configurationId: 'cfg-2',
+    createdAt: '2026-11-25T08:00:00.000Z',
+    sourceTitle: 'Wednesday',
+  },
+  {
+    id: 'mid-late',
+    origin: 'playground',
+    displayStatus: 'completed',
+    configurationId: 'cfg-1',
+    createdAt: '2026-11-24T20:00:00.000Z',
+    sourceTitle: 'Tuesday evening',
+  },
+  {
+    id: 'mid-early',
+    origin: 'discovery',
+    displayStatus: 'failed',
+    configurationId: 'cfg-1',
+    createdAt: '2026-11-24T09:00:00.000Z',
+    sourceTitle: 'Tuesday morning',
   },
 ];
 
@@ -64,6 +101,15 @@ test('filterHistoryRuns and groupHistoryByDay keep newest-first day buckets', ()
   expect(groups.map((group) => group.dayKey)).toEqual(['2026-11-24', '2026-11-23']);
   expect(historyDayKey(runs[0]!.createdAt)).toBe('2026-11-24');
   expect(formatHistoryDayHeading('2026-11-24')).toContain('Nov');
+});
+
+test('sortHistoryRunsNewestFirst then groupHistoryByDay orders scrambled days newest first', () => {
+  const sorted = sortHistoryRunsNewestFirst(scrambledDays);
+  expect(sorted.map((run) => run.id)).toEqual(['newest', 'mid-late', 'mid-early', 'old']);
+
+  const groups = groupHistoryByDay(scrambledDays);
+  expect(groups.map((group) => group.dayKey)).toEqual(['2026-11-25', '2026-11-24', '2026-11-23']);
+  expect(groups[1]!.runs.map((run) => run.id)).toEqual(['mid-late', 'mid-early']);
 });
 
 test('paginateHistoryRuns clamps page and slices stably', () => {

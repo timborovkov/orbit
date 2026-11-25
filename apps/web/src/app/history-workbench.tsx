@@ -27,6 +27,7 @@ import {
   type HistoryFilters,
   type HistoryFilterStatus,
   paginateHistoryRuns,
+  sortHistoryRunsNewestFirst,
   uniqueHistorySources,
 } from '@/lib/runtime/history-filters';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
@@ -90,7 +91,10 @@ export function HistoryWorkbench({
   const [filters, setFilters] = useState<HistoryFilters>(defaultHistoryFilters);
   const [page, setPage] = useState(1);
   const sources = useMemo(() => uniqueHistorySources(history), [history]);
-  const filtered = useMemo(() => filterHistoryRuns(history, filters), [history, filters]);
+  const filtered = useMemo(
+    () => sortHistoryRunsNewestFirst(filterHistoryRuns(history, filters)),
+    [history, filters],
+  );
   const paged = useMemo(() => paginateHistoryRuns(filtered, page, PAGE_SIZE), [filtered, page]);
   const groups = useMemo(() => groupHistoryByDay(paged.items), [paged.items]);
   const now = useMemo(() => new Date(), []);
@@ -210,8 +214,10 @@ export function HistoryWorkbench({
                               {title}
                             </span>
                           </div>
-                          <div className="history-run-meta">
+                          <div className="history-run-status">
                             <StatusBadge status={run.displayStatus} />
+                          </div>
+                          <div className="history-run-meta">
                             <time
                               dateTime={run.createdAt.toISOString()}
                               title={formatUtcTimestamp(run.createdAt)}
