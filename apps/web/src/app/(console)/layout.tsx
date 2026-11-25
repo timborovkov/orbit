@@ -20,9 +20,7 @@ async function PendingHeader() {
 export default function ConsoleLayout({ children }: { children: ReactNode }) {
   return (
     <div className="console-shell">
-      <Suspense
-        fallback={<WorkspaceHeader pendingApprovalCount={0} authDisabled={env().AUTH_DISABLED} />}
-      >
+      <Suspense fallback={<WorkspaceHeader pendingApprovalCount={0} />}>
         <PendingHeader />
       </Suspense>
       {children}
