@@ -5,6 +5,7 @@ import {
   formatHistoryDayHeading,
   groupHistoryByDay,
   historyDayKey,
+  historyPageForRunId,
   matchesHistoryFilters,
   paginateHistoryRuns,
   sortHistoryRunsNewestFirst,
@@ -119,4 +120,11 @@ test('paginateHistoryRuns clamps page and slices stably', () => {
   const page2 = paginateHistoryRuns(runs, 99, 2);
   expect(page2.page).toBe(2);
   expect(page2.items.map((run) => run.id)).toEqual(['c']);
+});
+
+test('historyPageForRunId selects the page that contains a focused run', () => {
+  expect(historyPageForRunId(runs, undefined, 2)).toBeNull();
+  expect(historyPageForRunId(runs, 'a', 2)).toBe(1);
+  expect(historyPageForRunId(runs, 'c', 2)).toBe(2);
+  expect(historyPageForRunId(runs, 'missing', 2)).toBe(1);
 });

@@ -26,6 +26,7 @@ import {
   groupHistoryByDay,
   type HistoryFilters,
   type HistoryFilterStatus,
+  historyPageForRunId,
   paginateHistoryRuns,
   sortHistoryRunsNewestFirst,
   uniqueHistorySources,
@@ -89,7 +90,11 @@ export function HistoryWorkbench({
   const versionFor = (configurationId: string) =>
     versions.find((version) => version.id === configurationId)?.version ?? '—';
   const [filters, setFilters] = useState<HistoryFilters>(defaultHistoryFilters);
-  const [page, setPage] = useState(1);
+  // Parent remounts this workbench when focusRunId changes (see key=); land on that page.
+  const [page, setPage] = useState(() => {
+    const ordered = sortHistoryRunsNewestFirst(filterHistoryRuns(history, defaultHistoryFilters));
+    return historyPageForRunId(ordered, focusRunId, PAGE_SIZE) ?? 1;
+  });
   const sources = useMemo(() => uniqueHistorySources(history), [history]);
   const filtered = useMemo(
     () => sortHistoryRunsNewestFirst(filterHistoryRuns(history, filters)),
@@ -272,7 +277,7 @@ export function HistoryWorkbench({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={page <= 1}
+                disabled={paged.page <= 1}
                 onClick={() => {
                   setPage((current) => Math.max(1, current - 1));
                 }}
@@ -286,7 +291,7 @@ export function HistoryWorkbench({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={page >= paged.totalPages}
+                disabled={paged.page >= paged.totalPages}
                 onClick={() => {
                   setPage((current) => Math.min(paged.totalPages, current + 1));
                 }}

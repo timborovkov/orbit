@@ -2,12 +2,12 @@ import { LoadingStatus } from '@/app/loading-status';
 
 function ContentListSkeleton({ label = 'Loading…', rows = 4 }: { label?: string; rows?: number }) {
   return (
-    <div className="content-skeleton" aria-hidden="true">
+    <div className="content-skeleton">
       <div className="content-skeleton-heading">
-        <span className="overview-placeholder w-32" />
+        <span className="overview-placeholder w-32" aria-hidden="true" />
         <LoadingStatus>{label}</LoadingStatus>
       </div>
-      <ul className="content-skeleton-list">
+      <ul className="content-skeleton-list" aria-hidden="true">
         {Array.from({ length: rows }, (_, index) => (
           <li key={index} className="content-skeleton-row">
             <span className="overview-placeholder w-16" />
@@ -22,12 +22,12 @@ function ContentListSkeleton({ label = 'Loading…', rows = 4 }: { label?: strin
 
 function FormSkeleton({ label = 'Loading…' }: { label?: string }) {
   return (
-    <div className="content-skeleton" aria-hidden="true">
+    <div className="content-skeleton">
       <div className="content-skeleton-heading">
-        <span className="overview-placeholder w-40" />
+        <span className="overview-placeholder w-40" aria-hidden="true" />
         <LoadingStatus>{label}</LoadingStatus>
       </div>
-      <div className="content-skeleton-form">
+      <div className="content-skeleton-form" aria-hidden="true">
         {[0, 1, 2].map((row) => (
           <div key={row} className="content-skeleton-field">
             <span className="overview-placeholder w-24" />
@@ -46,15 +46,15 @@ export function AgentWorkspaceSkeleton() {
   return (
     <div className="agent-shell">
       <main className="workspace-main" id="main" tabIndex={-1}>
-        <div className="agent-workspace-skeleton" aria-hidden="true">
-          <div className="agent-workspace-skeleton-header">
+        <div className="agent-workspace-skeleton">
+          <div className="agent-workspace-skeleton-header" aria-hidden="true">
             <span className="avatar overview-placeholder" />
             <div className="overview-agent-placeholder">
               <span className="overview-placeholder w-40" />
               <span className="overview-placeholder w-24" />
             </div>
           </div>
-          <div className="agent-workspace-skeleton-tabs">
+          <div className="agent-workspace-skeleton-tabs" aria-hidden="true">
             {[0, 1, 2, 3, 4].map((tab) => (
               <span key={tab} className="overview-placeholder w-20" />
             ))}
@@ -77,7 +77,10 @@ export function ConsolePageSkeleton({
     <main className="workspace-main" id="main" tabIndex={-1}>
       <div className="page-heading">
         <div>
-          <span className={`overview-placeholder ${titleWidth} content-skeleton-title`} />
+          <span
+            className={`overview-placeholder ${titleWidth} content-skeleton-title`}
+            aria-hidden="true"
+          />
         </div>
       </div>
       {kind === 'form' ? <FormSkeleton /> : <ContentListSkeleton />}

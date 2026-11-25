@@ -8,6 +8,16 @@ const namedEntities: Record<string, string> = {
   nbsp: ' ',
 };
 
+const UNICODE_MAX_CODE_POINT = 0x10ffff;
+
+/** Convert a numeric entity only when the code point is in the Unicode range. */
+function codePointFromNumericEntity(code: number, match: string): string {
+  if (!Number.isFinite(code) || code < 0 || code > UNICODE_MAX_CODE_POINT) {
+    return match;
+  }
+  return String.fromCodePoint(code);
+}
+
 export function decodeHtmlEntities(value: string): string {
   let current = value;
   // Repeat so nested encodings like `&amp;nbsp;` fully resolve.
@@ -16,11 +26,11 @@ export function decodeHtmlEntities(value: string): string {
       const lower = entity.toLowerCase();
       if (lower.startsWith('#x')) {
         const code = Number.parseInt(lower.slice(2), 16);
-        return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+        return codePointFromNumericEntity(code, match);
       }
       if (lower.startsWith('#')) {
         const code = Number.parseInt(lower.slice(1), 10);
-        return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+        return codePointFromNumericEntity(code, match);
       }
       return namedEntities[lower] ?? match;
     });

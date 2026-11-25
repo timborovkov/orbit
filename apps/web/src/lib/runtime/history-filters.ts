@@ -141,3 +141,19 @@ export function paginateHistoryRuns<T>(
     total,
   };
 }
+
+/**
+ * Page that contains `runId` in the already-ordered list (1-based).
+ * Missing ids return page 1 so deep links still land on a valid page.
+ */
+export function historyPageForRunId(
+  runs: readonly { id: string }[],
+  runId: string | undefined,
+  pageSize: number,
+): number | null {
+  if (!runId) return null;
+  const size = Math.max(1, pageSize);
+  const index = runs.findIndex((run) => run.id === runId);
+  if (index < 0) return 1;
+  return Math.floor(index / size) + 1;
+}

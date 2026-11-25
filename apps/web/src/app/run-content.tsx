@@ -14,7 +14,6 @@ import { WebCitations } from '@/app/web-citations';
 import { formatUtcTimestamp } from '@/lib/format';
 import { draftAnswerFromResult, groundedAnswerFromResult } from '@/lib/runtime/simulation';
 import type { runs } from '@/lib/schema';
-import { plainTextSnippet } from '@/lib/text/plain-snippet';
 
 function PolicyLabel({ policy }: { policy: string | undefined }) {
   if (policy === 'allow') {
@@ -64,7 +63,7 @@ export function RunContent({
     <div className="run-content">
       <section className="run-input">
         <h3>Input</h3>
-        <p className="preserve-text">{plainTextSnippet(run.input, 4000)}</p>
+        <p className="preserve-text">{run.input}</p>
       </section>
       {interrupted && (
         <div className="run-notice">

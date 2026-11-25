@@ -218,6 +218,7 @@ export function AgentWorkspaceTabs({
           count: history.length + activityEvents.length,
           content: (
             <HistoryWorkbench
+              key={focusRunId ?? 'history'}
               agentId={id}
               history={history}
               versions={versions}
