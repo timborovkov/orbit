@@ -438,7 +438,15 @@ test('createAgentFromTemplate enqueues discovery poll when template has xSearchQ
 test('a discovery run can remember a project detail with evidence from its event', async () => {
   const agentId = await createAgent('Discovery memory', '*');
   const quote = 'Project Juniper moves to pilot in December.';
-  const adapter = createFixtureXSearchAdapter([{ id: '2001', text: quote, raw: {} }]);
+  const adapter = createFixtureXSearchAdapter([
+    {
+      id: '2001',
+      text: quote,
+      createdAt: new Date().toISOString(),
+      lang: 'en',
+      raw: { lang: 'en' },
+    },
+  ]);
   expect(
     await processDiscoveryPoll({ payload: { agentId } }, signal, {
       adapter,
@@ -791,4 +799,26 @@ test('the worker sends with the agent’s encrypted X token and records the prov
     if (originalEncryptionKey === undefined) delete process.env.ORBIT_ENCRYPTION_KEY;
     else process.env.ORBIT_ENCRYPTION_KEY = originalEncryptionKey;
   }
+});
+
+test('deferred events are re-filtered against current rules before admission', async () => {
+  const agentId = await createAgent('Deferred filter', '*');
+  const createdAt = new Date().toISOString();
+  const adapter = createFixtureXSearchAdapter([
+    { id: '3001', text: 'plain post', createdAt, lang: 'en', raw: { lang: 'en' } },
+  ]);
+  await processDiscoveryPoll({ payload: { agentId } }, signal, { adapter, evaluate: false });
+  const [before] =
+    await sql`SELECT run_id, admission_status FROM source_events WHERE agent_id=${agentId}`;
+  expect(before?.run_id).toBeNull();
+
+  await sql`UPDATE source_events SET provider_created_at = now() - interval '5 hours' WHERE agent_id=${agentId}`;
+  expect(
+    await processDiscoveryPoll({ payload: { agentId } }, signal, { adapter, evaluate: true }),
+  ).toMatchObject({ evaluated: 0, pending: 0 });
+  const [after] =
+    await sql`SELECT run_id, admission_status, admission_reason FROM source_events WHERE agent_id=${agentId}`;
+  expect(after?.run_id).toBeNull();
+  expect(after?.admission_status).toBe('rejected');
+  expect(String(after?.admission_reason)).toMatch(/age/i);
 });

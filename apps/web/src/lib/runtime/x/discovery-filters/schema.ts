@@ -14,11 +14,13 @@ import {
   FIELD_OPERATORS,
 } from '@/lib/runtime/x/discovery-filters/types';
 
+const MAX_LIST_ENTRY_LENGTH = 200;
+
 const filterValue = z.union([
   z.string(),
   z.number(),
   z.boolean(),
-  z.array(z.string().trim().min(1).max(200)).max(50),
+  z.array(z.string().trim().min(1).max(MAX_LIST_ENTRY_LENGTH)).max(50),
 ]);
 
 const discoveryFilterRuleSchema = z
@@ -93,7 +95,7 @@ function normalizeRule(raw: unknown): DiscoveryFilterRule | null {
   } else if (Array.isArray(input.value)) {
     value = input.value
       .filter((entry): entry is string => typeof entry === 'string')
-      .map((entry) => entry.trim())
+      .map((entry) => entry.trim().slice(0, MAX_LIST_ENTRY_LENGTH))
       .filter(Boolean)
       .slice(0, 50);
   } else if (

@@ -102,35 +102,64 @@ export type StaleDiscoveryIntent = {
   runId: string | null;
 };
 
-/** Pending X reply intents whose source posts are past maxPostAge. */
+const STALE_SCAN_PAGE_SIZE = 200;
+const STALE_SCAN_MAX_ROWS = 5000;
+
+/**
+ * Pending X reply intents whose source posts are past maxPostAge. Pages through
+ * pending proposals so still-eligible rows cannot starve stale ones behind them.
+ */
 export async function listStaleDiscoveryApprovals(
   tx: Tx,
   limit = 100,
   now = new Date(),
 ): Promise<StaleDiscoveryIntent[]> {
-  const pending = await tx
-    .select({
-      id: actionIntents.id,
-      agentId: actionIntents.agentId,
-      runId: actionIntents.runId,
-    })
-    .from(actionIntents)
-    .where(
-      and(eq(actionIntents.reviewStatus, 'pending'), eq(actionIntents.actionType, X_REPLY_ACTION)),
-    )
-    .orderBy(actionIntents.createdAt)
-    .limit(limit);
+  const stale: StaleDiscoveryIntent[] = [];
+  const filtersByAgent = new Map<string, Promise<DiscoveryFilters>>();
+  const filtersFor = (agentId: string) => {
+    let cached = filtersByAgent.get(agentId);
+    if (!cached) {
+      cached = latestFilters(tx, agentId);
+      filtersByAgent.set(agentId, cached);
+    }
+    return cached;
+  };
 
-  const checks = await Promise.all(
-    pending.map(async (intent) => {
-      if (!intent.runId) return null;
-      const event = await loadDiscoverySourceEvent(tx, intent.agentId, intent.runId);
-      if (!event) return null;
-      const filters = await latestFilters(tx, intent.agentId);
-      return isPostPastMaxAge(event.providerCreatedAt, filters.maxPostAgeHours, now)
-        ? intent
-        : null;
-    }),
-  );
-  return checks.filter((intent): intent is StaleDiscoveryIntent => intent !== null);
+  for (let offset = 0; offset < STALE_SCAN_MAX_ROWS && stale.length < limit;) {
+    const page = await tx
+      .select({
+        id: actionIntents.id,
+        agentId: actionIntents.agentId,
+        runId: actionIntents.runId,
+      })
+      .from(actionIntents)
+      .where(
+        and(
+          eq(actionIntents.reviewStatus, 'pending'),
+          eq(actionIntents.actionType, X_REPLY_ACTION),
+        ),
+      )
+      .orderBy(actionIntents.createdAt, actionIntents.id)
+      .limit(STALE_SCAN_PAGE_SIZE)
+      .offset(offset);
+    if (!page.length) break;
+    offset += page.length;
+
+    const checks = await Promise.all(
+      page.map(async (intent) => {
+        if (!intent.runId) return null;
+        const event = await loadDiscoverySourceEvent(tx, intent.agentId, intent.runId);
+        if (!event) return null;
+        const filters = await filtersFor(intent.agentId);
+        return isPostPastMaxAge(event.providerCreatedAt, filters.maxPostAgeHours, now)
+          ? intent
+          : null;
+      }),
+    );
+    for (const intent of checks) {
+      if (intent && stale.length < limit) stale.push(intent);
+    }
+    if (page.length < STALE_SCAN_PAGE_SIZE) break;
+  }
+  return stale;
 }

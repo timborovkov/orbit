@@ -227,3 +227,18 @@ test('snapshotFromSearchPost reads metrics and author expansions from raw', () =
   expect(snap.authorFollowers).toBe(900);
   expect(snap.authorVerified).toBe(true);
 });
+
+test('over-long list phrases are truncated without resetting other saved filters', () => {
+  const normalized = normalizeDiscoveryFilters({
+    maxPostAgeHours: 6,
+    skipRecentlyEngagedAuthors: true,
+    rules: [
+      { field: 'post.text', op: 'matches_none', value: ['x'.repeat(300), 'spam'] },
+      { field: 'post.lang', op: 'eq', value: 'fr' },
+    ],
+  });
+  expect(normalized.maxPostAgeHours).toBe(6);
+  expect(normalized.skipRecentlyEngagedAuthors).toBe(true);
+  expect(normalized.rules).toHaveLength(2);
+  expect((normalized.rules[0]?.value as string[])[0]).toHaveLength(200);
+});

@@ -23,6 +23,12 @@ import {
   loadRecentlyEngagedAuthorIds,
   normalizeDiscoveryFilters,
 } from '@/lib/runtime/x/discovery-filters';
+import {
+  evaluateDiscoveryFilters,
+  formatFilterSkipReason,
+} from '@/lib/runtime/x/discovery-filters/engine';
+import { snapshotFromSourceEvent } from '@/lib/runtime/x/discovery-filters/snapshot';
+import type { DiscoveryFilters } from '@/lib/runtime/x/discovery-filters/types';
 import { compareSnowflake } from '@/lib/runtime/x/fixture';
 import { capDiscoveryPosts, prefilterDiscoveryPosts } from '@/lib/runtime/x/relevance-prefilter';
 import { xPostId } from '@/lib/runtime/x/reply-input';
@@ -222,6 +228,24 @@ async function persistPosts(
   return inserted;
 }
 
+async function recordFilterSkips(
+  tx: Tx,
+  agentId: string,
+  skipped: { label: string; reason: string | null }[],
+) {
+  if (!skipped.length) return;
+  const sample = skipped
+    .slice(0, 5)
+    .map((entry) => `${entry.label}: ${entry.reason}`)
+    .join(' · ');
+  await tx.insert(agentActivityEvents).values({
+    agentId,
+    kind: 'discovery.filter_skip',
+    summary: `Skipped ${skipped.length} X post${skipped.length === 1 ? '' : 's'} by discovery filters.`,
+    detail: sample,
+  });
+}
+
 async function persistFilteredOutPosts(
   tx: Tx,
   agentId: string,
@@ -235,22 +259,66 @@ async function persistFilteredOutPosts(
       }),
     ),
   );
-  if (!rejected.length) return;
-  const sample = rejected
-    .slice(0, 5)
-    .map((outcome) => {
-      const handle = outcome.post.authorUsername
-        ? `@${outcome.post.authorUsername}`
-        : outcome.post.id;
-      return `${handle}: ${outcome.skipReason}`;
-    })
-    .join(' · ');
-  await tx.insert(agentActivityEvents).values({
+  await recordFilterSkips(
+    tx,
     agentId,
-    kind: 'discovery.filter_skip',
-    summary: `Skipped ${rejected.length} X post${rejected.length === 1 ? '' : 's'} by discovery filters.`,
-    detail: sample,
-  });
+    rejected.map((outcome) => ({
+      label: outcome.post.authorUsername ? `@${outcome.post.authorUsername}` : outcome.post.id,
+      reason: outcome.skipReason,
+    })),
+  );
+}
+
+/**
+ * Posts deferred by capacity/budget are admitted on later polls. Re-check them
+ * against the current filters so age, saved rules and new engagement still gate
+ * paid evaluation.
+ */
+async function rejectPendingEventsByFilters(
+  tx: Tx,
+  agentId: string,
+  events: (typeof sourceEvents.$inferSelect)[],
+  filters: DiscoveryFilters,
+  now: Date,
+) {
+  if (!events.length) return events;
+  const engaged = filters.skipRecentlyEngagedAuthors
+    ? await loadRecentlyEngagedAuthorIds(
+        tx,
+        agentId,
+        events.flatMap((event) => (event.authorId ? [event.authorId] : [])),
+        filters.recentlyEngagedWithinHours,
+        now,
+      )
+    : new Set<string>();
+  const kept: typeof events = [];
+  const rejected: { event: (typeof events)[number]; reason: string }[] = [];
+  for (const event of events) {
+    const snapshot = snapshotFromSourceEvent(event);
+    if (filters.skipRecentlyEngagedAuthors && event.authorId) {
+      snapshot.authorRecentlyEngaged = engaged.has(event.authorId);
+    }
+    const decision = evaluateDiscoveryFilters(snapshot, filters, now);
+    if (decision.pass) kept.push(event);
+    else rejected.push({ event, reason: formatFilterSkipReason(decision.reasons) });
+  }
+  await Promise.all(
+    rejected.map(({ event, reason }) =>
+      tx
+        .update(sourceEvents)
+        .set({ admissionStatus: 'rejected', admissionReason: reason })
+        .where(eq(sourceEvents.id, event.id)),
+    ),
+  );
+  await recordFilterSkips(
+    tx,
+    agentId,
+    rejected.map(({ event, reason }) => ({
+      label: event.authorUsername ? `@${event.authorUsername}` : event.providerEventId,
+      reason,
+    })),
+  );
+  return kept;
 }
 
 async function listUnevaluatedEvents(tx: Tx, agentId: string) {
@@ -598,7 +666,15 @@ export async function processDiscoveryPoll(
     });
 
     // Admit every unevaluated event (new + prior capacity rejects), not just this poll.
-    const pendingEvents = evaluate ? await listUnevaluatedEvents(tx, agentId) : [];
+    const pendingEvents = evaluate
+      ? await rejectPendingEventsByFilters(
+          tx,
+          agentId,
+          await listUnevaluatedEvents(tx, agentId),
+          filters,
+          now,
+        )
+      : [];
     const admission = evaluate
       ? await admitDiscoveryEvents(tx, agent, prep.version.id, pendingEvents)
       : { evaluated: 0, waitingForCapacity: false, remaining: 0 };

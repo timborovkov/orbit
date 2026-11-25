@@ -12,6 +12,7 @@ import {
 import {
   applyDiscoveryFilters,
   type DiscoveryFilters,
+  loadRecentlyEngagedAuthorIds,
   normalizeDiscoveryFilters,
 } from '@/lib/runtime/x/discovery-filters';
 import { createFixtureXSearchAdapter } from '@/lib/runtime/x/fixture';
@@ -97,7 +98,18 @@ export async function previewDiscoveryQuery(input: {
         },
       };
     });
-    const filtered = applyDiscoveryFilters(capped, { filters });
+    const authorIds = capped.flatMap((post) => (post.authorId ? [post.authorId] : []));
+    const recentlyEngagedAuthorIds = filters.skipRecentlyEngagedAuthors
+      ? await store.transaction((tx) =>
+          loadRecentlyEngagedAuthorIds(
+            tx,
+            input.agentId,
+            authorIds,
+            filters.recentlyEngagedWithinHours,
+          ),
+        )
+      : undefined;
+    const filtered = applyDiscoveryFilters(capped, { filters, recentlyEngagedAuthorIds });
     const criteria = {
       mission: config?.mission,
       engagementCriteria: config?.engagementCriteria,
