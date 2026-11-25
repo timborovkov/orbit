@@ -2740,8 +2740,8 @@ fieldset[aria-disabled='true'] textarea {
 .history-run-summary {
   display: grid;
   flex: 1;
-  /* Fixed status column so badges share one vertical edge across rows. */
-  grid-template-columns: minmax(0, 1fr) 9.75rem auto;
+  /* Fixed trailing columns so status badges share one vertical edge across rows. */
+  grid-template-columns: minmax(0, 1fr) 9.75rem 7.25rem;
   align-items: center;
   gap: 8px 16px;
   min-width: 0;
@@ -2774,6 +2774,7 @@ fieldset[aria-disabled='true'] textarea {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px 12px;
   white-space: nowrap;
 }
