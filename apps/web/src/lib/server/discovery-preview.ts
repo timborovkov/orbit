@@ -14,6 +14,7 @@ import {
   type DiscoveryFilters,
   normalizeDiscoveryFilters,
 } from '@/lib/runtime/x/discovery-filters';
+import { createFixtureXSearchAdapter } from '@/lib/runtime/x/fixture';
 import {
   prefilterDiscoveryPosts,
   scoreDiscoveryRelevance,
@@ -65,9 +66,10 @@ export async function previewDiscoveryQuery(input: {
     input.filters ?? config?.xDiscoveryFilters ?? undefined,
   );
 
-  const adapter = createXSearchAdapter(resolveXBearerToken());
-  const availability = adapter.availability();
-  if (!availability.available) return { error: availability.reason };
+  const live = createXSearchAdapter(resolveXBearerToken());
+  const availability = live.availability();
+  const usingFixture = !availability.available;
+  const adapter = usingFixture ? createFixtureXSearchAdapter() : live;
 
   try {
     const search = await adapter.searchRecent({
@@ -76,7 +78,25 @@ export async function previewDiscoveryQuery(input: {
       maxPosts,
       maxPages: X_DISCOVERY_PAGES_PER_QUERY,
     });
-    const capped = search.posts.slice(0, maxPosts);
+    // Fixture posts use fixed historical timestamps; refresh them in Test query so
+    // age defaults do not hide every sample when X is unavailable.
+    const now = Date.now();
+    const capped = search.posts.slice(0, maxPosts).map((post, index) => {
+      const createdAt = usingFixture
+        ? new Date(now - index * 60_000).toISOString()
+        : (post.createdAt ?? new Date(now - index * 60_000).toISOString());
+      const lang = post.lang ?? 'en';
+      return {
+        ...post,
+        createdAt,
+        lang,
+        raw: {
+          ...post.raw,
+          created_at: createdAt,
+          lang,
+        },
+      };
+    });
     const filtered = applyDiscoveryFilters(capped, { filters });
     const criteria = {
       mission: config?.mission,
@@ -99,8 +119,11 @@ export async function previewDiscoveryQuery(input: {
       };
     });
     const filterDropped = filtered.rejected.length;
+    const sourceNote = usingFixture
+      ? `Fixture samples (${availability.available === false ? availability.reason : 'offline'}). `
+      : '';
     return {
-      message: `Sampled ${posts.length} post${posts.length === 1 ? '' : 's'} without saving. ${filterDropped} filtered · ${dropped} failed relevance.`,
+      message: `${sourceNote}Sampled ${posts.length} post${posts.length === 1 ? '' : 's'} without saving. ${filterDropped} filtered · ${dropped} failed relevance.`,
       posts,
     };
   } catch (error) {
