@@ -2740,7 +2740,8 @@ fieldset[aria-disabled='true'] textarea {
 .history-run-summary {
   display: grid;
   flex: 1;
-  grid-template-columns: minmax(0, 1fr) minmax(9.75rem, max-content) auto;
+  /* Fixed status column so badges share one vertical edge across rows. */
+  grid-template-columns: minmax(0, 1fr) 9.75rem auto;
   align-items: center;
   gap: 8px 16px;
   min-width: 0;
@@ -3264,7 +3265,7 @@ fieldset[aria-disabled='true'] textarea {
     grid-template-columns: minmax(0, 1fr);
   }
   .history-run-summary {
-    grid-template-columns: minmax(0, 1fr) minmax(7.5rem, max-content);
+    grid-template-columns: minmax(0, 1fr) 7.75rem;
     gap: 6px 12px;
   }
   .history-run-meta {
