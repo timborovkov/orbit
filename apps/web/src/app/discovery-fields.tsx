@@ -5,11 +5,13 @@ import { useMemo, useState, useTransition } from 'react';
 import { Loader, Plus, Radar, Trash2 } from 'lucide-react';
 
 import { previewXDiscoveryQuery } from '@/actions/discovery';
+import { DiscoveryFilterFields } from '@/app/discovery-filter-fields';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { discoveryCostHint } from '@/lib/runtime/x/discovery-cost';
+import type { DiscoveryFilters } from '@/lib/runtime/x/discovery-filters';
 
 type QueryRow = { id: string; value: string };
 
@@ -19,6 +21,8 @@ type PreviewPost = {
   authorUsername?: string;
   relevant: boolean;
   matchedTerms: string[];
+  filterPass: boolean;
+  filterReasons: string[];
 };
 
 function newRow(value = ''): QueryRow {
@@ -30,12 +34,14 @@ export function DiscoveryFields({
   initialQueries,
   initialPaused,
   initialMaxPosts,
+  initialFilters,
   prefix,
 }: {
   agentId?: string;
   initialQueries: string[];
   initialPaused: boolean;
   initialMaxPosts: number;
+  initialFilters: DiscoveryFilters;
   prefix: string;
 }) {
   const [queries, setQueries] = useState<QueryRow[]>(() =>
@@ -78,6 +84,10 @@ export function DiscoveryFields({
       form.set('agentId', agentId);
       form.set('query', trimmed);
       form.set('maxPosts', String(maxPosts));
+      const filtersField = document.querySelector<HTMLInputElement>(
+        `input[name="xDiscoveryFilters"]`,
+      );
+      if (filtersField?.value) form.set('xDiscoveryFilters', filtersField.value);
       const result = await previewXDiscoveryQuery(form);
       if (result.error) {
         setPreviewError(result.error);
@@ -132,6 +142,8 @@ export function DiscoveryFields({
         />
         <FieldDescription>Hard cap across all queries for each poll cycle (1–50).</FieldDescription>
       </Field>
+
+      <DiscoveryFilterFields prefix={prefix} initial={initialFilters} />
 
       <div className="discovery-query-list" role="group" aria-label="X search queries">
         {queries.map((row, index) => (
@@ -209,9 +221,8 @@ export function DiscoveryFields({
 
       <p className="field-hint discovery-cost-hint">{costHint}</p>
       <p className="field-hint">
-        Saving with polling on schedules live X search. Use Test query to preview matches without
-        persisting history. A cheap relevance pre-filter drops posts that share no terms with the
-        mission or engagement criteria before full evaluation.
+        Filters run before the relevance pre-filter and model evaluation. Test query shows which
+        sample posts pass or fail and why.
       </p>
 
       {previewError && (
@@ -231,20 +242,37 @@ export function DiscoveryFields({
             <p className="muted">No sample matches for this query right now.</p>
           ) : (
             <ul>
-              {preview.map((post) => (
-                <li key={post.id} data-relevant={post.relevant || undefined}>
-                  <div className="discovery-preview-meta">
-                    <span>{post.authorUsername ? `@${post.authorUsername}` : post.id}</span>
-                    <span className="state-label">
-                      {post.relevant ? 'Likely relevant' : 'Would skip'}
-                    </span>
-                  </div>
-                  <p>{post.text}</p>
-                  {post.matchedTerms.length > 0 && (
-                    <p className="muted">Matched: {post.matchedTerms.join(', ')}</p>
-                  )}
-                </li>
-              ))}
+              {preview.map((post) => {
+                const status = !post.filterPass
+                  ? 'Filtered'
+                  : post.relevant
+                    ? 'Would evaluate'
+                    : 'Would skip';
+                return (
+                  <li
+                    key={post.id}
+                    data-relevant={post.filterPass && post.relevant ? true : undefined}
+                    data-filtered={!post.filterPass ? true : undefined}
+                  >
+                    <div className="discovery-preview-meta">
+                      <span>{post.authorUsername ? `@${post.authorUsername}` : post.id}</span>
+                      <span className="state-label">{status}</span>
+                    </div>
+                    <p>{post.text}</p>
+                    {!post.filterPass && post.filterReasons.length > 0 && (
+                      <p className="muted">Filter: {post.filterReasons.join(' ')}</p>
+                    )}
+                    {post.filterPass && post.matchedTerms.length > 0 && (
+                      <p className="muted">Matched: {post.matchedTerms.join(', ')}</p>
+                    )}
+                    {post.filterPass && !post.relevant && (
+                      <p className="muted">
+                        Relevance: no overlap with mission or engagement criteria.
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

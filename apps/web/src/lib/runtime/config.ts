@@ -4,6 +4,11 @@ import {
   clampDiscoveryMaxPosts,
   X_DISCOVERY_DEFAULT_MAX_POSTS,
 } from '@/lib/runtime/x/discovery-cost';
+import {
+  type DiscoveryFilters,
+  discoveryFiltersSchema,
+  normalizeDiscoveryFilters,
+} from '@/lib/runtime/x/discovery-filters';
 
 const prose = z.string().trim().max(12000);
 const model = z
@@ -18,6 +23,7 @@ const searchQuery = z.string().trim().min(1).max(512);
 /**
  * Normalize legacy `xSearchQuery` string into `xSearchQueries` array and clamp poll caps.
  * Existing configuration JSON remains readable without a DB migration.
+ * Missing discovery filters receive the versioned defaults (including 2h max age).
  */
 function normalizeDiscoveryConfig(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
@@ -49,6 +55,8 @@ function normalizeDiscoveryConfig(raw: unknown): unknown {
       : X_DISCOVERY_DEFAULT_MAX_POSTS,
   );
 
+  next.xDiscoveryFilters = normalizeDiscoveryFilters(next.xDiscoveryFilters);
+
   return next;
 }
 
@@ -77,6 +85,8 @@ export const configSchema = z.preprocess(
       .min(1)
       .max(50)
       .default(X_DISCOVERY_DEFAULT_MAX_POSTS),
+    /** Deterministic discovery filters applied before relevance and LLM evaluation. */
+    xDiscoveryFilters: discoveryFiltersSchema.default(() => normalizeDiscoveryFilters(undefined)),
     mainModel: model,
     evaluatorModel: model,
   }),
@@ -96,6 +106,7 @@ export function discoverySettings(raw: unknown): {
   queries: string[];
   paused: boolean;
   maxPosts: number;
+  filters: DiscoveryFilters;
 } {
   const normalized = normalizeDiscoveryConfig(raw) as Partial<AgentConfig> | null | undefined;
   const config = normalized && typeof normalized === 'object' ? normalized : {};
@@ -103,6 +114,7 @@ export function discoverySettings(raw: unknown): {
     queries: discoveryQueries(config),
     paused: config.xDiscoveryPaused === true,
     maxPosts: clampDiscoveryMaxPosts(config.xDiscoveryMaxPostsPerPoll),
+    filters: normalizeDiscoveryFilters(config.xDiscoveryFilters),
   };
 }
 

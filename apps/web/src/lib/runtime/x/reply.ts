@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import type { Db, Tx } from '@/lib/db';
 import type { ActionIntent, ChannelAction } from '@/lib/runtime/channels/types';
 import { decryptSecret } from '@/lib/runtime/secrets';
+import { discoveryApprovalBlockReason } from '@/lib/runtime/x/discovery-filters/server';
 import { xPostId, xReplyDraft, xReplyKey } from '@/lib/runtime/x/reply-input';
 import { deliverXReply } from '@/lib/runtime/x/reply-provider';
 import { X_PROVIDER } from '@/lib/runtime/x/types';
@@ -55,6 +56,8 @@ export async function validateXReplyApproval(tx: Tx, intent: ActionIntent) {
   ) {
     return 'X replies require a matching discovery post and author.';
   }
+  const stale = await discoveryApprovalBlockReason(tx, intent);
+  if (stale) return stale;
 }
 
 export const prepareXReplyDelivery: ChannelAction['prepareDelivery'] = async (

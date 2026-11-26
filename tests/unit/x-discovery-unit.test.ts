@@ -25,6 +25,8 @@ test('config schema defaults empty X search queries and discovery controls', () 
   expect(parsed.xSearchQueries).toEqual([]);
   expect(parsed.xDiscoveryPaused).toBe(false);
   expect(parsed.xDiscoveryMaxPostsPerPoll).toBe(10);
+  expect(parsed.xDiscoveryFilters.maxPostAgeHours).toBe(2);
+  expect(parsed.xDiscoveryFilters.rules).toEqual([{ field: 'post.lang', op: 'eq', value: 'en' }]);
 });
 
 test('config schema maps legacy xSearchQuery into xSearchQueries', () => {
@@ -63,6 +65,8 @@ test('live adapter walks next_token pages before returning newest_id', async () 
   const fetchImpl = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     calls.push(url.searchParams.get('pagination_token') ?? '');
+    expect(url.searchParams.get('tweet.fields')).toContain('public_metrics');
+    expect(url.searchParams.get('user.fields')).toContain('verified');
     if (!url.searchParams.get('pagination_token')) {
       return Response.json({
         data: [

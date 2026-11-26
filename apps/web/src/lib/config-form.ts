@@ -1,5 +1,15 @@
 import { configSchema } from '@/lib/runtime/config';
 import { clampDiscoveryMaxPosts } from '@/lib/runtime/x/discovery-cost';
+import { normalizeDiscoveryFilters } from '@/lib/runtime/x/discovery-filters';
+
+function parseFiltersField(raw: FormDataEntryValue | null) {
+  if (typeof raw !== 'string' || !raw.trim()) return normalizeDiscoveryFilters(undefined);
+  try {
+    return normalizeDiscoveryFilters(JSON.parse(raw) as unknown);
+  } catch {
+    return normalizeDiscoveryFilters(undefined);
+  }
+}
 
 /** Parse agent/template configuration forms, including multi-value discovery fields. */
 export function parseConfigForm(form: FormData, overrides: Record<string, unknown> = {}) {
@@ -17,6 +27,7 @@ export function parseConfigForm(form: FormData, overrides: Record<string, unknow
     typeof maxRaw === 'string' && maxRaw.trim()
       ? clampDiscoveryMaxPosts(Number(maxRaw))
       : undefined;
+  const filters = parseFiltersField(form.get('xDiscoveryFilters'));
 
   return configSchema.safeParse({
     ...entries,
@@ -25,6 +36,7 @@ export function parseConfigForm(form: FormData, overrides: Record<string, unknow
     xSearchQuery: queries[0] ?? '',
     xDiscoveryPaused:
       pausedRaw === 'true' ? true : pausedRaw === 'false' ? false : entries.xDiscoveryPaused,
+    xDiscoveryFilters: filters,
     ...(maxPosts !== undefined ? { xDiscoveryMaxPostsPerPoll: maxPosts } : {}),
   });
 }

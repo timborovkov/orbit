@@ -141,7 +141,8 @@ async function observe(
       authorId,
       authorUsername: handle,
       text,
-      raw: { id },
+      raw: { id, lang: 'en' },
+      lang: 'en',
       createdAt: new Date().toISOString(),
     },
   ]);

@@ -123,7 +123,7 @@ export const discoveryModule: SeedModule = {
           text: post.text,
           authorId: post.authorId ?? null,
           authorUsername: post.authorUsername ?? null,
-          providerCreatedAt: post.createdAt ? new Date(post.createdAt) : null,
+          providerCreatedAt: new Date(now.getTime() - (invited ? 5 : 20) * 60_000),
           ingestedAt: now,
           runId,
         })

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
+import { db } from '@/lib/db';
 import { claimJobs, completeJob, failJob } from '@/lib/queue/jobs';
 import type { ChannelAction } from '@/lib/runtime/channels/types';
 import { processSimulationJob, processSimulationRunForOrigin } from '@/lib/runtime/execute';
@@ -11,6 +12,7 @@ import { processOutboundJob } from '@/lib/runtime/outbound/process';
 import { CHANNEL_OUTBOUND_JOB } from '@/lib/runtime/outbound/types';
 import { encryptSecret } from '@/lib/runtime/secrets';
 import type { ModelCall } from '@/lib/runtime/simulation';
+import { loadRecentlyEngagedAuthorIds } from '@/lib/runtime/x/discovery-filters/server';
 import {
   createFixtureXSearchAdapter,
   FIXTURE_X_POSTS,
@@ -438,7 +440,15 @@ test('createAgentFromTemplate enqueues discovery poll when template has xSearchQ
 test('a discovery run can remember a project detail with evidence from its event', async () => {
   const agentId = await createAgent('Discovery memory', '*');
   const quote = 'Project Juniper moves to pilot in December.';
-  const adapter = createFixtureXSearchAdapter([{ id: '2001', text: quote, raw: {} }]);
+  const adapter = createFixtureXSearchAdapter([
+    {
+      id: '2001',
+      text: quote,
+      createdAt: new Date().toISOString(),
+      lang: 'en',
+      raw: { lang: 'en' },
+    },
+  ]);
   expect(
     await processDiscoveryPoll({ payload: { agentId } }, signal, {
       adapter,
@@ -791,4 +801,49 @@ test('the worker sends with the agent’s encrypted X token and records the prov
     if (originalEncryptionKey === undefined) delete process.env.ORBIT_ENCRYPTION_KEY;
     else process.env.ORBIT_ENCRYPTION_KEY = originalEncryptionKey;
   }
+});
+
+test('deferred events are re-filtered against current rules before admission', async () => {
+  const agentId = await createAgent('Deferred filter', '*');
+  const createdAt = new Date().toISOString();
+  const adapter = createFixtureXSearchAdapter([
+    { id: '3001', text: 'plain post', createdAt, lang: 'en', raw: { lang: 'en' } },
+  ]);
+  await processDiscoveryPoll({ payload: { agentId } }, signal, { adapter, evaluate: false });
+  const [before] =
+    await sql`SELECT run_id, admission_status FROM source_events WHERE agent_id=${agentId}`;
+  expect(before?.run_id).toBeNull();
+
+  await sql`UPDATE source_events SET provider_created_at = now() - interval '5 hours' WHERE agent_id=${agentId}`;
+  expect(
+    await processDiscoveryPoll({ payload: { agentId } }, signal, { adapter, evaluate: true }),
+  ).toMatchObject({ evaluated: 0, pending: 0 });
+  const [after] =
+    await sql`SELECT run_id, admission_status, admission_reason FROM source_events WHERE agent_id=${agentId}`;
+  expect(after?.run_id).toBeNull();
+  expect(after?.admission_status).toBe('rejected');
+  expect(String(after?.admission_reason)).toMatch(/age/i);
+});
+
+test('recent engagement lookup matches recipients in SQL for the lookback window', async () => {
+  const { agentId } = await discoverReply();
+  const engaged = await db().transaction((tx) =>
+    loadRecentlyEngagedAuthorIds(tx, agentId, ['12001', '99999'], 24),
+  );
+  expect([...engaged]).toEqual(['12001']);
+  const none = await db().transaction((tx) =>
+    loadRecentlyEngagedAuthorIds(tx, agentId, ['12001'], 24, new Date(Date.now() + 48 * 3_600_000)),
+  );
+  expect(none.size).toBe(0);
+});
+
+test('recent engagement lookup is not truncated by thousands of unrelated intents', async () => {
+  const { agentId } = await discoverReply();
+  await sql`INSERT INTO action_intents (agent_id, action_type, recipients, idempotency_key, decision, created_at)
+    SELECT ${agentId}, 'email.send', '["x:unrelated"]'::jsonb, ${randomUUID()} || '-' || n, 'allow', now() + (n || ' seconds')::interval
+    FROM generate_series(1, 2100) AS n`;
+  const engaged = await db().transaction((tx) =>
+    loadRecentlyEngagedAuthorIds(tx, agentId, ['12001'], 720),
+  );
+  expect([...engaged]).toEqual(['12001']);
 });

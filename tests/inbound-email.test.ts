@@ -691,7 +691,15 @@ test('inbound memory commits once across a finalization retry and recalls only i
   const asked = 'Does the Northstar pilot require SSO?';
   await sql`UPDATE agent_configurations SET config = config || '{"xSearchQuery":"*"}'::jsonb
     WHERE id=${sarah.version}`;
-  const adapter = createFixtureXSearchAdapter([{ id: '32001', text: asked, raw: {} }]);
+  const adapter = createFixtureXSearchAdapter([
+    {
+      id: '32001',
+      text: asked,
+      createdAt: new Date().toISOString(),
+      lang: 'en',
+      raw: { lang: 'en' },
+    },
+  ]);
   expect(
     await processDiscoveryPoll({ payload: { agentId: sarah.id } }, signal, {
       adapter,

@@ -163,6 +163,12 @@ export async function reviewProposedAction(
     }
 
     const approved = reviewStatus === 'approved';
+    if (approved) {
+      const { discoveryApprovalBlockReason } =
+        await import('@/lib/runtime/x/discovery-filters/server');
+      const stale = await discoveryApprovalBlockReason(tx, intent, now);
+      if (stale) return { error: stale };
+    }
     const payload =
       approved && options.editedPayload
         ? { ...intent.payload, ...options.editedPayload }
