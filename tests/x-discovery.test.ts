@@ -836,3 +836,14 @@ test('recent engagement lookup matches recipients in SQL for the lookback window
   );
   expect(none.size).toBe(0);
 });
+
+test('recent engagement lookup is not truncated by thousands of unrelated intents', async () => {
+  const { agentId } = await discoverReply();
+  await sql`INSERT INTO action_intents (agent_id, action_type, recipients, idempotency_key, decision, created_at)
+    SELECT ${agentId}, 'email.send', '["x:unrelated"]'::jsonb, ${randomUUID()} || '-' || n, 'allow', now() + (n || ' seconds')::interval
+    FROM generate_series(1, 2100) AS n`;
+  const engaged = await db().transaction((tx) =>
+    loadRecentlyEngagedAuthorIds(tx, agentId, ['12001'], 720),
+  );
+  expect([...engaged]).toEqual(['12001']);
+});
