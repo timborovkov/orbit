@@ -5,42 +5,71 @@ import type {
   XSearchResult,
 } from '@/lib/runtime/x/types';
 
+const FIXTURE_LOADED_AT = Date.now();
+
+/** Fixture timestamps are relative to load time so default max-age filters keep passing. */
+function fixtureCreatedAt(minutesAgo: number): string {
+  return new Date(FIXTURE_LOADED_AT - minutesAgo * 60_000).toISOString();
+}
+
+function fixturePost(
+  post: Omit<XSearchPost, 'createdAt' | 'lang' | 'raw'> & { raw: Record<string, unknown> },
+  minutesAgo: number,
+): XSearchPost {
+  const createdAt = fixtureCreatedAt(minutesAgo);
+  return {
+    ...post,
+    createdAt,
+    lang: 'en',
+    raw: { ...post.raw, created_at: createdAt, lang: 'en' },
+  };
+}
+
 /** Deterministic fixture posts used by unit/integration tests and local demos. */
 export const FIXTURE_X_POSTS: XSearchPost[] = [
-  {
-    id: '1001',
-    text: 'Looking for a work-history product that helps teams see what changed and why. Any recommendations?',
-    authorId: 'u-100',
-    authorUsername: 'ops_lead',
-    createdAt: '2026-11-18T10:00:00.000Z',
-    raw: { id: '1001', text: 'Looking for a work-history product…', fixture: true },
-  },
-  {
-    id: '1002',
-    text: 'We need better audit trails across our delivery tools. What are people using for timeline-style history?',
-    authorId: 'u-101',
-    authorUsername: 'eng_manager',
-    createdAt: '2026-11-18T11:30:00.000Z',
-    raw: { id: '1002', text: 'We need better audit trails…', fixture: true },
-  },
-  {
-    id: '1003',
-    text: 'Random lunch spam — ignore me.',
-    authorId: 'u-102',
-    authorUsername: 'noise_bot',
-    createdAt: '2026-11-18T12:00:00.000Z',
-    raw: { id: '1003', text: 'Random lunch spam…', fixture: true },
-  },
+  fixturePost(
+    {
+      id: '1001',
+      text: 'Looking for a work-history product that helps teams see what changed and why. Any recommendations?',
+      authorId: 'u-100',
+      authorUsername: 'ops_lead',
+      raw: { id: '1001', text: 'Looking for a work-history product…', fixture: true },
+    },
+    30,
+  ),
+  fixturePost(
+    {
+      id: '1002',
+      text: 'We need better audit trails across our delivery tools. What are people using for timeline-style history?',
+      authorId: 'u-101',
+      authorUsername: 'eng_manager',
+      raw: { id: '1002', text: 'We need better audit trails…', fixture: true },
+    },
+    20,
+  ),
+  fixturePost(
+    {
+      id: '1003',
+      text: 'Random lunch spam — ignore me.',
+      authorId: 'u-102',
+      authorUsername: 'noise_bot',
+      raw: { id: '1003', text: 'Random lunch spam…', fixture: true },
+    },
+    10,
+  ),
 ];
 
 /** A single post addressed to the demo replying account. */
-export const FIXTURE_X_REPLY_POST: XSearchPost = {
-  id: '1001',
-  text: '@orbit_fixture Looking for a work-history product. Could you tell me about yours?',
-  authorId: '12001',
-  authorUsername: 'ops_lead',
-  raw: { id: '1001', fixture: true },
-};
+export const FIXTURE_X_REPLY_POST: XSearchPost = fixturePost(
+  {
+    id: '1001',
+    text: '@orbit_fixture Looking for a work-history product. Could you tell me about yours?',
+    authorId: '12001',
+    authorUsername: 'ops_lead',
+    raw: { id: '1001', fixture: true },
+  },
+  5,
+);
 
 function newestAmong(posts: XSearchPost[], fallback: string | null): string | null {
   if (posts.length === 0) return fallback;

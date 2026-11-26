@@ -12,18 +12,45 @@ const RECENT_SEARCH_URL = 'https://api.x.com/2/tweets/search/recent';
 /** Safety cap so a runaway next_token cannot loop forever. */
 export const X_RECENT_SEARCH_MAX_PAGES = 5;
 
+/** Fields needed for discovery filters without unused expansions. */
+const X_DISCOVERY_TWEET_FIELDS =
+  'created_at,author_id,conversation_id,public_metrics,lang,referenced_tweets,entities,attachments';
+const X_DISCOVERY_USER_FIELDS =
+  'username,name,created_at,public_metrics,verified,description,location';
+
+interface TweetMetrics {
+  like_count?: number;
+  retweet_count?: number;
+  reply_count?: number;
+  quote_count?: number;
+  impression_count?: number;
+}
+
 interface TweetPayload {
   id?: string;
   text?: string;
   author_id?: string;
   conversation_id?: string;
   created_at?: string;
+  lang?: string;
+  public_metrics?: TweetMetrics;
+  referenced_tweets?: { type?: string; id?: string }[];
+  entities?: { urls?: unknown[] };
+  attachments?: { media_keys?: string[] };
 }
 
 interface UserPayload {
   id?: string;
   username?: string;
   name?: string;
+  created_at?: string;
+  description?: string;
+  location?: string;
+  verified?: boolean;
+  public_metrics?: {
+    followers_count?: number;
+    following_count?: number;
+  };
 }
 
 interface SearchResponse {
@@ -48,6 +75,14 @@ function newestAmong(posts: XSearchPost[], fallback: string | null): string | nu
   );
 }
 
+function resolvePostType(refs: { type?: string }[] | undefined): XSearchPost['postType'] {
+  if (!refs?.length) return 'original';
+  if (refs.some((ref) => ref.type === 'retweeted')) return 'retweet';
+  if (refs.some((ref) => ref.type === 'quoted')) return 'quote';
+  if (refs.some((ref) => ref.type === 'replied_to')) return 'reply';
+  return 'original';
+}
+
 function mapPage(body: SearchResponse): XSearchPost[] {
   const users = new Map(
     (body.includes?.users ?? [])
@@ -60,6 +95,7 @@ function mapPage(body: SearchResponse): XSearchPost[] {
     )
     .map((tweet) => {
       const author = tweet.author_id ? users.get(tweet.author_id) : undefined;
+      const metrics = tweet.public_metrics;
       return {
         id: tweet.id,
         text: tweet.text,
@@ -68,7 +104,31 @@ function mapPage(body: SearchResponse): XSearchPost[] {
         authorUsername: author?.username,
         authorName: author?.name,
         createdAt: tweet.created_at,
-        raw: { ...tweet },
+        lang: tweet.lang,
+        postType: resolvePostType(tweet.referenced_tweets),
+        hasLinks: Boolean(tweet.entities?.urls?.length) || /https?:\/\/\S+/i.test(tweet.text),
+        hasMedia: Boolean(tweet.attachments?.media_keys?.length),
+        metrics: metrics
+          ? {
+              likeCount: metrics.like_count ?? null,
+              repostCount: metrics.retweet_count ?? null,
+              replyCount: metrics.reply_count ?? null,
+              quoteCount: metrics.quote_count ?? null,
+              impressionCount: metrics.impression_count ?? null,
+            }
+          : undefined,
+        author: author
+          ? {
+              description: author.description ?? null,
+              location: author.location ?? null,
+              verified: author.verified ?? null,
+              followersCount: author.public_metrics?.followers_count ?? null,
+              followingCount: author.public_metrics?.following_count ?? null,
+              createdAt: author.created_at ?? null,
+            }
+          : undefined,
+        // Embed author so persisted payloads can rebuild filter snapshots.
+        raw: { ...tweet, ...(author ? { __author: author } : {}) },
       };
     });
 }
@@ -118,9 +178,9 @@ export function createLiveXSearchAdapter(
         const url = new URL(RECENT_SEARCH_URL);
         url.searchParams.set('query', query);
         url.searchParams.set('max_results', String(maxResults));
-        url.searchParams.set('tweet.fields', 'created_at,author_id,conversation_id');
+        url.searchParams.set('tweet.fields', X_DISCOVERY_TWEET_FIELDS);
         url.searchParams.set('expansions', 'author_id');
-        url.searchParams.set('user.fields', 'username,name');
+        url.searchParams.set('user.fields', X_DISCOVERY_USER_FIELDS);
         if (request.sinceId) url.searchParams.set('since_id', request.sinceId);
         if (paginationToken) url.searchParams.set('pagination_token', paginationToken);
 

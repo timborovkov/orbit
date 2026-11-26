@@ -264,10 +264,13 @@ so drafts survive navigation.
 ### Configuration and identity
 
 Use one editor and one save bar. Identity, Behaviour, Discovery and Models
-each expose one field group. Discovery holds the admin-only X search query
-(one per agent); blank disables polling. The section navigator is 192px wide
-and reduces to 156px at 900px and narrower. At 600px and narrower it becomes
-a horizontal row and identity fields stack.
+each expose one field group. Discovery holds admin-authored X search queries,
+poll controls, and deterministic discovery filters (2h max post age and
+English-only by default, plus engagement skip and field/operator/value rules
+as a compact list). Blank queries disable polling. Test query shows which
+sample posts pass or fail filters and why.
+The section navigator is 192px wide and reduces to 156px at 900px and narrower.
+At 600px and narrower it becomes a horizontal row and identity fields stack.
 
 Each configuration save creates an immutable version. Keep unsaved values
 on conflicts. After saving, Playground defaults to the newest version.

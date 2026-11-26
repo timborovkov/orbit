@@ -109,12 +109,15 @@ export function ConfigFields({
                   discovery.queries.join('\u0001'),
                   String(discovery.paused),
                   String(discovery.maxPosts),
+                  String(discovery.filters.maxPostAgeHours),
+                  String(discovery.filters.rules.length),
                 ].join('|')}
                 agentId={agentId}
                 prefix={prefix}
                 initialQueries={discovery.queries}
                 initialPaused={discovery.paused}
                 initialMaxPosts={discovery.maxPosts}
+                initialFilters={discovery.filters}
               />
             ) : (
               <div className={`editor-fields editor-fields-${group.id}`}>

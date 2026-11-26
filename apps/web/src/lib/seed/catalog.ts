@@ -115,24 +115,34 @@ function baseConfig(
     | 'xSearchQueries'
     | 'xDiscoveryPaused'
     | 'xDiscoveryMaxPostsPerPoll'
+    | 'xDiscoveryFilters'
   > & {
     mission: string;
     xSearchQuery?: string;
     xSearchQueries?: string[];
     xDiscoveryPaused?: boolean;
     xDiscoveryMaxPostsPerPoll?: number;
+    xDiscoveryFilters?: AgentConfig['xDiscoveryFilters'];
   },
 ): AgentConfig {
   const queries =
     template.xSearchQueries ??
     (template.xSearchQuery?.trim() ? [template.xSearchQuery.trim()] : []);
+  const { xDiscoveryFilters: filters, ...rest } = template;
   return {
-    ...template,
+    ...rest,
     name,
     xSearchQueries: queries,
     xSearchQuery: queries[0] ?? '',
     xDiscoveryPaused: template.xDiscoveryPaused ?? false,
     xDiscoveryMaxPostsPerPoll: template.xDiscoveryMaxPostsPerPoll ?? 10,
+    xDiscoveryFilters: filters ?? {
+      version: 1,
+      maxPostAgeHours: 2,
+      skipRecentlyEngagedAuthors: false,
+      recentlyEngagedWithinHours: 24,
+      rules: [{ field: 'post.lang', op: 'eq', value: 'en' }],
+    },
   };
 }
 

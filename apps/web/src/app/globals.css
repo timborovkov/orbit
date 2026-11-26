@@ -2944,9 +2944,55 @@ fieldset[aria-disabled='true'] textarea {
 .research-tool-list,
 .research-seeds,
 .seed-list-editor,
-.discovery-query-list {
+.discovery-query-list,
+.discovery-filters,
+.discovery-filter-basics,
+.discovery-filter-rules {
   display: grid;
   gap: 16px;
+}
+.discovery-filter-rules-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.discovery-filter-rules-heading h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.discovery-filter-rule-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.discovery-filter-rule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.discovery-filter-field,
+.discovery-filter-op {
+  min-width: 140px;
+}
+.discovery-filter-field select,
+.discovery-filter-op select {
+  width: 100%;
+  height: 36px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 10px;
+  font: inherit;
+}
+.discovery-preview li[data-filtered] .state-label {
+  color: var(--danger);
 }
 .discovery-pause-row,
 .research-tool-row,
