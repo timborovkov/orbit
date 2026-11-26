@@ -11,8 +11,16 @@ import {
   persistCredential,
   persistTemplate,
 } from '@/lib/server/workspace-mutations';
+import { getPendingApprovalCount } from '@/lib/server/workspace-queries';
 
 const uuid = z.uuid();
+
+/** Live refresh for the persistent console Approvals badge (layout does not re-run on client navigations). */
+export async function fetchPendingApprovalCount(): Promise<number> {
+  await checkOrigin();
+  return getPendingApprovalCount();
+}
+
 export async function saveConfiguration(form: FormData) {
   await checkOrigin();
   const actor = await requireAdmin();
