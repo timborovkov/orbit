@@ -278,7 +278,7 @@ const discoveryExpiredReason =
  * Uses the same durable reconcile loop as lease recovery / approval expiry.
  */
 export async function expireStaleDiscoveryApprovals(actor = 'system:discovery-expiry') {
-  const { listStaleDiscoveryApprovals } = await import('@/lib/runtime/x/discovery-filters');
+  const { listStaleDiscoveryApprovals } = await import('@/lib/runtime/x/discovery-filters/server');
   const candidates = await db().transaction(async (tx) => listStaleDiscoveryApprovals(tx, 100));
   let expired = 0;
   for (const { id, agentId } of candidates) {
@@ -295,7 +295,8 @@ export async function expireStaleDiscoveryApprovals(actor = 'system:discovery-ex
       ).at(0);
       if (!intent) return;
       // Re-check under the lock in case the post is still within age.
-      const { discoveryApprovalBlockReason } = await import('@/lib/runtime/x/discovery-filters');
+      const { discoveryApprovalBlockReason } =
+        await import('@/lib/runtime/x/discovery-filters/server');
       const block = await discoveryApprovalBlockReason(tx, intent, now);
       if (!block) return;
       await expireApproval(tx, agent, intent, now, actor, discoveryExpiredReason);

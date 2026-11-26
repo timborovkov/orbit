@@ -1,4 +1,4 @@
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 
 import type { Tx } from '@/lib/db';
 import { actionIntents } from '@/lib/schema';
@@ -18,11 +18,17 @@ export async function loadRecentlyEngagedAuthorIds(
   if (!wanted.size) return new Set();
 
   const since = new Date(now.getTime() - Math.max(1, withinHours) * 60 * 60 * 1000);
+  const wantedRecipients = [...wanted].map((authorId) => sql`${`x:${authorId}`}`);
   const rows = await tx
     .select({ recipients: actionIntents.recipients })
     .from(actionIntents)
-    .where(and(eq(actionIntents.agentId, agentId), gte(actionIntents.createdAt, since)))
-    .limit(2000);
+    .where(
+      and(
+        eq(actionIntents.agentId, agentId),
+        gte(actionIntents.createdAt, since),
+        sql`jsonb_exists_any(${actionIntents.recipients}, array[${sql.join(wantedRecipients, sql`, `)}]::text[])`,
+      ),
+    );
 
   const engaged = new Set<string>();
   for (const row of rows) {

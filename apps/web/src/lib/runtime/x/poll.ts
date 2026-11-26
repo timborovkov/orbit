@@ -20,13 +20,13 @@ import {
 import {
   applyDiscoveryFilters,
   type DiscoveryFilterOutcome,
-  loadRecentlyEngagedAuthorIds,
   normalizeDiscoveryFilters,
 } from '@/lib/runtime/x/discovery-filters';
 import {
   evaluateDiscoveryFilters,
   formatFilterSkipReason,
 } from '@/lib/runtime/x/discovery-filters/engine';
+import { loadRecentlyEngagedAuthorIds } from '@/lib/runtime/x/discovery-filters/server';
 import { snapshotFromSourceEvent } from '@/lib/runtime/x/discovery-filters/snapshot';
 import type { DiscoveryFilters } from '@/lib/runtime/x/discovery-filters/types';
 import { compareSnowflake } from '@/lib/runtime/x/fixture';

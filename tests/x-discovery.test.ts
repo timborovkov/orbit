@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 
 import { budgetDefaults } from '@/lib/budgets';
+import { db } from '@/lib/db';
 import { claimJobs, completeJob, failJob } from '@/lib/queue/jobs';
 import type { ChannelAction } from '@/lib/runtime/channels/types';
 import { processSimulationJob, processSimulationRunForOrigin } from '@/lib/runtime/execute';
@@ -11,6 +12,7 @@ import { processOutboundJob } from '@/lib/runtime/outbound/process';
 import { CHANNEL_OUTBOUND_JOB } from '@/lib/runtime/outbound/types';
 import { encryptSecret } from '@/lib/runtime/secrets';
 import type { ModelCall } from '@/lib/runtime/simulation';
+import { loadRecentlyEngagedAuthorIds } from '@/lib/runtime/x/discovery-filters/server';
 import {
   createFixtureXSearchAdapter,
   FIXTURE_X_POSTS,
@@ -821,4 +823,16 @@ test('deferred events are re-filtered against current rules before admission', a
   expect(after?.run_id).toBeNull();
   expect(after?.admission_status).toBe('rejected');
   expect(String(after?.admission_reason)).toMatch(/age/i);
+});
+
+test('recent engagement lookup matches recipients in SQL for the lookback window', async () => {
+  const { agentId } = await discoverReply();
+  const engaged = await db().transaction((tx) =>
+    loadRecentlyEngagedAuthorIds(tx, agentId, ['12001', '99999'], 24),
+  );
+  expect([...engaged]).toEqual(['12001']);
+  const none = await db().transaction((tx) =>
+    loadRecentlyEngagedAuthorIds(tx, agentId, ['12001'], 24, new Date(Date.now() + 48 * 3_600_000)),
+  );
+  expect(none.size).toBe(0);
 });

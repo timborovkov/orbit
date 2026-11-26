@@ -7,19 +7,12 @@ export {
   isPostPastMaxAge,
   postAgeExpiryAt,
 } from '@/lib/runtime/x/discovery-filters/engine';
-export { loadRecentlyEngagedAuthorIds } from '@/lib/runtime/x/discovery-filters/engagement';
 export {
   defaultDiscoveryFilters,
   discoveryFiltersSchema,
   normalizeDiscoveryFilters,
 } from '@/lib/runtime/x/discovery-filters/schema';
 export { snapshotFromSearchPost } from '@/lib/runtime/x/discovery-filters/snapshot';
-export {
-  DISCOVERY_STALE_APPROVAL_REASON,
-  discoveryApprovalBlockReason,
-  discoveryReviewExpiresAt,
-  listStaleDiscoveryApprovals,
-} from '@/lib/runtime/x/discovery-filters/staleness';
 export {
   DEFAULT_LANGUAGE_RULE,
   DEFAULT_MAX_POST_AGE_HOURS,

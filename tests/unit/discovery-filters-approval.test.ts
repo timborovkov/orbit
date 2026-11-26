@@ -1,12 +1,14 @@
 import { expect, test } from 'bun:test';
 
 import {
-  DISCOVERY_STALE_APPROVAL_REASON,
-  discoveryReviewExpiresAt,
   evaluateDiscoveryFilters,
   isPostPastMaxAge,
   normalizeDiscoveryFilters,
 } from '@/lib/runtime/x/discovery-filters';
+import {
+  DISCOVERY_STALE_APPROVAL_REASON,
+  discoveryReviewExpiresAt,
+} from '@/lib/runtime/x/discovery-filters/server';
 
 const now = new Date('2026-11-24T14:00:00.000Z');
 

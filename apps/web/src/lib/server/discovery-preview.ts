@@ -12,9 +12,9 @@ import {
 import {
   applyDiscoveryFilters,
   type DiscoveryFilters,
-  loadRecentlyEngagedAuthorIds,
   normalizeDiscoveryFilters,
 } from '@/lib/runtime/x/discovery-filters';
+import { loadRecentlyEngagedAuthorIds } from '@/lib/runtime/x/discovery-filters/server';
 import { createFixtureXSearchAdapter } from '@/lib/runtime/x/fixture';
 import {
   prefilterDiscoveryPosts,
