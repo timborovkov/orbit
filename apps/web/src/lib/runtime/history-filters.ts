@@ -18,6 +18,7 @@ export type HistoryRunLike = {
   createdAt: Date | string;
   sourceTitle: string;
   channelName?: string;
+  authorHandle?: string | null;
 };
 
 export type HistoryFilters = {
@@ -52,6 +53,21 @@ export function filterHistoryRuns<T extends HistoryRunLike>(
   return runs.filter((run) => matchesHistoryFilters(run, filters));
 }
 
+function historyCreatedAtMs(value: Date | string): number {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  const ms = date.getTime();
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+/** Newest createdAt first; stable on id when timestamps match. */
+export function sortHistoryRunsNewestFirst<T extends HistoryRunLike>(runs: readonly T[]): T[] {
+  return [...runs].sort((left, right) => {
+    const delta = historyCreatedAtMs(right.createdAt) - historyCreatedAtMs(left.createdAt);
+    if (delta !== 0) return delta;
+    return right.id.localeCompare(left.id);
+  });
+}
+
 /** UTC calendar day key YYYY-MM-DD. */
 export function historyDayKey(value: Date | string): string {
   const date = typeof value === 'string' ? new Date(value) : value;
@@ -80,24 +96,64 @@ export type HistoryDayGroup<T extends HistoryRunLike> = {
   runs: T[];
 };
 
-/** Group newest-first runs into day buckets (also newest-first). */
+/**
+ * Sort runs newest-first by time, then group into day buckets (newest day first).
+ * Does not rely on input order — SQL boosts (focus run, recent crawl) must not scramble days.
+ */
 export function groupHistoryByDay<T extends HistoryRunLike>(
   runs: readonly T[],
 ): HistoryDayGroup<T>[] {
+  const sorted = sortHistoryRunsNewestFirst(runs);
   const groups = new Map<string, T[]>();
-  for (const run of runs) {
+  for (const run of sorted) {
     const key = historyDayKey(run.createdAt);
     const list = groups.get(key);
     if (list) list.push(run);
     else groups.set(key, [run]);
   }
-  return [...groups.entries()].map(([dayKey, dayRuns]) => ({
-    dayKey,
-    label: formatHistoryDayHeading(dayKey),
-    runs: dayRuns,
-  }));
+  return [...groups.entries()]
+    .sort(([left], [right]) => right.localeCompare(left))
+    .map(([dayKey, dayRuns]) => ({
+      dayKey,
+      label: formatHistoryDayHeading(dayKey),
+      runs: dayRuns,
+    }));
 }
 
 export function uniqueHistorySources(runs: readonly HistoryRunLike[]): string[] {
   return [...new Set(runs.map(historySourceKey))].sort();
+}
+
+export function paginateHistoryRuns<T>(
+  runs: readonly T[],
+  page: number,
+  pageSize: number,
+): { items: T[]; page: number; totalPages: number; total: number } {
+  const size = Math.max(1, pageSize);
+  const total = runs.length;
+  const totalPages = Math.max(1, Math.ceil(total / size));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * size;
+  return {
+    items: runs.slice(start, start + size),
+    page: safePage,
+    totalPages,
+    total,
+  };
+}
+
+/**
+ * Page that contains `runId` in the already-ordered list (1-based).
+ * Missing ids return page 1 so deep links still land on a valid page.
+ */
+export function historyPageForRunId(
+  runs: readonly { id: string }[],
+  runId: string | undefined,
+  pageSize: number,
+): number | null {
+  if (!runId) return null;
+  const size = Math.max(1, pageSize);
+  const index = runs.findIndex((run) => run.id === runId);
+  if (index < 0) return 1;
+  return Math.floor(index / size) + 1;
 }

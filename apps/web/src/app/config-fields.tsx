@@ -20,28 +20,28 @@ const groups = [
     id: 'identity',
     title: 'Identity',
     icon: Fingerprint,
-    description: 'Define who this agent is and what it is here to do.',
+    description: 'Name, role, mission and voice.',
     fields: ['name', 'role', 'mission', 'personality'],
   },
   {
     id: 'behaviour',
     title: 'Behaviour',
     icon: SlidersHorizontal,
-    description: 'Set the operating rules and when this agent should engage.',
+    description: 'Instructions and engagement criteria.',
     fields: ['instructions', 'engagementCriteria'],
   },
   {
     id: 'discovery',
     title: 'Discovery',
     icon: Radar,
-    description: 'Configure proactive X search. Polling stays read-only in shadow mode.',
+    description: 'Proactive X search. Read-only in shadow.',
     fields: [] as string[],
   },
   {
     id: 'models',
     title: 'Models',
     icon: Cpu,
-    description: 'Choose the models that evaluate inputs and compose responses.',
+    description: 'Main and evaluator models.',
     fields: ['mainModel', 'evaluatorModel'],
   },
 ];
@@ -137,9 +137,7 @@ export function ConfigFields({
                       markdown={!short}
                       compactMarkdown={name === 'personality'}
                       description={
-                        name === 'mission'
-                          ? 'Describe the outcome this agent should work towards.'
-                          : undefined
+                        name === 'mission' ? 'Outcome this agent should pursue.' : undefined
                       }
                       maxLength={
                         name === 'name'

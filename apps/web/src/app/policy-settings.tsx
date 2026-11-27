@@ -1,47 +1,28 @@
 import Link from 'next/link';
 
-import { Inbox, TriangleAlert } from 'lucide-react';
+import { TriangleAlert } from 'lucide-react';
 
 import { savePeopleGrant } from '@/actions/introductions';
-import {
-  reviewProposal,
-  saveChannelGrant,
-  saveConsent,
-  saveConsentRequirements,
-} from '@/actions/policy';
+import { saveChannelGrant, saveConsent, saveConsentRequirements } from '@/actions/policy';
 import { saveXReplyConnection } from '@/actions/x-reply';
 import { ActionRequirementsForm } from '@/app/action-requirements-form';
 import { ApprovalToolsForm } from '@/app/approval-tools-form';
 import { WorkspaceField, WorkspaceSelect } from '@/app/workspace-field';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from '@/components/ui/empty';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import type { ConsentScope } from '@/lib/policy/scopes';
-import { INTRODUCTION_REVIEW, peopleGrants } from '@/lib/runtime/introductions/types';
-import { X_REPLY_ACTION, xReplyDraftLength } from '@/lib/runtime/x/reply-input';
+import { peopleGrants } from '@/lib/runtime/introductions/types';
+import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
 type Workspace = NonNullable<Awaited<ReturnType<typeof getAgentWorkspace>>>;
 
 const actionLabels = {
-  reply: 'Reply',
-  [X_REPLY_ACTION]: 'X reply',
-  like: 'Like',
-  repost: 'Repost',
-  follow: 'Follow',
-  bookmark: 'Bookmark',
-  introduce: 'Introduce',
-  [INTRODUCTION_REVIEW]: 'Introduction draft',
-  escalate: 'Escalate',
+  introduce: 'Introductions',
+  escalate: 'Escalations',
+  [X_REPLY_ACTION]: 'X replies',
 } as Record<string, string>;
 
 const consentOptions = [
@@ -77,10 +58,7 @@ export function ReviewSettings({
     <section className="access-workbench" data-testid="approval-settings">
       <div className="editor-section-heading">
         <h2>Approval rules</h2>
-        <p className="muted">
-          Off by default. Enable actions that must pause for an administrator before continuing.
-          People introductions enter review after both participants agree.
-        </p>
+        <p className="muted">Actions that must wait for an administrator before continuing.</p>
       </div>
       <ApprovalToolsForm
         agentId={agentId}
@@ -247,7 +225,7 @@ export function ConsentSettings({
         action={saveConsentRequirements}
         label="Save consent requirements"
         legend="Require recipient consent"
-        description="Choose which scenario actions require recorded permission from everyone involved. Recorded refusals and revocations always block the action."
+        description="Actions that need recorded permission from everyone involved."
       />
       <div className="consent-records-block">
         <h3 className="consent-records-title">Existing consents</h3>
@@ -274,7 +252,7 @@ export function ConsentSettings({
             label="Recipient ID"
             maxLength={120}
             required
-            description="For X replies, use x: followed by the author’s numeric X user ID."
+            description="For X replies: x: plus the author’s numeric user ID."
           />
           <div className="form-grid">
             <WorkspaceSelect
@@ -301,109 +279,10 @@ export function ConsentSettings({
             label="Evidence reference"
             maxLength={1000}
             required
-            description="Link or note that shows where this choice was recorded."
+            description="Link or note for where this was recorded."
           />
         </FieldGroup>
       </WorkspaceForm>
-    </section>
-  );
-}
-
-export function ProposalReview({
-  agentId,
-  reviews,
-}: {
-  agentId: string;
-  reviews: Workspace['reviews'];
-}) {
-  return (
-    <section className="access-workbench" aria-labelledby="proposal-review-title">
-      <div className="editor-section-heading">
-        <h2 id="proposal-review-title">Proposal review</h2>
-        <p className="muted">Review pending proposals and find past decisions.</p>
-        <p className="muted">
-          Change which actions need approval in{' '}
-          <Link href={`/agents/${agentId}?tab=access&access=approvals`}>
-            Access → Approval rules
-          </Link>
-          , or review every agent in <Link href="/approvals">Approvals</Link>.
-        </p>
-      </div>
-      {reviews.length === 0 ? (
-        <Empty className="border border-border py-10 md:py-12">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Inbox aria-hidden="true" />
-            </EmptyMedia>
-            <EmptyTitle>No proposals awaiting review</EmptyTitle>
-            <EmptyDescription>
-              When an agent action needs approval, it will appear here.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <ul className="policy-records" aria-label="Proposals, pending first">
-          {reviews.map((proposal) => (
-            <li id={`proposal-${proposal.id}`} key={proposal.id}>
-              <div className="approvals-row-meta">
-                <strong>{actionLabels[proposal.actionType] ?? proposal.actionType}</strong>
-                <span className="state-label">
-                  {proposal.status === 'pending' ? 'Pending review' : proposal.status}
-                </span>
-              </div>
-              {proposal.introductionId ? (
-                <Link href={`/people/introductions/${proposal.introductionId}`}>
-                  View disclosure and consent
-                </Link>
-              ) : (
-                proposal.recipients.length > 0 && (
-                  <p className="muted">{proposal.recipients.join(' · ')}</p>
-                )
-              )}
-              {proposal.reason && <p>{proposal.reason}</p>}
-              {proposal.status === 'pending' ? (
-                <div className="policy-review-edit">
-                  <WorkspaceForm action={reviewProposal} label="Approve">
-                    <input type="hidden" name="agentId" value={agentId} />
-                    <input type="hidden" name="intentId" value={proposal.id} />
-                    <input type="hidden" name="decision" value="approved" />
-                    {proposal.actionType === INTRODUCTION_REVIEW ? (
-                      <blockquote className="approvals-preview">{proposal.draft}</blockquote>
-                    ) : (
-                      <Field>
-                        <FieldLabel htmlFor={`draft-${proposal.id}`}>
-                          Draft (edit before approve)
-                        </FieldLabel>
-                        <Textarea
-                          id={`draft-${proposal.id}`}
-                          name="draft"
-                          rows={3}
-                          defaultValue={proposal.draft ?? ''}
-                          maxLength={
-                            proposal.actionType === X_REPLY_ACTION ? xReplyDraftLength : 8000
-                          }
-                        />
-                      </Field>
-                    )}
-                  </WorkspaceForm>
-                  <WorkspaceForm action={reviewProposal} label="Reject">
-                    <input type="hidden" name="agentId" value={agentId} />
-                    <input type="hidden" name="intentId" value={proposal.id} />
-                    <input type="hidden" name="decision" value="rejected" />
-                  </WorkspaceForm>
-                </div>
-              ) : (
-                proposal.draft && (
-                  <blockquote className="approvals-preview">{proposal.draft}</blockquote>
-                )
-              )}
-              {proposal.reviewedBy && (
-                <p className="field-hint">Reviewed by {proposal.reviewedBy}</p>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
     </section>
   );
 }

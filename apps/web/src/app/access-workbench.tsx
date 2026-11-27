@@ -155,8 +155,7 @@ export function AccessWorkbench({
         <div className="editor-section-heading">
           <h2 id="commitment-permissions">Commitment permissions</h2>
           <p className="muted">
-            Allow this agent to create commitments in its current conversation. Follow-up drafts go
-            to Approvals.
+            Create commitments in the current conversation. Drafts go to Approvals.
           </p>
         </div>
         {commitmentGrants.map(({ type, label }) => {

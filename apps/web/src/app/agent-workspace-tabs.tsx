@@ -11,8 +11,8 @@ import { KnowledgeWorkbench } from '@/app/knowledge-workbench';
 import { LoadingStatus } from '@/app/loading-status';
 import { MemoryWorkbench } from '@/app/memory-workbench';
 import { PlaygroundPanel } from '@/app/playground-panel';
-import { ProposalReview } from '@/app/policy-settings';
 import { ProfilePictureEditor } from '@/app/profile-picture-editor';
+import { ProposalReview } from '@/app/proposal-review';
 import { WorkspaceForm } from '@/app/workspace-form';
 import { WorkspaceTabs } from '@/app/workspace-tabs';
 import { KNOWLEDGE_SEARCH_TOOL } from '@/lib/knowledge/types';
@@ -54,6 +54,7 @@ export function AgentWorkspaceTabs({
   keySource,
   canSimulate,
   lifecycle,
+  globalPaused,
   knowledgeDocuments,
   sharedLibraries,
   librarySkills,
@@ -70,6 +71,7 @@ export function AgentWorkspaceTabs({
   webResearch,
   webResearchAccess,
   knowledgeDocumentCount,
+  renderedAt,
 }: {
   id: string;
   agent: Workspace['agent'];
@@ -86,6 +88,7 @@ export function AgentWorkspaceTabs({
   keySource: OpenRouterKeySource;
   canSimulate: boolean;
   lifecycle: LifecycleState;
+  globalPaused: boolean;
   knowledgeDocuments: Awaited<ReturnType<typeof listKnowledgeDocuments>>;
   sharedLibraries: Awaited<ReturnType<typeof listGrantedKnowledgeLibraries>>;
   librarySkills: Awaited<ReturnType<typeof listSkillSummaries>>['items'];
@@ -102,6 +105,7 @@ export function AgentWorkspaceTabs({
   webResearch: Awaited<ReturnType<typeof getWebResearchActivity>>;
   webResearchAccess: Awaited<ReturnType<typeof getWebResearchAccess>>;
   knowledgeDocumentCount: number;
+  renderedAt: string;
 }) {
   const approvalSettings = current.approvalSettings ?? agent;
   const versionFor = (configurationId: string) =>
@@ -216,12 +220,14 @@ export function AgentWorkspaceTabs({
           count: history.length + activityEvents.length,
           content: (
             <HistoryWorkbench
+              key={focusRunId ?? 'history'}
               agentId={id}
               history={history}
               versions={versions}
               activityEvents={activityEvents}
               webResearch={webResearch}
               focusRunId={focusRunId}
+              renderedAt={renderedAt}
             />
           ),
         },
@@ -229,7 +235,14 @@ export function AgentWorkspaceTabs({
           id: 'approvals',
           label: 'Approvals',
           count: reviews.filter((review) => review.status === 'pending').length,
-          content: <ProposalReview agentId={id} reviews={reviews} />,
+          content: (
+            <ProposalReview
+              agentId={id}
+              reviews={reviews}
+              lifecycle={lifecycle}
+              globalPaused={globalPaused}
+            />
+          ),
         },
         {
           id: 'access',

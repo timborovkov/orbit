@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { SubmitButton } from '@/components/ui/submit-button';
-import { env } from '@/lib/env';
 
 const navLinks = [
   { href: '/', label: 'Overview' },
@@ -26,12 +25,17 @@ const navLinks = [
   { href: '/mcp', label: 'MCP' },
 ] as const;
 
+export type WorkspaceNavHref = (typeof navLinks)[number]['href'];
+
 export function WorkspaceHeader({
   current,
   pendingApprovalCount,
+  authDisabled = false,
 }: {
-  current?: (typeof navLinks)[number]['href'];
+  current?: WorkspaceNavHref;
   pendingApprovalCount: number;
+  /** Passed from a Server Component — never call env() from client trees. */
+  authDisabled?: boolean;
 }) {
   const links = navLinks.map(({ href, label }) => (
     <Link key={href} href={href} aria-current={href === current ? 'page' : undefined}>
@@ -61,7 +65,7 @@ export function WorkspaceHeader({
           <span className="workspace-name">Private workspace</span>
           <div className="header-actions">
             <ThemeSwitch />
-            {!env().AUTH_DISABLED && (
+            {!authDisabled && (
               <form action={logout}>
                 <SubmitButton
                   variant="ghost"

@@ -1,13 +1,13 @@
-import { BrandMark } from '@/app/brand-mark';
-import { LoadingStatus } from '@/app/loading-status';
+import { ConsolePageSkeleton } from '@/app/console-skeletons';
 
+/**
+ * Rare fallback outside the console group (e.g. login). Do not call env() —
+ * Next prerenders /_global-error without CI env vars and Zod would fail the build.
+ */
 export default function Loading() {
   return (
-    <main className="grid min-h-dvh place-items-center p-6" aria-label="Orbit">
-      <div className="grid justify-items-center gap-4">
-        <BrandMark size={40} />
-        <LoadingStatus>Loading Orbit…</LoadingStatus>
-      </div>
-    </main>
+    <div className="console-shell">
+      <ConsolePageSkeleton />
+    </div>
   );
 }

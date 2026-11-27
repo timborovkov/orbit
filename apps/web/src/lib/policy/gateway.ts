@@ -207,7 +207,7 @@ export function evaluateCandidate(
   }
 
   if (ctx.lifecycle === 'paused') {
-    reasons.push('Agent is paused.');
+    reasons.push('Agent is paused. Resume it before approving outbound actions.');
     return { decision: 'deny', reasons };
   }
 
@@ -392,7 +392,7 @@ export function evaluateCandidate(
     }
 
     if (ctx.globalPaused) {
-      reasons.push('Global outbound pause is enabled.');
+      reasons.push('Global outbound pause is enabled. Release it before approving.');
       return { decision: 'deny', reasons };
     }
 
