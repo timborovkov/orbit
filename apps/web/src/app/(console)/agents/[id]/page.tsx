@@ -203,6 +203,7 @@ export default async function AgentWorkspace({
             webResearch={webResearch}
             webResearchAccess={webResearchAccess}
             knowledgeDocumentCount={knowledgeDocumentCount}
+            renderedAt={now.toISOString()}
           />
         </Suspense>
       </main>

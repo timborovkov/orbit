@@ -79,6 +79,7 @@ export function HistoryWorkbench({
   activityEvents,
   webResearch,
   focusRunId,
+  renderedAt,
 }: {
   agentId: string;
   history: WorkspaceHistory;
@@ -86,6 +87,8 @@ export function HistoryWorkbench({
   activityEvents: ActivityEventRow[];
   webResearch: WebResearchActivity;
   focusRunId?: string;
+  /** Server render/refresh clock so ages advance on PendingRunRefresh without hydration drift. */
+  renderedAt: string;
 }) {
   const versionFor = (configurationId: string) =>
     versions.find((version) => version.id === configurationId)?.version ?? '—';
@@ -102,7 +105,8 @@ export function HistoryWorkbench({
   );
   const paged = useMemo(() => paginateHistoryRuns(filtered, page, PAGE_SIZE), [filtered, page]);
   const groups = useMemo(() => groupHistoryByDay(paged.items), [paged.items]);
-  const now = useMemo(() => new Date(), []);
+  // Stable across SSR/hydration; updates whenever the agent page re-renders after refresh.
+  const now = useMemo(() => new Date(renderedAt), [renderedAt]);
 
   function updateFilters(next: HistoryFilters) {
     setFilters(next);

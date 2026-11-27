@@ -522,6 +522,7 @@ export function ApprovalsInbox({
     approvalBlockReason({
       lifecycle: item.agentLifecycle ?? agentStates[item.agentId] ?? 'shadow',
       globalPaused,
+      actionType: item.actionType,
     });
   const selectAllId = useId();
 

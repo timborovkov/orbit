@@ -71,6 +71,7 @@ export function AgentWorkspaceTabs({
   webResearch,
   webResearchAccess,
   knowledgeDocumentCount,
+  renderedAt,
 }: {
   id: string;
   agent: Workspace['agent'];
@@ -104,6 +105,7 @@ export function AgentWorkspaceTabs({
   webResearch: Awaited<ReturnType<typeof getWebResearchActivity>>;
   webResearchAccess: Awaited<ReturnType<typeof getWebResearchAccess>>;
   knowledgeDocumentCount: number;
+  renderedAt: string;
 }) {
   const approvalSettings = current.approvalSettings ?? agent;
   const versionFor = (configurationId: string) =>
@@ -225,6 +227,7 @@ export function AgentWorkspaceTabs({
               activityEvents={activityEvents}
               webResearch={webResearch}
               focusRunId={focusRunId}
+              renderedAt={renderedAt}
             />
           ),
         },

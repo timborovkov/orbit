@@ -1,8 +1,14 @@
+import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
+
 /** Human-readable reason approve is blocked before the request is sent. */
 export function approvalBlockReason(input: {
   lifecycle: string;
   globalPaused: boolean;
+  /** Introduction reviews skip the outbound gateway; do not block on pause. */
+  actionType?: string;
 }): string | null {
+  // INTRODUCTION_REVIEW only records disclosure/consent — no outbound send.
+  if (input.actionType === INTRODUCTION_REVIEW) return null;
   if (input.lifecycle === 'paused') {
     return 'Agent is paused. Resume it before approving outbound actions.';
   }

@@ -37,7 +37,11 @@ export function ProposalReviewCard({
   const [draft, setDraft] = useState(proposal.draft ?? '');
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
-  const blockReason = approvalBlockReason({ lifecycle, globalPaused });
+  const blockReason = approvalBlockReason({
+    lifecycle,
+    globalPaused,
+    actionType: proposal.actionType,
+  });
 
   function review(decision: 'approved' | 'rejected') {
     if (decision === 'approved' && blockReason) {
