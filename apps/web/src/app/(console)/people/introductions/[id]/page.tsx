@@ -26,11 +26,15 @@ function PartyConsent({
   party,
   counterpart,
   identitiesCurrent,
+  canAgree,
+  disclosureDigest,
 }: {
   introductionId: string;
   party: Introduction['parties'][number];
   counterpart: string;
   identitiesCurrent: boolean;
+  canAgree: boolean;
+  disclosureDigest?: string | null;
 }) {
   const decisionId = `decision-${party.personId}`;
   const evidenceId = `evidence-${party.personId}`;
@@ -67,6 +71,9 @@ function PartyConsent({
         >
           <input type="hidden" name="introductionId" value={introductionId} />
           <input type="hidden" name="personId" value={party.personId} />
+          {disclosureDigest && (
+            <input type="hidden" name="disclosureDigest" value={disclosureDigest} />
+          )}
           <FieldGroup>
             {party.decision === 'agreed' ? (
               <input type="hidden" name="decision" value="revoked" />
@@ -77,7 +84,7 @@ function PartyConsent({
                 label="Decision"
                 initialValue=""
                 options={[
-                  { value: 'agreed', label: 'Agreed' },
+                  ...(canAgree ? [{ value: 'agreed', label: 'Agreed' }] : []),
                   { value: 'declined', label: 'Declined' },
                 ]}
               />
@@ -122,6 +129,19 @@ export default async function IntroductionPage({ params }: { params: Promise<{ i
       </div>
       <section className="space-y-4" aria-labelledby="introduction-scope">
         <h2 id="introduction-scope">Disclosure and consent</h2>
+        {introduction.legacy && (
+          <p className="muted">
+            Review only. A new proposal requires fresh consent to share email addresses.
+          </p>
+        )}
+        {introduction.emailPreview && (
+          <div className="space-y-2">
+            <p className="wrap-break-word">To {introduction.emailPreview.to.join(', ')}</p>
+            <p className="wrap-break-word">Subject {introduction.emailPreview.subject}</p>
+            <blockquote className="approvals-preview">{introduction.emailPreview.draft}</blockquote>
+            <p className="muted">Both participants will see both email addresses.</p>
+          </div>
+        )}
         <div className="grid gap-4 md:grid-cols-2">
           {introduction.parties.map((party, i) => (
             <PartyConsent
@@ -129,15 +149,31 @@ export default async function IntroductionPage({ params }: { params: Promise<{ i
               party={party}
               counterpart={introduction.parties[1 - i].name}
               identitiesCurrent={introduction.identitiesCurrent}
+              canAgree={introduction.canAgree}
+              disclosureDigest={introduction.disclosureDigest}
               introductionId={introduction.id}
             />
           ))}
         </div>
       </section>
+      {introduction.delivery && (
+        <section className="space-y-2" aria-labelledby="introduction-delivery">
+          <h2 id="introduction-delivery">Email delivery</h2>
+          <p className="capitalize">{introduction.delivery.status}</p>
+          {introduction.delivery.reason && <p>{introduction.delivery.reason}</p>}
+          {introduction.delivery.providerMessageId && (
+            <p className="wrap-break-word">
+              Resend message ID {introduction.delivery.providerMessageId}
+            </p>
+          )}
+        </section>
+      )}
       {introduction.draft && (
         <section className="space-y-3" aria-labelledby="introduction-draft">
           <h2 id="introduction-draft">Introduction draft</h2>
-          <blockquote className="approvals-preview">{introduction.draft}</blockquote>
+          {!introduction.emailPreview && (
+            <blockquote className="approvals-preview">{introduction.draft}</blockquote>
+          )}
           {introduction.reviewStatus === 'approved' && (
             <p className="muted">Administrator approved the draft.</p>
           )}

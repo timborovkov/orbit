@@ -135,6 +135,7 @@ export function introductionTools(options: {
                 firstDisclosure: { ...firstProfile, blurb: first.blurb },
                 secondDisclosure: { ...secondProfile, blurb: second.blurb },
                 rationale,
+                disclosureVersion: 2,
               });
               return { id: decision.intentId };
             });

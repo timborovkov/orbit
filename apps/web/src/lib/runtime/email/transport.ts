@@ -4,7 +4,7 @@ import { readEmailPayload } from '@/lib/runtime/email/provider';
 
 export interface OutboundEmailMessage {
   from: string;
-  to: string;
+  to: string | readonly string[];
   subject: string;
   text: string;
   headers: Record<string, string>;
@@ -38,7 +38,7 @@ export function createResendTransport(apiKey: string): EmailTransport {
           },
           body: JSON.stringify({
             from: message.from,
-            to: [message.to],
+            to: typeof message.to === 'string' ? [message.to] : message.to,
             subject: message.subject,
             text: message.text,
             headers: message.headers,

@@ -34,6 +34,10 @@ export async function saveIntroductionConsent(form: FormData) {
       personId: z.uuid(),
       decision: introductionDecision,
       evidence: z.string().trim().min(1).max(1000),
+      disclosureDigest: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .optional(),
     })
     .safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: 'Choose a decision and enter an evidence reference.' };

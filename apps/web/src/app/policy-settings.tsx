@@ -79,8 +79,8 @@ export function ReviewSettings({
           <div>
             <h3 id="live-sending-title">Live sending</h3>
             <p>
-              These controls can publish to X when the agent is Live. Review the connected account
-              and permissions before changing them.
+              These permissions allow outbound actions when the agent is Live. Review the connected
+              accounts and mailboxes before enabling them.
             </p>
           </div>
         </div>

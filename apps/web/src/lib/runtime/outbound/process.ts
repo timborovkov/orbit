@@ -8,7 +8,7 @@ import { lockApprovalAgent } from '@/lib/runtime/approval-work';
 import { channelAction, channelOutboundJobTypes } from '@/lib/runtime/channels/registry';
 import type { ChannelAction } from '@/lib/runtime/channels/types';
 import { RetryableInfrastructureError } from '@/lib/runtime/errors';
-import { introductionDisclosureFailure } from '@/lib/runtime/introductions/disclosure';
+import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
 import {
   claimOutboundForSending,
   loadOutboundForDispatch,
@@ -113,7 +113,14 @@ export async function processOutboundJob(
     if ('terminal' in claimed && claimed.terminal) return null;
     if (nonIdempotent && row.dispatchAttempt !== job.attempts) return null;
     const block = (reason: string) =>
-      markOutboundStatus(tx, row.id, { status: 'blocked', reason, completedAt: new Date() });
+      markOutboundStatus(tx, row.id, {
+        status: 'blocked',
+        reason:
+          handler?.idempotencyWindowMs && job.attempts > 1
+            ? `${reason} An earlier attempt may have reached the provider. Check the provider outcome.`
+            : reason,
+        completedAt: new Date(),
+      });
     if (jobRow.status === 'cancelled') {
       await block('Outbound send cancelled before dispatch.');
       return null;
@@ -125,6 +132,7 @@ export async function processOutboundJob(
     if (
       !intent ||
       intent.actionType !== row.actionType ||
+      intent.actionType === INTRODUCTION_REVIEW ||
       (intent.reviewStatus !== null && intent.reviewStatus !== 'approved') ||
       intent.decision !== 'allow' ||
       (handler?.alwaysRequiresApproval && intent.reviewStatus !== 'approved')
@@ -138,24 +146,15 @@ export async function processOutboundJob(
     }
     const delivery = await prepare(tx, row, intent);
     if ('error' in delivery) {
-      await block(delivery.error);
-      return null;
-    }
-
-    const disclosureError = await introductionDisclosureFailure(tx, intent, {
-      body: row.body,
-      recipients: delivery.recipients,
-    });
-    if (disclosureError) {
       await tx.insert(policyDecisions).values({
         agentId: row.agentId,
         actionType: row.actionType,
         intentId: intent.id,
         actor,
         decision: 'deny',
-        reasons: [disclosureError],
+        reasons: [delivery.error],
       });
-      await block(disclosureError);
+      await block(delivery.error);
       return null;
     }
 
@@ -207,6 +206,19 @@ export async function processOutboundJob(
         dispatchAttempt: null,
       });
       return { retryable: 'Worker stopped before delivery.' };
+    }
+    if (
+      handler.idempotencyWindowMs &&
+      job.attempts > 1 &&
+      Date.now() - (row.dispatchedAt ?? row.createdAt).getTime() >= handler.idempotencyWindowMs
+    ) {
+      await markOutboundStatus(tx, row.id, {
+        status: 'failed',
+        reason:
+          'The provider retry window expired. Check the provider outcome before sending again.',
+        completedAt: new Date(),
+      });
+      return null;
     }
     signal.throwIfAborted();
     const provider = delivery.provider ?? handler.provider;

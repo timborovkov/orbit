@@ -4,7 +4,11 @@ import type { ChannelAdapter } from '@/lib/runtime/channels/types';
 import { extractEmailAddress } from '@/lib/runtime/email/headers';
 import { emailKnowledgeQuery, emailMemoryQuery } from '@/lib/runtime/email/input';
 import { EMAIL_DRAFT_JOB, EMAIL_RECEIVE_JOB } from '@/lib/runtime/email/settings';
-import { EMAIL_SEND_ACTION, EMAIL_SEND_JOB } from '@/lib/runtime/outbound/types';
+import {
+  EMAIL_INTRODUCTION_ACTION,
+  EMAIL_SEND_ACTION,
+  EMAIL_SEND_JOB,
+} from '@/lib/runtime/outbound/types';
 import { emailMailboxes, emailMessages } from '@/lib/schema';
 
 export const emailChannel: ChannelAdapter = {
@@ -64,6 +68,22 @@ export const emailChannel: ChannelAdapter = {
     },
   },
   actions: [
+    {
+      type: EMAIL_INTRODUCTION_ACTION,
+      label: 'Email introductions',
+      provider: 'resend',
+      alwaysRequiresApproval: true,
+      standalone: true,
+      idempotencyWindowMs: 23 * 60 * 60 * 1000, // Resend retains keys for 24 hours.
+      async validateApproval(tx, intent) {
+        const { validateIntroductionApproval } = await import('@/lib/runtime/email/introduction');
+        return validateIntroductionApproval(tx, intent);
+      },
+      async prepareDelivery(tx, outbound, intent) {
+        const { prepareIntroductionDelivery } = await import('@/lib/runtime/email/introduction');
+        return prepareIntroductionDelivery(tx, outbound, intent);
+      },
+    },
     {
       type: EMAIL_SEND_ACTION,
       jobType: EMAIL_SEND_JOB,

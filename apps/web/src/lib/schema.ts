@@ -437,6 +437,7 @@ export const introductionProposals = pgTable(
     firstDisclosure: jsonb('first_disclosure').$type<IntroductionDisclosure>().notNull(),
     secondDisclosure: jsonb('second_disclosure').$type<IntroductionDisclosure>().notNull(),
     rationale: text('rationale').notNull(),
+    disclosureVersion: integer('disclosure_version').notNull().default(1),
     reviewIntentId: uuid('review_intent_id')
       .unique()
       .references(() => actionIntents.id, { onDelete: 'set null' }),
@@ -523,6 +524,7 @@ export const recipientConsents = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     actor: text('actor').notNull(),
     introductionId: uuid('introduction_id'),
+    disclosureDigest: text('disclosure_digest'),
     introductionDecision: text('introduction_decision').$type<IntroductionDecision>(),
   },
   (table) => [
