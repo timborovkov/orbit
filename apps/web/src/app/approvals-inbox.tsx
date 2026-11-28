@@ -26,6 +26,7 @@ import { approvalBlockReason, clarifyApprovalError } from '@/lib/approvals/block
 import { approvalReviewLimit } from '@/lib/approvals/rules';
 import { formatAge, formatUtcTimestamp } from '@/lib/format';
 import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
+import { EMAIL_INTRODUCTION_ACTION } from '@/lib/runtime/outbound/types';
 import { X_REPLY_ACTION, xReplyDraftLength } from '@/lib/runtime/x/reply-input';
 import { cn } from '@/lib/utils';
 
@@ -40,6 +41,7 @@ const actionLabels = {
   escalate: 'Escalate',
   'email.send': 'Email reply',
   [INTRODUCTION_REVIEW]: 'Introduction draft',
+  [EMAIL_INTRODUCTION_ACTION]: 'Email introduction',
 } as Record<string, string>;
 
 export interface ApprovalItem {
@@ -52,6 +54,7 @@ export interface ApprovalItem {
   introductionId: string | null;
   recipients: string[];
   draft: string | null;
+  subject?: string | null;
   reason: string | null;
   status: 'pending' | 'approved' | 'rejected' | 'expired' | null;
   createdAt: Date | string;
@@ -102,6 +105,12 @@ function ProposalContext({ item }: { item: ApprovalItem }) {
         </Link>
       ) : (
         item.recipients.length > 0 && <span>Recipients {item.recipients.join(' · ')}</span>
+      )}
+      {item.actionType === EMAIL_INTRODUCTION_ACTION && (
+        <>
+          <span className="wrap-break-word">To {item.recipients.join(', ')}</span>
+          <span className="wrap-break-word">Subject {item.subject}</span>
+        </>
       )}
       {item.runId && (
         <Link href={`/agents/${item.agentId}?run=${item.runId}#run-${item.runId}`}>
@@ -173,7 +182,7 @@ function PendingDraftBlock({
       <blockquote className="approvals-preview">
         {(item.draft ?? '').trim() || 'No draft text.'}
       </blockquote>
-      {item.actionType !== INTRODUCTION_REVIEW && (
+      {item.actionType !== INTRODUCTION_REVIEW && item.actionType !== EMAIL_INTRODUCTION_ACTION && (
         <Button
           type="button"
           size="sm"

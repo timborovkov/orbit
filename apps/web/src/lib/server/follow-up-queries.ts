@@ -7,12 +7,14 @@ import { db } from '@/lib/db';
 import { channelLabel } from '@/lib/runtime/channels/registry';
 import { mergeFollowUpListViews } from '@/lib/runtime/follow-ups/list';
 import { pendingFollowUpStatuses } from '@/lib/runtime/follow-ups/types';
+import { EMAIL_INTRODUCTION_ACTION } from '@/lib/runtime/outbound/types';
 import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
 import {
   actionIntents,
   agentActivityEvents,
   emailMessages,
   followUps,
+  introductionProposals,
   jobs,
   outboundActions,
   sourceEvents,
@@ -87,7 +89,7 @@ export async function selectFollowUpsForAgentView(agentId: string) {
 
 export async function listActivityEventsForAgent(agentId: string, limit = 50) {
   await requireAdmin();
-  const [events, replies] = await Promise.all([
+  const [events, deliveries] = await Promise.all([
     selectActivityEvents(agentId, limit),
     db()
       .select({
@@ -98,37 +100,61 @@ export async function listActivityEventsForAgent(agentId: string, limit = 50) {
         providerMessageId: outboundActions.providerMessageId,
         updatedAt: outboundActions.updatedAt,
         runId: actionIntents.runId,
+        introductionId: introductionProposals.id,
+        actionType: outboundActions.actionType,
       })
       .from(outboundActions)
       .innerJoin(
         actionIntents,
         and(eq(actionIntents.id, outboundActions.intentId), eq(actionIntents.agentId, agentId)),
       )
+      .leftJoin(
+        introductionProposals,
+        and(
+          eq(introductionProposals.reviewIntentId, outboundActions.intentId),
+          eq(introductionProposals.agentId, outboundActions.agentId),
+        ),
+      )
       .where(
-        and(eq(outboundActions.agentId, agentId), eq(outboundActions.actionType, X_REPLY_ACTION)),
+        and(
+          eq(outboundActions.agentId, agentId),
+          inArray(outboundActions.actionType, [X_REPLY_ACTION, EMAIL_INTRODUCTION_ACTION]),
+        ),
       )
       .orderBy(desc(outboundActions.updatedAt), desc(outboundActions.id))
       .limit(limit),
   ]);
   return [
     ...events,
-    ...replies.map((reply) => ({
-      id: reply.id,
-      summary: `${reply.provider === 'x-fixture' ? 'Fixture X reply' : 'X reply'} ${reply.status}`,
-      detail: reply.providerMessageId ? `Reply ID ${reply.providerMessageId}` : reply.reason,
-      createdAt: reply.updatedAt,
-      dueAt: null,
-      channel: channelLabel('x'),
-      replyExcerpt: null,
-      links: reply.runId
-        ? [
-            {
-              label: 'View originating run',
-              href: `/agents/${agentId}?run=${reply.runId}#run-${reply.runId}`,
-            },
-          ]
-        : [],
-    })),
+    ...deliveries.map((delivery) => {
+      const email = delivery.actionType === EMAIL_INTRODUCTION_ACTION;
+      const label = email
+        ? 'Email introduction'
+        : delivery.provider === 'x-fixture'
+          ? 'Fixture X reply'
+          : 'X reply';
+      const link =
+        email && delivery.introductionId
+          ? { label: 'View introduction', href: `/people/introductions/${delivery.introductionId}` }
+          : delivery.runId
+            ? {
+                label: 'View originating run',
+                href: `/agents/${agentId}?run=${delivery.runId}#run-${delivery.runId}`,
+              }
+            : null;
+      return {
+        id: delivery.id,
+        summary: `${label} ${delivery.status}`,
+        detail: delivery.providerMessageId
+          ? `${email ? 'Resend message ID' : 'Reply ID'} ${delivery.providerMessageId}`
+          : delivery.reason,
+        createdAt: delivery.updatedAt,
+        dueAt: null,
+        channel: channelLabel(email ? 'email' : 'x'),
+        replyExcerpt: null,
+        links: link ? [link] : [],
+      };
+    }),
   ]
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))
     .slice(0, limit);

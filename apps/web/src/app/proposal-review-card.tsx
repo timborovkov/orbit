@@ -13,6 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { approvalBlockReason, clarifyApprovalError } from '@/lib/approvals/block-reason';
 import type { LifecycleState } from '@/lib/lifecycle';
 import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
+import { EMAIL_INTRODUCTION_ACTION } from '@/lib/runtime/outbound/types';
 import { X_REPLY_ACTION, xReplyDraftLength } from '@/lib/runtime/x/reply-input';
 
 export function ProposalReviewCard({
@@ -31,6 +32,9 @@ export function ProposalReviewCard({
   lifecycle: LifecycleState;
   globalPaused: boolean;
 }) {
+  const readOnly =
+    proposal.actionType === INTRODUCTION_REVIEW ||
+    proposal.actionType === EMAIL_INTRODUCTION_ACTION;
   const draftId = useId();
   const router = useRouter();
   const { toast } = useToast();
@@ -53,7 +57,7 @@ export function ProposalReviewCard({
     form.set('agentId', agentId);
     form.set('intentId', proposal.id);
     form.set('decision', decision);
-    if (decision === 'approved' && proposal.actionType !== INTRODUCTION_REVIEW) {
+    if (decision === 'approved' && !readOnly) {
       form.set('draft', draft);
     }
     startTransition(async () => {
@@ -94,7 +98,7 @@ export function ProposalReviewCard({
 
   return (
     <div className="proposal-review-card">
-      {proposal.actionType === INTRODUCTION_REVIEW ? (
+      {readOnly ? (
         <blockquote className="approvals-preview">{proposal.draft}</blockquote>
       ) : (
         <Field>

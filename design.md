@@ -166,7 +166,7 @@ starts with a keyboard-visible skip link to its main content.
 
 Show database-derived counts, the agent table, recent audit activity and global
 outbound controls. Explain that external writes stay suppressed except for
-registered Live adapters after administrator approval (email replies today).
+registered Live adapters under their configured approval rules.
 Put the full mission beneath each agent name in muted,
 wrapping text. Preserve line breaks and let long words wrap. Align table
 headers to the logical start. Activity stacks below the primary column on
@@ -451,11 +451,13 @@ Show each person’s display name and blurb beside the name of the person who
 would receive them. Record an explicit decision and evidence reference for
 each person. Keep a revocation action available after agreement.
 
-The second agreement creates a read-only draft in Approvals with a link back
-to the disclosure and consent. If a person revokes an agreement after
-approval, show Blocked on the proposal and preserve the approval decision in
-history. Configure People tool grants in Access → Consent. See
-[consent-based introductions](docs/introductions.md).
+For email introductions, put both visible To addresses, the subject and the
+full body above the consent cards. Explain that each recipient will see both
+addresses. Show the same read-only email in Approvals with a link back to
+the consent evidence. Show delivery state, any blocking reason and the Resend
+message ID on the introduction and in Activity. Keep revocation available
+after approval and preserve the decision in history. Label earlier proposals
+as review only. See [consent-based introductions](docs/introductions.md).
 
 Playwright recorded the first agreement at 1440px, then exercised drafting,
 approval, and revocation at 390px. It checked for horizontal overflow and ran
@@ -464,6 +466,11 @@ A live-mode run used OpenRouter to generate Maya’s proposal for synthetic
 participants. The browser recorded both decisions, approval, and revocation.
 Both saved-case replays completed with live inference and left the proposal
 and delivery records untouched.
+
+Chromium verified that both visible addresses, the subject and the full body
+match the consent preview and the read-only email approval at 390px. It also
+checked that the approval is disabled in Shadow and the consent view fits
+without horizontal overflow.
 
 ## Workspace libraries and approvals
 

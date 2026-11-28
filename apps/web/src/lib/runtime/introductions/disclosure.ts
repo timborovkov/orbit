@@ -79,15 +79,8 @@ function matchesRecipients(proposal: Proposal, recipients: string[]) {
   );
 }
 
-/**
- * Caller holds the agent lock, which serializes consent changes and review.
- * Delivery must report the canonical People IDs of the resolved destinations.
- */
-export async function introductionDisclosureFailure(
-  tx: Tx,
-  intent: Intent,
-  delivery?: { body: string; recipients: string[] },
-) {
+/** Validate a legacy review-only draft while holding the agent lock. */
+export async function introductionDisclosureFailure(tx: Tx, intent: Intent) {
   if (intent.actionType !== INTRODUCTION_REVIEW) return null;
   await lockPeople(tx);
   const [proposal] = await tx
@@ -103,15 +96,8 @@ export async function introductionDisclosureFailure(
     return 'The introduction recipients do not match the proposal.';
   }
   const draft = introductionDraft(proposal);
-  if (
-    intent.payload.introductionId !== proposal.id ||
-    intent.payload.draft !== draft ||
-    (delivery && (delivery.body !== draft || !matchesRecipients(proposal, delivery.recipients)))
-  ) {
+  if (intent.payload.introductionId !== proposal.id || intent.payload.draft !== draft) {
     return 'The introduction draft or recipients changed after consent.';
-  }
-  if (delivery && intent.reviewStatus !== 'approved') {
-    return 'An administrator must approve the introduction draft.';
   }
   if (!hasBothAgreements(proposal, await introductionConsents(tx, proposal))) {
     return 'Both people must currently agree to this introduction.';

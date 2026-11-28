@@ -1,9 +1,10 @@
 import 'server-only';
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 
 import { db, type Tx } from '@/lib/db';
 import { lockApprovalAgent, recordApprovalReviews } from '@/lib/runtime/approval-work';
+import { introductionEmailDisclosure } from '@/lib/runtime/email/introduction';
 import {
   hasBothAgreements,
   introductionConsents,
@@ -15,6 +16,7 @@ import {
   type IntroductionDecision,
   type PeopleGrant,
 } from '@/lib/runtime/introductions/types';
+import { EMAIL_INTRODUCTION_ACTION } from '@/lib/runtime/outbound/types';
 import { lockPeople } from '@/lib/runtime/people/identity';
 import {
   actionIntents,
@@ -58,16 +60,20 @@ async function prepareReview(
   agent: typeof agents.$inferSelect,
   actor: string,
   now: Date,
+  disclosure: Awaited<ReturnType<typeof introductionEmailDisclosure>>,
 ) {
+  const actionType = disclosure ? EMAIL_INTRODUCTION_ACTION : INTRODUCTION_REVIEW;
   const reasons = ['Both people agreed. An administrator must review this introduction.'];
   const [intent] = await tx
     .insert(actionIntents)
     .values({
-      actionType: INTRODUCTION_REVIEW,
+      actionType,
       agentId: agent.id,
-      idempotencyKey: `introduction-review:${proposal.id}`,
-      recipients: [proposal.firstPersonId, proposal.secondPersonId],
-      payload: { introductionId: proposal.id, draft: introductionDraft(proposal) },
+      idempotencyKey: disclosure
+        ? `email-introduction:${proposal.id}`
+        : `introduction-review:${proposal.id}`,
+      recipients: disclosure?.to ?? [proposal.firstPersonId, proposal.secondPersonId],
+      payload: disclosure ?? { introductionId: proposal.id, draft: introductionDraft(proposal) },
       decision: 'needs-approval',
       reasons,
       reviewStatus: 'pending',
@@ -82,7 +88,7 @@ async function prepareReview(
     .where(eq(introductionProposals.id, proposal.id));
   await tx.insert(policyDecisions).values({
     intentId: intent.id,
-    actionType: INTRODUCTION_REVIEW,
+    actionType,
     agentId: agent.id,
     actor,
     decision: 'needs-approval',
@@ -96,6 +102,7 @@ export async function recordIntroductionConsent(input: {
   personId: string;
   decision: IntroductionDecision;
   evidence: string;
+  disclosureDigest?: string;
 }) {
   return db().transaction(async (tx) => {
     const [owner] = await tx
@@ -128,10 +135,28 @@ export async function recordIntroductionConsent(input: {
     if (!allowed) {
       return { error: 'This consent decision cannot be changed.' };
     }
+    let disclosure: Awaited<ReturnType<typeof introductionEmailDisclosure>> = null;
     if (input.decision === 'agreed') {
       await lockPeople(tx);
       if (!(await validPeopleBindings(tx, proposal))) {
         return { error: 'A People identity or its source changed. Create a new introduction.' };
+      }
+      if (proposal.disclosureVersion === 2) {
+        disclosure = await introductionEmailDisclosure(tx, proposal);
+        if (
+          !disclosure ||
+          disclosure.digest !== input.disclosureDigest ||
+          decisions.some(
+            (decision) =>
+              decision.introductionDecision === 'agreed' &&
+              decision.disclosureDigest !== disclosure?.digest,
+          )
+        ) {
+          return {
+            error:
+              'The email disclosure is unavailable or changed. Review the current details and obtain fresh consent.',
+          };
+        }
       }
     }
 
@@ -140,6 +165,7 @@ export async function recordIntroductionConsent(input: {
       granted: input.decision === 'agreed',
       introductionDecision: input.decision,
       evidence: input.evidence,
+      disclosureDigest: disclosure?.digest ?? null,
       actor: input.actor,
       updatedAt: now,
     };
@@ -169,7 +195,7 @@ export async function recordIntroductionConsent(input: {
     });
     if (input.decision === 'agreed') {
       if (!proposal.reviewIntentId && hasBothAgreements(proposal, [...decisions, consent])) {
-        await prepareReview(tx, proposal, agent, input.actor, now);
+        await prepareReview(tx, proposal, agent, input.actor, now, disclosure);
         return { message: 'Both people agreed. Draft ready for review.' };
       }
       return { message: 'Agreement recorded.' };
@@ -182,7 +208,7 @@ export async function recordIntroductionConsent(input: {
           and(
             eq(actionIntents.id, proposal.reviewIntentId),
             eq(actionIntents.agentId, agent.id),
-            eq(actionIntents.actionType, INTRODUCTION_REVIEW),
+            inArray(actionIntents.actionType, [INTRODUCTION_REVIEW, EMAIL_INTRODUCTION_ACTION]),
           ),
         )
         .for('update');
@@ -202,7 +228,7 @@ export async function recordIntroductionConsent(input: {
       } else if (intent?.reviewStatus === 'approved') {
         await tx.insert(policyDecisions).values({
           intentId: intent.id,
-          actionType: INTRODUCTION_REVIEW,
+          actionType: intent.actionType,
           agentId: agent.id,
           actor: input.actor,
           decision: 'deny',

@@ -34,8 +34,12 @@ export interface ChannelAction {
   alwaysRequiresApproval: boolean;
   /** Keep editable proposals in Shadow for actions that can run automatically in Live. */
   reviewInShadow?: boolean;
+  /** An approval created outside a channel run. */
+  standalone?: boolean;
   /** This provider does not support idempotency keys for writes. */
   requiresDispatchMarker?: boolean;
+  /** Retry only while a provider can still deduplicate an earlier attempt. */
+  idempotencyWindowMs?: number;
   consentScope?: ConsentScope;
   /** Existing channels may use an equivalent provider-specific agent grant. */
   usesProviderGrant?: boolean;

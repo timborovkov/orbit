@@ -305,7 +305,11 @@ export function evaluateCandidate(
   const isMcp = action.type.startsWith('mcp:');
   const inRunTool = action.type === 'load_skill' || isMcp;
   const registered = channelAction(action.type);
-  if (registered && ctx.executionContext !== 'replay' && registered.channel !== ctx.runChannel) {
+  if (
+    registered &&
+    ctx.executionContext !== 'replay' &&
+    (registered.action.standalone ? ctx.runId !== null : registered.channel !== ctx.runChannel)
+  ) {
     return { decision: 'deny', reasons: ['Action is unavailable for this run’s channel.'] };
   }
   if (

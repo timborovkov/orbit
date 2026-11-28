@@ -18,6 +18,7 @@ import { isCommitmentTool } from '@/lib/runtime/follow-ups/types';
 import { introductionDisclosureFailure } from '@/lib/runtime/introductions/disclosure';
 import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
 import { enqueueOutbound } from '@/lib/runtime/outbound/dispatch';
+import { EMAIL_INTRODUCTION_ACTION } from '@/lib/runtime/outbound/types';
 import { recordApprovalDecision } from '@/lib/runtime/telemetry';
 import { actionIntents, agents, audit, policyDecisions, recipientConsents } from '@/lib/schema';
 
@@ -169,6 +170,9 @@ export async function reviewProposedAction(
       const stale = await discoveryApprovalBlockReason(tx, intent, now);
       if (stale) return { error: stale };
     }
+    if (approved && intent.actionType === EMAIL_INTRODUCTION_ACTION && options.editedPayload) {
+      return { error: 'Changing the email requires a new introduction and fresh consent.' };
+    }
     const payload =
       approved && options.editedPayload
         ? { ...intent.payload, ...options.editedPayload }
@@ -215,12 +219,15 @@ export async function reviewProposedAction(
         false,
         { skipApproval: true },
       );
-      if (policy.decision === 'deny') {
+      if (
+        policy.decision === 'deny' ||
+        (intent.actionType === EMAIL_INTRODUCTION_ACTION && policy.decision !== 'allow')
+      ) {
         await tx.insert(policyDecisions).values({
           agentId,
           runId: intent.runId,
           actionType: intent.actionType,
-          decision: 'deny',
+          decision: policy.decision,
           reasons: policy.reasons,
           intentId,
           actor,
@@ -254,11 +261,14 @@ export async function reviewProposedAction(
     });
 
     if (approved && approvalDecision === 'allow') {
-      await enqueueOutbound(
+      const queued = await enqueueOutbound(
         tx,
         { ...intent, payload, reviewStatus: 'approved', decision: approvalDecision },
         actor,
       );
+      if (intent.actionType === EMAIL_INTRODUCTION_ACTION && !queued) {
+        throw new Error('Approved email introduction could not be queued.');
+      }
     }
 
     const settled = intent.runId && (await settleApprovalRun(tx, agent, intent.runId, actor));

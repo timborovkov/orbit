@@ -1,27 +1,36 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
+import postgres from 'postgres';
 
 import { openAccessSection, openWorkspaceTab } from './workspace-nav';
 
 const databaseUrl = 'postgres://orbit:orbit_dev@localhost:5432/orbit_test';
 
-test('Maya’s introduction waits for both people and revocation blocks an approved draft', async ({
-  page,
-}) => {
-  test.setTimeout(60_000);
+function seedDemo() {
   execFileSync('bun', ['run', 'db:seed:demo', '--reset'], {
     env: { ...process.env, NODE_ENV: 'test', DATABASE_URL: databaseUrl },
   });
+}
 
-  await page.setViewportSize({ width: 1440, height: 900 });
+async function signIn(page: Page) {
   await page.goto('/people/introductions');
   await expect(page).toHaveURL(/\/login/);
   await page.getByLabel(/^Email/).fill('admin@example.com');
   await page.getByLabel(/^Password/).fill('test-only-password-123456');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+}
+
+test('Maya’s introduction waits for both people and revocation blocks an approved draft', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  seedDemo();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await signIn(page);
 
   await page.goto('/people');
   await page.getByRole('link', { name: 'Introductions', exact: true }).click();
@@ -84,4 +93,64 @@ test('Maya’s introduction waits for both people and revocation blocks an appro
   await expect(grant).toBeVisible();
   await grant.click();
   await expect(revokeGrant).toBeVisible();
+});
+
+test('the same visible addresses, subject and body appear in consent and read-only approval', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  seedDemo();
+  const store = postgres(databaseUrl);
+  const addresses = ['alex-introduction@example.test', 'priya-introduction@example.test'];
+  let proposalId: string;
+  try {
+    const [proposal] = await store<
+      { id: string; agent_id: string; first_person_id: string; second_person_id: string }[]
+    >`
+      select id, agent_id, first_person_id, second_person_id from introduction_proposals
+      where rationale = 'Alex’s evaluation experience fits Priya’s current support project.'
+    `;
+    proposalId = proposal.id;
+    const [thread] =
+      await store`insert into email_threads (agent_id) values (${proposal.agent_id}) returning id`;
+    for (const [i, personId] of [proposal.first_person_id, proposal.second_person_id].entries()) {
+      const [message] = await store`
+        insert into email_messages (agent_id, resend_email_id, event, sender, subject, received_at, thread_id)
+        values (${proposal.agent_id}, ${randomUUID()}, '{}', ${addresses[i]}, 'Synthetic introduction evidence', now(), ${thread.id})
+        returning person_identity_id
+      `;
+      await store`update person_identities set person_id = ${personId} where id = ${message.person_identity_id}`;
+    }
+    await store`update introduction_proposals set disclosure_version = 2 where id = ${proposal.id}`;
+  } finally {
+    await store.end();
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  await page.goto(`/people/introductions/${proposalId}`);
+  const to = `To ${addresses.join(', ')}`;
+  const subject = 'Subject Introduction: Alex Chen and Priya Patel';
+  await expect(page.getByText(to, { exact: true })).toBeVisible();
+  await expect(page.getByText(subject, { exact: true })).toBeVisible();
+  await expect(page.getByText('Both participants will see both email addresses.')).toBeVisible();
+  const body = await page.locator('blockquote').textContent();
+  expect(body).toContain('Hello Alex Chen and Priya Patel');
+
+  for (const name of ['Alex Chen', 'Priya Patel']) {
+    const party = page.getByRole('region', { name });
+    await party.getByLabel('Evidence reference').fill(`${name} agreed to the email preview.`);
+    await party.getByRole('combobox', { name: 'Decision' }).click();
+    await page.getByRole('option', { name: 'Agreed', exact: true }).click();
+    await party.getByRole('button', { name: 'Record decision' }).click();
+    await expect(party.getByRole('button', { name: 'Record revocation' })).toBeVisible();
+    await expect(party.getByText('Agreed', { exact: true })).toBeVisible();
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('link', { name: 'View in Approvals' }).click();
+  const draft = page.locator('li.approvals-card').filter({ hasText: to });
+  await expect(draft.getByText(subject, { exact: true })).toBeVisible();
+  expect(await draft.locator('blockquote').textContent()).toBe(body);
+  await expect(draft.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+  await expect(draft.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled();
 });

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/empty';
 import type { LifecycleState } from '@/lib/lifecycle';
 import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
+import { EMAIL_INTRODUCTION_ACTION } from '@/lib/runtime/outbound/types';
 import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
 import type { getAgentWorkspace } from '@/lib/server/workspace-queries';
 
@@ -26,6 +27,7 @@ const actionLabels = {
   bookmark: 'Bookmark',
   introduce: 'Introduce',
   [INTRODUCTION_REVIEW]: 'Introduction draft',
+  [EMAIL_INTRODUCTION_ACTION]: 'Email introduction',
   escalate: 'Escalate',
 } as Record<string, string>;
 
@@ -78,6 +80,12 @@ export function ProposalReview({
                 proposal.recipients.length > 0 && (
                   <p className="muted">{proposal.recipients.join(' · ')}</p>
                 )
+              )}
+              {proposal.actionType === EMAIL_INTRODUCTION_ACTION && (
+                <>
+                  <p className="wrap-break-word">To {proposal.recipients.join(', ')}</p>
+                  <p className="wrap-break-word">Subject {proposal.subject}</p>
+                </>
               )}
               {proposal.reason && <p>{proposal.reason}</p>}
               {proposal.status === 'pending' ? (

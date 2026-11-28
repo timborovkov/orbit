@@ -1,4 +1,5 @@
 import { INTRODUCTION_REVIEW } from '@/lib/runtime/introductions/types';
+import { EMAIL_INTRODUCTION_ACTION } from '@/lib/runtime/outbound/types';
 
 /** Human-readable reason approve is blocked before the request is sent. */
 export function approvalBlockReason(input: {
@@ -14,6 +15,9 @@ export function approvalBlockReason(input: {
   }
   if (input.lifecycle === 'stopped') {
     return 'Agent is stopped. External writes are blocked until it is resumed.';
+  }
+  if (input.lifecycle === 'shadow' && input.actionType === EMAIL_INTRODUCTION_ACTION) {
+    return 'Switch the agent to Live before approving this introduction.';
   }
   if (input.globalPaused) {
     return 'Global outbound pause is enabled. Release it before approving.';
