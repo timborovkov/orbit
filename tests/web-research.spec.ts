@@ -86,6 +86,12 @@ test('edits independent grants, cancels a pending crawl and imports a cited page
   await expect(page.getByLabel('Approved crawl sites or paths')).toHaveValue(target);
   await openWorkspaceTab(page, 'History');
   const runSummary = page.locator('#run-' + runId + ' > summary');
+  const nextPage = page.getByRole('navigation', { name: 'Run pages' }).getByRole('button', {
+    name: 'Next',
+  });
+  while ((await runSummary.count()) === 0 && (await nextPage.isEnabled())) {
+    await nextPage.click();
+  }
   await expect(runSummary).toBeVisible();
   await runSummary.click();
   const crawl = page.getByRole('region', { name: 'Crawl ' + target });
