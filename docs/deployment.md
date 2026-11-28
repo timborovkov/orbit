@@ -91,11 +91,15 @@ decision for tracing behaviour, redaction and evaluations.
 
 ## X discovery and replies
 
-Set `X_BEARER_TOKEN` on the worker for recent-search discovery. For replies,
-configure the same `ORBIT_ENCRYPTION_KEY` on web and worker and connect an X
-user token in the agent’s Access settings. The search token and the per-agent
-write credential are separate. See [X replies](x-discovery-replies.md) for
-provider authorization and the hosted delivery check.
+Set the server-only `X_BEARER_TOKEN` on both Railway services for live X search.
+The web service uses it for **Test query**, and the worker uses it for scheduled
+discovery polling. Both services can reference the same Railway shared variable.
+For a local Compose deployment, set it in the root `.env`.
+
+For replies, configure the same `ORBIT_ENCRYPTION_KEY` on web and worker and
+connect a separate X user token in the agent’s Access settings. See
+[X replies](x-discovery-replies.md) for provider authorization and the hosted
+delivery check.
 
 ## Email (inbound and approved outbound replies)
 
