@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 
 import { z } from 'zod';
 
+import { ExternalLink } from '@/components/external-link';
 import { requireAdmin } from '@/lib/auth';
 import { formatUtcTimestamp } from '@/lib/format';
 import { getAgentMemoryEvidence } from '@/lib/server/memory-queries';
@@ -44,9 +45,16 @@ export default async function MemoryEvidence({
           {attribution && <p className="preserve-text">{attribution}</p>}
           <p className="preserve-text">{source.body}</p>
         </section>
-        <Link className="memory-link" href={source.href}>
-          {source.linkLabel}
-        </Link>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <Link className="memory-link" href={source.href}>
+            {source.linkLabel}
+          </Link>
+          {evidence.externalSourceHref && (
+            <ExternalLink className="memory-link" href={evidence.externalSourceHref}>
+              View original on {evidence.channelLabel}
+            </ExternalLink>
+          )}
+        </div>
       </article>
     </main>
   );

@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { PendingRunRefresh } from '@/app/pending-run-refresh';
 import { RunContent } from '@/app/run-content';
+import { ExternalLink } from '@/components/external-link';
 import { formatUtcTimestamp } from '@/lib/format';
 import type { getEvaluationComparison } from '@/lib/server/evaluation-queries';
 
@@ -71,6 +72,11 @@ export function EvaluationComparisonView({ detail }: { detail: Detail }) {
       <section className="evaluation-shared-input" aria-label="Shared case input">
         <h2>Shared input</h2>
         <p className="preserve-text">{detail.comparison.caseInput}</p>
+        {detail.externalSourceHref && (
+          <ExternalLink className="person-source-link" href={detail.externalSourceHref}>
+            View original on {sourceLabel}
+          </ExternalLink>
+        )}
         {detail.comparison.caseRecipients.length > 0 && (
           <p className="muted">Recipients: {detail.comparison.caseRecipients.join(', ')}</p>
         )}

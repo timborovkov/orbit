@@ -5,7 +5,7 @@ import { asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { relevanceSnippet } from '@/lib/people-display';
-import { channelLabel } from '@/lib/runtime/channels/registry';
+import { channelItemHref, channelLabel } from '@/lib/runtime/channels/registry';
 import { getPersonContextForAgent, listPersonInteractions } from '@/lib/runtime/people/history';
 import {
   agents,
@@ -39,15 +39,15 @@ const latestPeopleSources = sql`
 
 function personActivity(condition: ReturnType<typeof sql>) {
   return sql`
-    select entry.agent_id, entry.occurred_at, entry.excerpt from (
+    select entry.agent_id, entry.occurred_at, entry.excerpt, entry.channel, entry.provider_id from (
       select mail_entry.agent_id, mail_entry.received_at as occurred_at, mail_entry.id,
-        mail_entry.subject as excerpt
+        mail_entry.subject as excerpt, 'email'::text as channel, null::text as provider_id
       from person_identities activity_identity
       join email_messages mail_entry on mail_entry.person_identity_id = activity_identity.id
       where activity_identity.person_id = person.id
       union all
       select post_entry.agent_id, coalesce(post_entry.provider_created_at, post_entry.ingested_at),
-        post_entry.id, left(post_entry.text, 400)
+        post_entry.id, left(post_entry.text, 400), post_entry.provider, post_entry.provider_event_id
       from person_identities activity_identity
       join source_events post_entry on post_entry.person_identity_id = activity_identity.id
         and post_entry.provider = activity_identity.channel
@@ -91,12 +91,16 @@ export async function listPeople(query: string, page: number, linkIdentityId?: s
     sourceAgentId: string | null;
     sourceAgentName: string | null;
     relevance: string | null;
+    relevanceChannel: string | null;
+    relevanceProviderId: string | null;
     lastSeen: string | null;
     channels: string[];
   }>(sql`
     select person.id, coalesce(primary_identity.label, primary_contact.label) as name,
       primary_identity.handle, source_agent.id as "sourceAgentId", source_agent.name as "sourceAgentName",
       latest_activity.excerpt as relevance,
+      latest_activity.channel as "relevanceChannel",
+      latest_activity.provider_id as "relevanceProviderId",
       to_char(latest_activity.occurred_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as "lastSeen",
       array(select distinct channel from person_identities where person_id = person.id order by channel) as channels
     from people person
@@ -125,6 +129,7 @@ export async function listPeople(query: string, page: number, linkIdentityId?: s
         ? { id: row.sourceAgentId, name: row.sourceAgentName ?? 'Agent' }
         : null,
       relevance: relevanceSnippet(row.relevance),
+      relevanceHref: channelItemHref(row.relevanceChannel, row.relevanceProviderId),
       lastSeen: row.lastSeen,
       channels: row.channels.map(channelLabel),
     })),

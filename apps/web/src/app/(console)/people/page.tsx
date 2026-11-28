@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { UsersRoundIcon } from 'lucide-react';
 import { z } from 'zod';
 
+import { ExternalLink } from '@/components/external-link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { env } from '@/lib/env';
@@ -42,7 +43,15 @@ function PeopleResults({
               </Link>
               {person.handle && <span className="muted">{person.handle}</span>}
             </div>
-            {person.relevance && <p className="people-relevance">{person.relevance}</p>}
+            {person.relevance && (
+              <p className="people-relevance">
+                {person.relevanceHref ? (
+                  <ExternalLink href={person.relevanceHref}>{person.relevance}</ExternalLink>
+                ) : (
+                  person.relevance
+                )}
+              </p>
+            )}
             <dl className="people-meta">
               <div>
                 <dt>Channels</dt>

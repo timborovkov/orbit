@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { Inbox } from 'lucide-react';
 
+import { ApprovalSourcePost } from '@/app/approval-source-post';
 import { ProposalReviewCard } from '@/app/proposal-review-card';
 import {
   Empty,
@@ -87,6 +88,7 @@ export function ProposalReview({
                   <p className="wrap-break-word">Subject {proposal.subject}</p>
                 </>
               )}
+              <ApprovalSourcePost post={proposal.sourcePost} />
               {proposal.reason && <p>{proposal.reason}</p>}
               {proposal.status === 'pending' ? (
                 <ProposalReviewCard

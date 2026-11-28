@@ -10,10 +10,11 @@ import { startJobWorker } from '@/lib/queue/worker';
 import { processSimulationJob, SIMULATION_JOB_TYPE } from '@/lib/runtime/execute';
 import { processOutboundJob } from '@/lib/runtime/outbound/process';
 import { CHANNEL_OUTBOUND_JOB } from '@/lib/runtime/outbound/types';
+import { FIXTURE_X_REPLY_POST } from '@/lib/runtime/x/fixture';
 import { validateXReplyApproval } from '@/lib/runtime/x/reply';
 import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
 import { runDemoSeed } from '@/lib/seed';
-import { DEMO_AGENTS } from '@/lib/seed/ids';
+import { DEMO_AGENTS, DEMO_INTENTS } from '@/lib/seed/ids';
 
 import { openAccessSection, openWorkspaceTab } from './workspace-nav';
 
@@ -122,7 +123,7 @@ async function openAccessApprovals(page: Page) {
   await expect(page.getByTestId('approval-settings')).toBeVisible();
 }
 
-test('John reviews a discovered X reply and sees its fixture delivery in Activity', async ({
+test('John reviews a discovered X reply and sees its fixture delivery in History', async ({
   page,
 }) => {
   test.setTimeout(120000);
@@ -137,6 +138,12 @@ test('John reviews a discovered X reply and sees its fixture delivery in Activit
     await page.goto(approvalsUrl);
     const proposal = page.locator('li.approvals-card').filter({ hasText: 'X reply' });
     await expect(proposal).toHaveCount(1);
+    const postLink = { name: /^View original post on X/ };
+    const postHref = `https://x.com/i/web/status/${FIXTURE_X_REPLY_POST.id}`;
+    await expect(proposal.getByRole('link', postLink)).toHaveAttribute('href', postHref);
+    await expect(proposal.getByRole('link', postLink)).toHaveAttribute('target', '_blank');
+    await expect(proposal.getByText('@ops_lead', { exact: true })).toBeVisible();
+    await expect(proposal.getByText(FIXTURE_X_REPLY_POST.text, { exact: true })).toBeVisible();
     const origin = await proposal
       .getByRole('link', { name: 'View originating run' })
       .getAttribute('href');
@@ -146,11 +153,29 @@ test('John reviews a discovered X reply and sees its fixture delivery in Activit
     await editor.fill(draft);
     await expect(editor).toHaveAttribute('maxlength', '280');
     await screenshotToArtifacts(page, 'john-x-shadow-approval.png');
-    await proposal.getByRole('button', { name: 'Save & approve' }).click();
+    await expect(proposal.getByRole('button', { name: 'Save & approve' })).toBeDisabled();
     await expect(
-      page.getByText('Switch the agent to Live before approving this reply.'),
+      proposal.getByText('Global outbound pause is enabled. Release it before approving.'),
     ).toBeVisible();
 
+    // Older discovery proposals used the generic Reply action.
+    await sql`UPDATE action_intents SET action_type='reply' WHERE id=${DEMO_INTENTS.johnXReply}`;
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(agentUrl);
+    await openWorkspaceTab(page, 'Approvals');
+    const legacyProposal = page.locator(`#proposal-${DEMO_INTENTS.johnXReply}`);
+    await expect(legacyProposal.getByText('Reply', { exact: true })).toBeVisible();
+    await expect(legacyProposal.getByRole('link', postLink)).toHaveAttribute('href', postHref);
+    await expect(legacyProposal.getByText('@ops_lead', { exact: true })).toBeVisible();
+    await expect(
+      legacyProposal.getByText(FIXTURE_X_REPLY_POST.text, { exact: true }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await sql`UPDATE action_intents SET action_type=${X_REPLY_ACTION} WHERE id=${DEMO_INTENTS.johnXReply}`;
+
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(agentUrl);
     await openWorkspaceTab(page, 'Access');
     await page.getByRole('button', { name: 'Set Live', exact: true }).click();
@@ -175,6 +200,9 @@ test('John reviews a discovered X reply and sees its fixture delivery in Activit
     await editor.fill(draft);
     await proposal.getByRole('button', { name: 'Save & approve' }).click();
     await expect(page.getByText('Proposal approved and queued for send.')).toBeVisible();
+    const resolved = page.getByRole('list', { name: 'Resolved approvals' });
+    await expect(resolved.getByRole('link', postLink)).toHaveAttribute('href', postHref);
+    await expect(resolved.getByText(FIXTURE_X_REPLY_POST.text, { exact: true })).toBeVisible();
     const workerId = 'browser-x-fixture';
     const [job] = await claimJobs({ workerId, types: [CHANNEL_OUTBOUND_JOB], limit: 1 });
     expect(job?.payload.agentId).toBe(DEMO_AGENTS.john);
@@ -195,7 +223,7 @@ test('John reviews a discovered X reply and sees its fixture delivery in Activit
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(origin!);
-    const activity = page.getByRole('region', { name: 'Activity' });
+    const activity = page.getByRole('region', { name: 'Follow-ups & replies' });
     const outcome = activity.getByRole('listitem').filter({ hasText: 'Fixture X reply sent' });
     await expect(outcome.getByText('Reply ID 90001')).toBeVisible();
     await expect(outcome.getByRole('link', { name: 'View originating run' })).toHaveAttribute(

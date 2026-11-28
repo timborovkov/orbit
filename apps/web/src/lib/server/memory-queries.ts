@@ -4,11 +4,14 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { channelItemHref, channelLabel } from '@/lib/runtime/channels/registry';
 import {
   agentMemories,
   agentMemoryEvidenceVersions,
   memoryEvidence,
+  outboundActions,
   personMemoryEvidence,
+  sourceEvents,
 } from '@/lib/schema';
 
 const pageSize = 30;
@@ -93,6 +96,10 @@ export async function selectAgentMemoryEvidence(
       quote: agentMemoryEvidenceVersions.quote,
       sourceAt: agentMemoryEvidenceVersions.sourceAt,
       correctedBy: agentMemoryEvidenceVersions.correctedBy,
+      channel: memoryEvidence.channel,
+      eventProviderId: sourceEvents.providerEventId,
+      replyProvider: outboundActions.provider,
+      replyProviderId: outboundActions.providerMessageId,
       source: {
         id: memoryEvidence.sourceId,
         title: memoryEvidence.title,
@@ -113,6 +120,22 @@ export async function selectAgentMemoryEvidence(
         eq(memoryEvidence.runId, agentMemoryEvidenceVersions.runId),
       ),
     )
+    .leftJoin(
+      sourceEvents,
+      and(
+        eq(memoryEvidence.sourceKind, 'event'),
+        eq(sourceEvents.id, memoryEvidence.sourceId),
+        eq(sourceEvents.agentId, memoryEvidence.agentId),
+      ),
+    )
+    .leftJoin(
+      outboundActions,
+      and(
+        eq(memoryEvidence.sourceKind, 'outcome'),
+        eq(outboundActions.id, memoryEvidence.sourceId),
+        eq(outboundActions.agentId, memoryEvidence.agentId),
+      ),
+    )
     .where(
       and(
         eq(agentMemoryEvidenceVersions.agentId, agentId),
@@ -120,5 +143,14 @@ export async function selectAgentMemoryEvidence(
         eq(agentMemoryEvidenceVersions.revision, revision),
       ),
     );
-  return row ?? null;
+  if (!row) return null;
+  const { channel, eventProviderId, replyProvider, replyProviderId, ...evidence } = row;
+  return {
+    ...evidence,
+    channelLabel: channelLabel(channel),
+    externalSourceHref: channelItemHref(
+      channel,
+      eventProviderId ?? (replyProvider === 'x-fixture' ? null : replyProviderId),
+    ),
+  };
 }

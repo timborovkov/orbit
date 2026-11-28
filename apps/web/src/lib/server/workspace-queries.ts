@@ -6,7 +6,7 @@ import { requireAdmin } from '@/lib/auth';
 import { budgetViolationMessage, parseBudgets } from '@/lib/budgets';
 import { db } from '@/lib/db';
 import { ACTIVE_CRAWL_STATES } from '@/lib/research';
-import { channelForRun } from '@/lib/runtime/channels/registry';
+import { channelForRun, channelItemHref, channelLabel } from '@/lib/runtime/channels/registry';
 import { openRouterKeySource } from '@/lib/runtime/openrouter-key';
 import { latestPersistedRun } from '@/lib/runtime/playground-ui';
 import { isExpiredSimulationRun } from '@/lib/runtime/simulation-watch';
@@ -25,10 +25,42 @@ import {
   recipientConsents,
   runMemoryEvidence,
   runs,
+  sourceEvents,
   templates,
   usageCounters,
   webCrawls,
 } from '@/lib/schema';
+
+const approvalPostSelection = {
+  id: sourceEvents.providerEventId,
+  provider: sourceEvents.provider,
+  authorUsername: sourceEvents.authorUsername,
+  authorName: sourceEvents.authorName,
+  text: sourceEvents.text,
+};
+
+const approvalPostJoin = and(
+  eq(sourceEvents.runId, actionIntents.runId),
+  eq(sourceEvents.agentId, actionIntents.agentId),
+);
+
+function describeApprovalPost(
+  post: {
+    id: string;
+    provider: string;
+    authorUsername: string | null;
+    authorName: string | null;
+    text: string;
+  } | null,
+) {
+  if (!post) return null;
+  return {
+    channel: channelLabel(post.provider),
+    author: post.authorUsername ? `@${post.authorUsername}` : post.authorName,
+    text: post.text,
+    href: channelItemHref(post.provider, post.id),
+  };
+}
 
 async function countPendingApprovals() {
   const [pending] = await db()
@@ -92,6 +124,7 @@ export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: st
         subject: sql<string | null>`${actionIntents.payload}->>'subject'`,
         reason: sql<string | null>`${actionIntents.payload}->>'reason'`,
         recipients: actionIntents.recipients,
+        sourcePost: approvalPostSelection,
         status: actionIntents.reviewStatus,
         createdAt: actionIntents.createdAt,
         reviewedBy: actionIntents.reviewedBy,
@@ -102,6 +135,7 @@ export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: st
       .from(actionIntents)
       .innerJoin(agents, eq(agents.id, actionIntents.agentId))
       .leftJoin(introductionProposals, eq(introductionProposals.reviewIntentId, actionIntents.id))
+      .leftJoin(sourceEvents, approvalPostJoin)
       .where(and(isNotNull(actionIntents.reviewStatus), agentFilter, runFilter))
       .orderBy(sql`(${actionIntents.reviewStatus} = 'pending') DESC`, desc(actionIntents.createdAt))
       .limit(100),
@@ -116,7 +150,10 @@ export async function getApprovalsInbox(filterAgentId?: string, filterRunId?: st
   const agentStates = Object.fromEntries(team.map((agent) => [agent.id, agent.lifecycle]));
   return {
     team: team.map(({ id, name }) => ({ id, name })),
-    items,
+    items: items.map(({ sourcePost, ...item }) => ({
+      ...item,
+      sourcePost: describeApprovalPost(sourcePost),
+    })),
     pendingCount: pending[0]?.count ?? 0,
     totalPendingCount: pendingTotal,
     globalPaused: controlRows[0]?.paused ?? true,
@@ -183,11 +220,17 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
         sourceHref: runMemoryEvidence.href,
         sourceLinkLabel: runMemoryEvidence.linkLabel,
         authorHandle: runMemoryEvidence.author,
+        sourceProvider: sourceEvents.provider,
+        sourceProviderId: sourceEvents.providerEventId,
       })
       .from(runs)
       .leftJoin(
         runMemoryEvidence,
         and(eq(runMemoryEvidence.runId, runs.id), eq(runMemoryEvidence.agentId, runs.agentId)),
+      )
+      .leftJoin(
+        sourceEvents,
+        and(eq(sourceEvents.runId, runs.id), eq(sourceEvents.agentId, runs.agentId)),
       )
       .leftJoin(personIdentities, eq(personIdentities.id, runMemoryEvidence.personIdentityId))
       .where(and(eq(runs.agentId, id), ne(runs.origin, 'replay')))
@@ -205,6 +248,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
         subject: sql<string | null>`${actionIntents.payload}->>'subject'`,
         reason: sql<string | null>`${actionIntents.payload}->>'reason'`,
         recipients: actionIntents.recipients,
+        sourcePost: approvalPostSelection,
         status: actionIntents.reviewStatus,
         createdAt: actionIntents.createdAt,
         reviewedBy: actionIntents.reviewedBy,
@@ -212,6 +256,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
       })
       .from(actionIntents)
       .leftJoin(introductionProposals, eq(introductionProposals.reviewIntentId, actionIntents.id))
+      .leftJoin(sourceEvents, approvalPostJoin)
       .where(and(eq(actionIntents.agentId, id), isNotNull(actionIntents.reviewStatus)))
       .orderBy(sql`(${actionIntents.reviewStatus} = 'pending') DESC`, desc(actionIntents.createdAt))
       .limit(50),
@@ -261,6 +306,8 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
     sourceHref,
     sourceLinkLabel,
     authorHandle,
+    sourceProvider,
+    sourceProviderId,
   }: (typeof history)[number]) => {
     // awaiting_approval waits on reviewExpiresAt, not the execution deadline.
     const expired = isExpiredSimulationRun(run);
@@ -272,6 +319,7 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
       authorHandle,
       sourceHref: sourceHref?.endsWith(`#run-${run.id}`) ? null : sourceHref,
       sourceLinkLabel,
+      externalSourceHref: channelItemHref(sourceProvider, sourceProviderId),
       channelName: channelForRun(run)?.label ?? run.channel ?? 'Playground',
       preferDraftAnswer: channelForRun(run)?.run.mode === 'draft',
       deferReason: run.deferReason ?? (expired ? budgetViolationMessage('run-deadline') : null),
@@ -323,9 +371,14 @@ export async function getAgentWorkspace(id: string, focusRunId?: string) {
             sourceHref: null,
             sourceLinkLabel: null,
             authorHandle: null,
+            sourceProvider: null,
+            sourceProviderId: null,
           })
         : undefined),
-    reviews,
+    reviews: reviews.map(({ sourcePost, ...review }) => ({
+      ...review,
+      sourcePost: describeApprovalPost(sourcePost),
+    })),
     pendingApprovalCount: pendingApprovals,
     globalPaused: controlRows[0]?.paused ?? true,
     consents,

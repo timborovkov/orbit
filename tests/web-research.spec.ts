@@ -61,12 +61,11 @@ test('edits independent grants, cancels a pending crawl and imports a cited page
   await page.goto('/agents/' + agentId);
   await openWorkspaceTab(page, 'Access');
   await openAccessSection(page, 'Web research');
-  await expect(page.getByRole('checkbox', { name: 'Search the web' })).not.toBeChecked();
-  await expect(page.getByRole('checkbox', { name: 'Read a web page' })).not.toBeChecked();
-  await expect(page.getByRole('checkbox', { name: 'Crawl a site' })).not.toBeChecked();
-  await page.getByRole('checkbox', { name: 'Search the web' }).check();
-  await page.getByRole('checkbox', { name: 'Read a web page' }).check();
-  await page.getByRole('checkbox', { name: 'Crawl a site' }).check();
+  for (const name of ['Search the web', 'Read a web page', 'Crawl a site']) {
+    const grant = page.getByRole('switch', { name });
+    await expect(grant).not.toBeChecked();
+    await grant.click();
+  }
   await page.getByLabel('Approved crawl sites or paths').fill(target);
   await page.getByRole('button', { name: 'Save web research access' }).click();
   await expect(page.getByText('Web research access saved.')).toBeVisible();
@@ -92,10 +91,15 @@ test('edits independent grants, cancels a pending crawl and imports a cited page
   const crawl = page.getByRole('region', { name: 'Crawl ' + target });
   await expect(crawl).toContainText('Queued');
   await expect(crawl).toContainText('depth limit 1');
-  await expect(crawl.getByRole('link', { name: 'Crawl status reference' })).toHaveAttribute(
-    'href',
-    target + '/crawl-get',
-  );
+  const citation = crawl.getByRole('link', { name: 'Crawl status reference' });
+  await expect(citation).toHaveAttribute('href', target + '/crawl-get');
+  await expect(citation).toHaveAttribute('target', '_blank');
+  const crawlTarget = crawl.getByRole('link', {
+    name: target + ' (opens in a new tab)',
+    exact: true,
+  });
+  await expect(crawlTarget).toHaveAttribute('href', target);
+  await expect(crawlTarget).toHaveAttribute('target', '_blank');
   await expect(crawl.getByText(excerpt)).toBeVisible();
   await crawl.getByRole('button', { name: 'Cancel crawl' }).click();
   await expect(crawl.getByText(/Cancelled ·/)).toBeVisible();

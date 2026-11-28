@@ -7,7 +7,7 @@ type ActivitySource = {
   agentName: string;
   threadId: string | null;
   runId: string | null;
-  providerId: string;
+  providerId: string | null;
   sourceId: string;
 };
 type ActivityKind = string;
@@ -125,7 +125,8 @@ export async function listPersonInteractions(personId: string, page: number, age
       union all
       select 'reply', reply.id::text, coalesce(reply.completed_at, reply.dispatched_at, reply.created_at),
         coalesce(nullif(left(reply.body, 280), ''), reply.action_type), reply.agent_id,
-        null::uuid, post.run_id, coalesce(reply.provider_message_id, reply.id::text), post.id,
+        null::uuid, post.run_id,
+        case when reply.provider <> 'x-fixture' then reply.provider_message_id end, post.id,
         post.provider, true
       from source_events post join identities on post.person_identity_id = identities.id
       join action_intents intent on intent.run_id = post.run_id and intent.agent_id = post.agent_id

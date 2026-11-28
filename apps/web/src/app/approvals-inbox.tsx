@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { Inbox, Pencil } from 'lucide-react';
 
 import { reviewProposal, reviewProposalsBulk } from '@/actions/policy';
+import { type ApprovalPost, ApprovalSourcePost } from '@/app/approval-source-post';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -53,6 +54,7 @@ export interface ApprovalItem {
   runId: string | null;
   introductionId: string | null;
   recipients: string[];
+  sourcePost: ApprovalPost | null;
   draft: string | null;
   subject?: string | null;
   reason: string | null;
@@ -281,6 +283,7 @@ function PendingCard({
           </div>
         </div>
         <ProposalContext item={item} />
+        <ApprovalSourcePost post={item.sourcePost} />
         {approveBlockedReason ? (
           <p role="status" className="form-error">
             {approveBlockedReason}
@@ -337,6 +340,7 @@ function HistoryCard({ item, renderedAt }: { item: ApprovalItem; renderedAt: str
           ) : null}
         </div>
         <ProposalContext item={item} />
+        <ApprovalSourcePost post={item.sourcePost} />
         {item.draft ? <blockquote className="approvals-preview">{item.draft}</blockquote> : null}
       </div>
     </li>

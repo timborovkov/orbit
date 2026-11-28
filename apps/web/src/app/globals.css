@@ -3817,6 +3817,20 @@ details[open] > summary > .disclosure-chevron {
   white-space: nowrap;
 }
 
+.approval-source-post {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.policy-records .approval-source-post {
+  margin-block-start: 8px;
+}
+
+.policy-records .approval-source-post blockquote {
+  margin: 0;
+}
+
 .approvals-proposal-context {
   display: flex;
   flex-wrap: wrap;
@@ -5315,7 +5329,8 @@ details[open] > summary > .disclosure-chevron {
   min-width: 0;
 }
 
-.people-agent-link {
+.people-agent-link,
+.people-relevance a {
   position: relative;
   z-index: 1;
   text-decoration: underline;
@@ -5435,7 +5450,8 @@ details[open] > summary > .disclosure-chevron {
   padding-inline-start: 0;
 }
 
-.research-sources a {
+.research-sources a,
+.research-seed a {
   text-decoration: underline;
   text-underline-offset: 3px;
 }

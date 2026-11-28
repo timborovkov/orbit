@@ -133,9 +133,7 @@ for (const width of [1440, 390] as const) {
     const { agent, v1, v2, run } = await seedComparisonFixture();
 
     await page.goto(`/agents/${agent.id}?run=${run.id}`);
-    await expect(
-      page.getByRole('heading', { name: 'Activity timeline', exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
     await expect(page.locator(`#run-${run.id}`)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save as case' })).toBeVisible();
     // Ensure Save as case is laid out, then reset scroll so the sticky header is at the top.

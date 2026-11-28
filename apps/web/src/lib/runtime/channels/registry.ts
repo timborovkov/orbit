@@ -54,6 +54,12 @@ export function channelLabel(id: string) {
   return channelAdapter(id)?.label ?? id;
 }
 
+export function channelItemHref(channel: string | null, providerId: string | null) {
+  return providerId
+    ? (channelAdapter(channel)?.activity?.externalHref?.(providerId) ?? null)
+    : null;
+}
+
 export function channelForRun(run: { origin: string; channel?: string | null }) {
   if (run.channel) return channelAdapter(run.channel);
   return [...channels.values()].find((adapter) => adapter.legacyOrigin === run.origin);

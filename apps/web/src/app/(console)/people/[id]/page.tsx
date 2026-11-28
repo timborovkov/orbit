@@ -10,11 +10,12 @@ import {
   unlinkPersonIdentity,
 } from '@/actions/people';
 import { WorkspaceForm } from '@/app/workspace-form';
+import { ExternalLink } from '@/components/external-link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { env } from '@/lib/env';
 import { formatUtcTimestamp } from '@/lib/format';
-import { channelAdapter, channelLabel } from '@/lib/runtime/channels/registry';
+import { channelAdapter, channelItemHref, channelLabel } from '@/lib/runtime/channels/registry';
 import { memoryEvidenceHref } from '@/lib/runtime/memory/types';
 import { getPerson, personHref } from '@/lib/server/people-queries';
 
@@ -38,9 +39,7 @@ function sourceHref(source: {
       : thread;
   }
   if (source.agentId && source.runId) return `/agents/${source.agentId}?run=${source.runId}`;
-  return source.postId
-    ? (channelAdapter(source.channel)?.activity?.externalHref?.(source.postId) ?? null)
-    : null;
+  return null;
 }
 
 function EvidenceLink({
@@ -51,7 +50,18 @@ function EvidenceLink({
   label: string;
 }) {
   const href = sourceHref(source);
-  return href ? <Link href={href}>{label}</Link> : <span>{label}</span>;
+  const externalHref = channelItemHref(source.channel ?? null, source.postId);
+  return (
+    <>
+      {href ? <Link href={href}>{label}</Link> : !externalHref && <span>{label}</span>}
+      {href && externalHref && ' · '}
+      {externalHref && (
+        <ExternalLink href={externalHref}>
+          {href ? `View original on ${channelLabel(source.channel ?? '')}` : label}
+        </ExternalLink>
+      )}
+    </>
+  );
 }
 
 function IdentityInputs({ name, identity }: { name: 'identity' | 'target'; identity: Identity }) {
@@ -286,6 +296,17 @@ function interactionLabel(channel: string, sent: boolean) {
   return sent ? (activity?.sentLabel ?? `Sent via ${label}`) : (activity?.receivedLabel ?? label);
 }
 
+function InteractionSource({ interaction }: { interaction: PersonView['interactions'][number] }) {
+  const href = channelItemHref(interaction.channel, interaction.sources[0]?.providerId ?? null);
+  if (!href) return null;
+  return (
+    <ExternalLink className="person-source-link" href={href}>
+      {interaction.sent ? 'View sent reply on' : 'View original on'}{' '}
+      {channelLabel(interaction.channel)}
+    </ExternalLink>
+  );
+}
+
 function PersonTimeline({ person, page }: { person: PersonView; page: number }) {
   const selectedAgent = person.selectedAgent;
   function pageHref(number: number) {
@@ -335,17 +356,11 @@ function PersonTimeline({ person, page }: { person: PersonView; page: number }) 
                 </time>
               </div>
               <p className="preserve-text">{interaction.title}</p>
+              <InteractionSource interaction={interaction} />
               <ul className="people-evidence-list">
                 {interaction.sources.map((source) => (
                   <li key={`${source.agentId}:${source.sourceId}`}>
-                    <EvidenceLink
-                      source={{
-                        ...source,
-                        channel: interaction.channel,
-                        postId: interaction.sent ? null : source.providerId,
-                      }}
-                      label={source.agentName}
-                    />
+                    <EvidenceLink source={{ ...source, postId: null }} label={source.agentName} />
                   </li>
                 ))}
               </ul>

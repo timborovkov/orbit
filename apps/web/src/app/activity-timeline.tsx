@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { ExternalLink } from '@/components/external-link';
 import { formatUtcTimestamp } from '@/lib/format';
 
 export interface ActivityEventRow {
@@ -10,7 +11,7 @@ export interface ActivityEventRow {
   dueAt: Date | null;
   channel: string | null;
   replyExcerpt: string | null;
-  links: { label: string; href: string }[];
+  links: { label: string; href: string; external?: boolean }[];
 }
 
 export function ActivityTimeline({ events }: { events: ActivityEventRow[] }) {
@@ -45,11 +46,17 @@ export function ActivityTimeline({ events }: { events: ActivityEventRow[] }) {
             </div>
             {event.links.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-                {event.links.map((link) => (
-                  <Link className="person-source-link" key={link.label} href={link.href}>
-                    {link.label}
-                  </Link>
-                ))}
+                {event.links.map((link) =>
+                  link.external ? (
+                    <ExternalLink className="person-source-link" key={link.label} href={link.href}>
+                      {link.label}
+                    </ExternalLink>
+                  ) : (
+                    <Link className="person-source-link" key={link.label} href={link.href}>
+                      {link.label}
+                    </Link>
+                  ),
+                )}
               </div>
             )}
           </li>

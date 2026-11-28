@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { FlaskConical, GitCompareArrows } from 'lucide-react';
 
+import { ExternalLink } from '@/components/external-link';
 import { LibraryEmpty } from '@/components/library-table';
 import { formatUtcTimestamp } from '@/lib/format';
 
@@ -10,6 +11,7 @@ export interface EvaluationCaseRow {
   agentId: string;
   title: string;
   sourceLabel: string;
+  externalSourceHref: string | null;
   input: string;
   createdAt: string;
   agentName: string;
@@ -24,6 +26,16 @@ export interface EvaluationComparisonRow {
   caseTitle: string;
   agentName: string;
   error: string | null;
+}
+
+function CaseSource({ sourceLabel, externalSourceHref }: EvaluationCaseRow) {
+  return externalSourceHref ? (
+    <ExternalLink className="person-source-link" href={externalSourceHref}>
+      View original on {sourceLabel}
+    </ExternalLink>
+  ) : (
+    sourceLabel
+  );
 }
 
 export function EvaluationLists({
@@ -67,7 +79,9 @@ export function EvaluationLists({
                         <div className="library-secondary preserve-text">{row.input}</div>
                       </td>
                       <td>{row.agentName}</td>
-                      <td>{row.sourceLabel}</td>
+                      <td>
+                        <CaseSource {...row} />
+                      </td>
                       <td>
                         <time dateTime={row.createdAt}>
                           {formatUtcTimestamp(new Date(row.createdAt))}
@@ -85,7 +99,7 @@ export function EvaluationLists({
                     <div className="library-primary">{row.title}</div>
                     <div className="library-secondary preserve-text">{row.input}</div>
                     <div className="library-meta">
-                      {row.agentName} · {row.sourceLabel} ·{' '}
+                      {row.agentName} · <CaseSource {...row} /> ·{' '}
                       <time dateTime={row.createdAt}>
                         {formatUtcTimestamp(new Date(row.createdAt))}
                       </time>

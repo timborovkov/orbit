@@ -4,11 +4,12 @@ import { and, asc, desc, eq, inArray, not, sql } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { channelLabel } from '@/lib/runtime/channels/registry';
+import { channelItemHref, channelLabel } from '@/lib/runtime/channels/registry';
 import { mergeFollowUpListViews } from '@/lib/runtime/follow-ups/list';
 import { pendingFollowUpStatuses } from '@/lib/runtime/follow-ups/types';
 import { EMAIL_INTRODUCTION_ACTION } from '@/lib/runtime/outbound/types';
 import { X_REPLY_ACTION } from '@/lib/runtime/x/reply-input';
+import { X_PROVIDER } from '@/lib/runtime/x/types';
 import {
   actionIntents,
   agentActivityEvents,
@@ -142,6 +143,10 @@ export async function listActivityEventsForAgent(agentId: string, limit = 50) {
                 href: `/agents/${agentId}?run=${delivery.runId}#run-${delivery.runId}`,
               }
             : null;
+      const replyHref =
+        !email && delivery.status === 'sent' && delivery.provider !== 'x-fixture'
+          ? channelItemHref(X_PROVIDER, delivery.providerMessageId)
+          : null;
       return {
         id: delivery.id,
         summary: `${label} ${delivery.status}`,
@@ -150,9 +155,14 @@ export async function listActivityEventsForAgent(agentId: string, limit = 50) {
           : delivery.reason,
         createdAt: delivery.updatedAt,
         dueAt: null,
-        channel: channelLabel(email ? 'email' : 'x'),
+        channel: channelLabel(email ? 'email' : X_PROVIDER),
         replyExcerpt: null,
-        links: link ? [link] : [],
+        links: [
+          ...(replyHref
+            ? [{ label: 'View sent reply on X', href: replyHref, external: true }]
+            : []),
+          ...(link ? [link] : []),
+        ],
       };
     }),
   ]
@@ -178,6 +188,8 @@ async function selectActivityEvents(agentId: string, limit: number) {
       replyEmailId: emailMessages.id,
       replyEmailExcerpt: sql<string | null>`left(${emailMessages.body}, 280)`,
       replyEventExcerpt: sql<string | null>`left(${sourceEvents.text}, 280)`,
+      replyEventProvider: sourceEvents.provider,
+      replyEventProviderId: sourceEvents.providerEventId,
     })
     .from(agentActivityEvents)
     .leftJoin(
@@ -206,6 +218,9 @@ async function selectActivityEvents(agentId: string, limit: number) {
   return rows.map((row) => {
     const isReply = row.kind === 'follow_up.reply_received';
     const isDraft = row.kind === 'follow_up.draft_ready';
+    const replyHref = isReply
+      ? channelItemHref(row.replyEventProvider, row.replyEventProviderId)
+      : null;
     return {
       id: row.id,
       summary: row.summary,
@@ -215,6 +230,7 @@ async function selectActivityEvents(agentId: string, limit: number) {
       channel: row.channel ? channelLabel(row.channel) : null,
       replyExcerpt: isReply ? (row.replyEmailExcerpt ?? row.replyEventExcerpt) : null,
       links: [
+        ...(replyHref ? [{ label: 'View original reply', href: replyHref, external: true }] : []),
         ...(isReply && row.replyEmailId && row.conversationId
           ? [
               {

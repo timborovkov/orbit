@@ -4,8 +4,25 @@ import { and, desc, eq } from 'drizzle-orm';
 
 import { requireAdmin } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { channelAdapter, channelLabel } from '@/lib/runtime/channels/registry';
-import { agents, configurations, evaluationCases, evaluationComparisons, runs } from '@/lib/schema';
+import { channelAdapter, channelItemHref, channelLabel } from '@/lib/runtime/channels/registry';
+import {
+  agents,
+  configurations,
+  evaluationCases,
+  evaluationComparisons,
+  runs,
+  sourceEvents,
+} from '@/lib/schema';
+
+const caseSourceSelection = {
+  sourceProvider: sourceEvents.provider,
+  sourceProviderId: sourceEvents.providerEventId,
+};
+
+const caseSourceJoin = and(
+  eq(sourceEvents.runId, evaluationCases.sourceRunId),
+  eq(sourceEvents.agentId, evaluationCases.agentId),
+);
 
 export async function listEvaluationWorkspace(agentId?: string) {
   await requireAdmin();
@@ -23,6 +40,7 @@ export async function listEvaluationWorkspace(agentId?: string) {
         title: evaluationCases.title,
         sourceKind: evaluationCases.sourceKind,
         sourceChannel: evaluationCases.sourceChannel,
+        ...caseSourceSelection,
         input: evaluationCases.input,
         recipients: evaluationCases.recipients,
         createdAt: evaluationCases.createdAt,
@@ -30,6 +48,7 @@ export async function listEvaluationWorkspace(agentId?: string) {
       })
       .from(evaluationCases)
       .innerJoin(agents, eq(agents.id, evaluationCases.agentId))
+      .leftJoin(sourceEvents, caseSourceJoin)
       .where(caseFilter)
       .orderBy(desc(evaluationCases.createdAt))
       .limit(100),
@@ -69,9 +88,13 @@ export async function listEvaluationWorkspace(agentId?: string) {
 
   return {
     agents: agentRows,
-    cases: cases.map((row) => {
+    cases: cases.map(({ sourceProvider, sourceProviderId, ...row }) => {
       const id = row.sourceChannel ?? channelAdapter(row.sourceKind)?.id;
-      return { ...row, sourceLabel: id ? channelLabel(id) : 'Playground' };
+      return {
+        ...row,
+        sourceLabel: id ? channelLabel(id) : 'Playground',
+        externalSourceHref: channelItemHref(sourceProvider, sourceProviderId),
+      };
     }),
     comparisons,
     versions: versionRows.map((row) => ({
@@ -107,10 +130,12 @@ export async function getEvaluationComparison(comparisonId: string) {
         caseRecipients: evaluationCases.recipients,
         caseSourceChannel: evaluationCases.sourceChannel,
         caseSourceKind: evaluationCases.sourceKind,
+        ...caseSourceSelection,
       })
       .from(evaluationComparisons)
       .innerJoin(agents, eq(agents.id, evaluationComparisons.agentId))
       .innerJoin(evaluationCases, eq(evaluationCases.id, evaluationComparisons.caseId))
+      .leftJoin(sourceEvents, caseSourceJoin)
       .where(eq(evaluationComparisons.id, comparisonId))
   ).at(0);
 
@@ -144,6 +169,7 @@ export async function getEvaluationComparison(comparisonId: string) {
   return {
     comparison,
     sourceLabel: channelId ? channelLabel(channelId) : 'Playground',
+    externalSourceHref: channelItemHref(comparison.sourceProvider, comparison.sourceProviderId),
     preferDraftAnswer: channelAdapter(channelId)?.run.mode === 'draft',
     left: {
       configurationId: comparison.leftConfigurationId,
