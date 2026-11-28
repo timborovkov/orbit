@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { ExternalLink } from '@/components/external-link';
+
 const webSourceSchema = z.object({
   id: z.number().int().positive(),
   url: z.string().min(1),
@@ -15,9 +17,9 @@ export function WebCitations({ sources }: { sources: z.infer<typeof webSourceSch
         <li key={source.url}>
           <strong>
             [{source.id}]{' '}
-            <a className="knowledge-source-link" href={source.url} rel="noreferrer">
+            <ExternalLink className="knowledge-source-link" href={source.url}>
               {source.title || source.url}
-            </a>
+            </ExternalLink>
           </strong>
           <blockquote className="preserve-text">{source.excerpt}</blockquote>
         </li>

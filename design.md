@@ -162,6 +162,13 @@ Keep the header below menus and dialogs, respect the top safe area and leave
 clearance for focused controls and anchor destinations. Every console page
 starts with a keyboard-visible skip link to its main content.
 
+When Orbit shows an external item, link directly to the original post, reply,
+or page when a provider permalink is available. Use the shared external link
+component for these links and announce that they open in a new tab. Link
+citations and crawl targets to their original pages. Keep links to related
+Orbit records available for reviewing runs, messages, and evidence. Use the
+channel's permalink builder for X and future channels such as Reddit.
+
 ### Overview
 
 Show database-derived counts, the agent table, recent audit activity and global
@@ -321,6 +328,8 @@ lets the administrator pick a shared library and then confirm the import.
 
 Chromium verified grant and credential controls at desktop width and the
 390px layout for cancellation, citation inspection, and explicit import.
+It checked that the crawl target and saved citation link to their original
+pages in new tabs.
 
 ### Follow-ups
 
@@ -509,7 +518,11 @@ reason; Reject still works. Agent Approvals uses the same horizontal action row
 pattern as the inbox and email draft review.
 
 Use the registered **X reply** label for reply proposals and channel
-permissions. Keep the author and source post fixed. Shadow proposals stay
+permissions. In both approval views, show the saved original post above the
+draft, with the author when known and a link to the post on X. Open the link in
+a new tab so any draft edits stay in place. Render the original text as plain
+text and apply the same treatment to older Reply proposals from X discovery.
+Keep the author and source post fixed. Shadow proposals stay
 pending and Live agents can either send automatically or require individual
 approval. Show the connected account by handle and accept replacement tokens
 in a password field. Link the scope instructions to the token field and give
@@ -517,9 +530,11 @@ the required X approval checkbox its own labeled row. Activity shows the reply
 outcome and provider reply ID when available, and links to the originating run.
 Label fixture delivery explicitly.
 
-The Chromium approval flow covers editing John’s proposal in Shadow and
-approving it in Live at 1440px. At 390px it checks the fixture outcome,
-provider ID, discovery run link and horizontal overflow.
+The Chromium approval flow verifies the saved post, author and URL in the
+1440px inbox and in the 390px agent Approvals tab for an older Reply proposal.
+It checks that the source remains visible after review. The flow also covers
+editing in Shadow, approving in Live, the fixture outcome in History, and
+horizontal overflow on mobile.
 
 ### Evaluations
 
@@ -536,17 +551,20 @@ external writes for that execution context.
 
 ### Channel activity
 
-Use the registered channel name in History, Evaluations and People. In History,
-link to a separate source surface when the channel provides one. In People, show
-whether an interaction was received or sent and link each agent’s observation to
-its originating run or provider surface. In Access → Approvals, show channel
+Use the registered channel name in History, Evaluations and People. Show a
+direct link beside the external item in run details, evaluation cases, People,
+and memory evidence. In People, show whether an interaction was received or
+sent and link each agent’s observation to its originating run or email thread.
+In Access → Approvals, show channel
 permission controls when a registered action supports individual agent grants.
 Actions that always require review use the same Approvals inbox as other proposals.
 
 Chromium verified saving an X run as an evaluation case, tracing email and X
 sources in People, and inspecting evaluation and email approval states at
 1440px and 390px. The People and email views passed their mobile accessibility
-and overflow checks in Light and Dark mode.
+and overflow checks in Light and Dark mode. Chromium checked the original X
+links in History, saved cases, and the People timeline. Opening a source from
+the People directory kept the directory in its original tab.
 
 ## Design review and verification
 

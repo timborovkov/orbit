@@ -10,6 +10,7 @@ import { type ActivityEventRow, ActivityTimeline } from '@/app/activity-timeline
 import { ResearchActivity, type WebResearchActivity } from '@/app/research-activity';
 import { RunContent } from '@/app/run-content';
 import { SaveRunCaseForm } from '@/app/save-evaluation-case-form';
+import { ExternalLink } from '@/components/external-link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -240,15 +241,27 @@ export function HistoryWorkbench({
                         </div>
                         <ChevronDown size={14} className="disclosure-chevron" aria-hidden="true" />
                       </summary>
-                      {run.personId && (
-                        <Link className="person-source-link" href={`/people/${run.personId}`}>
-                          View {run.channelName} author in People
-                        </Link>
-                      )}
-                      {run.sourceHref && (
-                        <Link className="person-source-link" href={run.sourceHref}>
-                          {run.sourceLinkLabel}
-                        </Link>
+                      {(run.personId || run.sourceHref || run.externalSourceHref) && (
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {run.personId && (
+                            <Link className="person-source-link" href={`/people/${run.personId}`}>
+                              View {run.channelName} author in People
+                            </Link>
+                          )}
+                          {run.sourceHref && (
+                            <Link className="person-source-link" href={run.sourceHref}>
+                              {run.sourceLinkLabel}
+                            </Link>
+                          )}
+                          {run.externalSourceHref && (
+                            <ExternalLink
+                              className="person-source-link"
+                              href={run.externalSourceHref}
+                            >
+                              View original on {run.channelName}
+                            </ExternalLink>
+                          )}
+                        </div>
                       )}
                       <RunContent
                         run={run}

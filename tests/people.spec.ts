@@ -54,6 +54,13 @@ test('the email and X surfaces share a People record and unlink preserves both s
       .getByRole('link', { name: 'People', exact: true })
       .click();
     await expect(page.getByRole('heading', { name: 'People', exact: true })).toBeVisible();
+    const providerPost = 'https://x.com/i/web/status/301';
+    await page.context().route(providerPost, (route) => route.fulfill({ body: 'Original X post' }));
+    const directoryPost = page.getByRole('link', { name: /^People fixture X activity/ });
+    const [sourceTab] = await Promise.all([page.waitForEvent('popup'), directoryPost.click()]);
+    await expect(sourceTab).toHaveURL(providerPost);
+    await expect(page).toHaveURL(/\/people$/);
+    await sourceTab.close();
     await page.goto(emailUrl);
     const senderLink = page.getByRole('link', { name: 'View sender in People' });
     const emailPerson = await senderLink.getAttribute('href');
@@ -66,13 +73,17 @@ test('the email and X surfaces share a People record and unlink preserves both s
     const xPerson = await authorLink.getAttribute('href');
     expect(xPerson).not.toBe(emailPerson);
     const sourceRun = page.locator(`#run-${run.id}`);
+    const originalPost = { name: /^View original on X/ };
+    await expect(sourceRun.getByRole('link', originalPost)).toHaveAttribute('href', providerPost);
+    await expect(sourceRun.getByRole('link', originalPost)).toHaveAttribute('target', '_blank');
     await sourceRun.getByLabel('Case title').fill('X lead case');
     await sourceRun.getByRole('button', { name: 'Save as case' }).click();
     await expect(sourceRun.getByRole('status')).toContainText('Saved as evaluation case.');
     await capturePage(page, testInfo.outputPath('x-history.png'));
     await page.goto(`/evaluations?agent=${agent}`);
     const savedCase = page.getByRole('row').filter({ hasText: 'X lead case' });
-    await expect(savedCase.getByRole('cell', { name: 'X', exact: true })).toBeVisible();
+    await expect(savedCase.getByRole('link', originalPost)).toHaveAttribute('href', providerPost);
+    await expect(savedCase.getByRole('link', originalPost)).toHaveAttribute('target', '_blank');
     await capturePage(page, testInfo.outputPath('x-evaluation-case.png'));
     await page.goto(xUrl);
     await authorLink.click();
@@ -85,6 +96,8 @@ test('the email and X surfaces share a People record and unlink preserves both s
     const timeline = page.getByRole('region', { name: 'Timeline' });
     await expect(timeline.getByText('People fixture email')).toBeVisible();
     await expect(timeline.getByText('People fixture X activity')).toBeVisible();
+    await expect(timeline.getByRole('link', originalPost)).toHaveAttribute('href', providerPost);
+    await expect(timeline.getByRole('link', originalPost)).toHaveAttribute('target', '_blank');
     await expect(page.getByRole('link', { name: 'Email evidence', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'X evidence', exact: true })).toBeVisible();
     await capturePage(page, testInfo.outputPath('cross-channel-people.png'));

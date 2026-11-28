@@ -132,7 +132,9 @@ test('admins can trace, correct, expire and remove an agent memory', async ({ pa
     await page.getByRole('combobox', { name: 'Maintenance schedule' }).click();
     await page.getByRole('option', { name: 'Weekly' }).click();
     await page.getByRole('button', { name: 'Save retention' }).click();
-    await expect(page.getByRole('status')).toContainText('Memory retention saved.');
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Memory retention saved.' }),
+    ).toBeVisible();
     expect(
       await sql`SELECT memory_fact_retention_days AS fact_days, memory_note_retention_days AS note_days, memory_outcome_retention_days AS outcome_days, memory_maintenance_interval_days AS interval_days FROM agents WHERE id=${sarah}`,
     ).toEqual([{ fact_days: 365, note_days: 30, outcome_days: null, interval_days: 7 }]);

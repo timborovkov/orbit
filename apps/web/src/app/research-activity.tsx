@@ -1,4 +1,5 @@
 import { ResearchActivityAction } from '@/app/research-activity-actions';
+import { ExternalLink } from '@/components/external-link';
 import { type CrawlStatus, WEB_SEARCH } from '@/lib/research';
 import type { getWebResearchActivity } from '@/lib/server/research-queries';
 
@@ -29,9 +30,7 @@ function Citations({
     <ol className="research-sources">
       {citations.map((citation) => (
         <li key={citation.id} id={'web-source-' + citation.id}>
-          <a href={citation.url} target="_blank" rel="noopener noreferrer">
-            {citation.title}
-          </a>
+          <ExternalLink href={citation.url}>{citation.title}</ExternalLink>
           <p className="muted">{citation.url}</p>
           {citation.tool === WEB_SEARCH && <p className="muted">Search rank {citation.rank}</p>}
           {citation.excerpt && <blockquote>{citation.excerpt}</blockquote>}
@@ -73,7 +72,7 @@ export function ResearchActivity({
           aria-label={'Crawl ' + crawl.seedUrl}
         >
           <p className="research-seed">
-            <strong>Crawl</strong> {crawl.seedUrl}
+            <strong>Crawl</strong> <ExternalLink href={crawl.seedUrl}>{crawl.seedUrl}</ExternalLink>
           </p>
           <p className="muted">
             {labels[crawl.status]} · {crawl.completedPages}
