@@ -199,7 +199,9 @@ test('John reviews a discovered X reply and sees its fixture delivery in History
     await proposal.getByRole('button', { name: 'Edit', exact: true }).click();
     await editor.fill(draft);
     await proposal.getByRole('button', { name: 'Save & approve' }).click();
-    await expect(page.getByText('Proposal approved and queued for send.')).toBeVisible();
+    await expect(
+      page.getByTestId('approvals-page').getByText('Proposal approved and queued for send.'),
+    ).toBeVisible();
     const resolved = page.getByRole('list', { name: 'Resolved approvals' });
     await expect(resolved.getByRole('link', postLink)).toHaveAttribute('href', postHref);
     await expect(resolved.getByText(FIXTURE_X_REPLY_POST.text, { exact: true })).toBeVisible();
